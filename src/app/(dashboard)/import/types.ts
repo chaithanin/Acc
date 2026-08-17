@@ -55,6 +55,8 @@ export interface SheetOverridePayload {
   headerRow?: number;
   columns?: { field: CanonicalField; columnIndex: number }[];
   include?: boolean;
+  /** Company for this sheet alone. Undefined inherits the file's. */
+  projectId?: string | null;
 }
 
 export interface FileOverridePayload {
