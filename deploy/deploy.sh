@@ -49,6 +49,24 @@ done
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
+# Registry uploads from Cloud Shell drop often enough to be worth retrying.
+# A half-finished push leaves the old image in place, so failing here without
+# retrying means the VM quietly keeps running the previous release.
+retry() {
+  local attempts=$1 delay=$2; shift 2
+  local n=1
+  until "$@"; do
+    if (( n >= attempts )); then
+      echo "Giving up after ${attempts} attempts: $*" >&2
+      return 1
+    fi
+    echo "  attempt ${n} failed; retrying in ${delay}s..." >&2
+    sleep "$delay"
+    n=$(( n + 1 ))
+    delay=$(( delay * 2 ))
+  done
+}
+
 if [[ -z "$DOMAIN" ]]; then
   echo "GTG_DOMAIN is empty. This app is only served over HTTPS, so it needs a domain." >&2
   exit 1
@@ -104,7 +122,7 @@ elif [[ "$BUILD_MODE" == "local" ]]; then
 
   gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
   docker build -t "$IMAGE" .
-  docker push "$IMAGE"
+  retry 4 5 docker push "$IMAGE"
 else
   say "Building the image with Cloud Build"
   if ! gcloud builds submit \
@@ -224,6 +242,18 @@ fi
 IP=$(gcloud compute instances describe "$VM" --zone="$ZONE" \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
 DNS_NOW=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
+
+if [[ "$BUILD_MODE" != "skip" ]]; then
+  say "Confirming the image reached the registry"
+  # A push that failed part-way leaves the previous image in place, and the VM
+  # would then pull that instead — succeeding while running the wrong release.
+  if ! gcloud artifacts docker images describe "$IMAGE" >/dev/null 2>&1; then
+    echo "The image is not in the registry. The push did not complete." >&2
+    echo "Re-run the same command; the build is cached, so only the push repeats." >&2
+    exit 1
+  fi
+  echo "  ${IMAGE} is present"
+fi
 
 say "Granting the VM permission to pull the image"
 # The VM authenticates to Artifact Registry as its own service account, which
