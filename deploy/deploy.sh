@@ -40,7 +40,10 @@ for arg in "$@"; do
     # allowed to propagate before anything else is built.
     --reserve-ip) IP_ONLY=true ;;
     --local-build) BUILD_MODE=local ;;
-    *) echo "Usage: $0 [--reserve-ip] [--update] [--local-build]" >&2; exit 1 ;;
+    # Redeploys the image already in the registry. Useful when only the VM
+    # side failed and a rebuild would just cost several minutes.
+    --skip-build) BUILD_MODE=skip ;;
+    *) echo "Usage: $0 [--reserve-ip] [--update] [--local-build] [--skip-build]" >&2; exit 1 ;;
   esac
 done
 
@@ -89,7 +92,9 @@ gcloud artifacts repositories describe "$REPO" --location="$REGION" >/dev/null 2
 
 # Built away from the VM either way: an e2-micro cannot complete `next build`
 # in 1 GB of RAM.
-if [[ "$BUILD_MODE" == "local" ]]; then
+if [[ "$BUILD_MODE" == "skip" ]]; then
+  say "Skipping the build — using the image already in the registry"
+elif [[ "$BUILD_MODE" == "local" ]]; then
   say "Building the image locally with Docker"
 
   if ! docker info >/dev/null 2>&1; then
@@ -219,6 +224,40 @@ fi
 IP=$(gcloud compute instances describe "$VM" --zone="$ZONE" \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
 DNS_NOW=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
+
+say "Granting the VM permission to pull the image"
+# The VM authenticates to Artifact Registry as its own service account, which
+# has no access to the repository by default — the cloud-platform scope only
+# says which APIs the instance may call, not what its identity is allowed to
+# do. Granted on the repository rather than the project, so the VM can read
+# this one repository and nothing else.
+VM_SA=$(gcloud compute instances describe "$VM" --zone="$ZONE" \
+  --format='get(serviceAccounts[0].email)' 2>/dev/null || true)
+
+if [[ -z "$VM_SA" ]]; then
+  echo "Could not determine the VM's service account; skipping the grant." >&2
+elif ! gcloud artifacts repositories add-iam-policy-binding "$REPO" \
+        --location="$REGION" \
+        --member="serviceAccount:${VM_SA}" \
+        --role=roles/artifactregistry.reader \
+        --quiet >/dev/null 2>&1; then
+  cat >&2 <<MSG
+
+Could not grant ${VM_SA} read access to the ${REPO} repository. Ask an
+administrator to run:
+
+  gcloud artifacts repositories add-iam-policy-binding ${REPO} \\
+    --location=${REGION} \\
+    --member="serviceAccount:${VM_SA}" \\
+    --role=roles/artifactregistry.reader
+
+Without it the VM cannot pull the image and the container will not start.
+
+MSG
+else
+  note_sa="${VM_SA}"
+  echo "  ${note_sa} can now read ${REPO}"
+fi
 
 say "Waiting for the VM to finish its first-boot setup"
 # The startup script installs Docker and formats the data disk; on a fresh VM

@@ -153,6 +153,40 @@ before deploying. Change it after first sign-in either way.
 
 ---
 
+## Service-account permissions
+
+Two identities need explicit grants beyond what a fresh project gives them, and
+neither failure is obvious from its error message:
+
+* **The deploying user** needs `roles/cloudbuild.builds.editor` to submit a
+  Cloud Build — or use `--local-build` and skip Cloud Build entirely.
+* **The VM's service account** needs `roles/artifactregistry.reader` on the
+  repository, or it cannot pull the image it is supposed to run. The
+  `cloud-platform` scope the VM is created with does *not* grant this: a scope
+  says which APIs the instance may call, not what its identity is permitted to
+  do. `deploy.sh` now grants this automatically, on the repository rather than
+  the whole project.
+
+If the deploy fails at the pull step, grant it by hand:
+
+```bash
+VM_SA=$(gcloud compute instances describe gtg-financial --zone=asia-southeast1-a \
+  --format='get(serviceAccounts[0].email)')
+
+gcloud artifacts repositories add-iam-policy-binding gtg \
+  --location=asia-southeast1 \
+  --member="serviceAccount:${VM_SA}" \
+  --role=roles/artifactregistry.reader
+```
+
+Then redeploy without rebuilding — the image is already in the registry:
+
+```bash
+./deploy/deploy.sh --skip-build
+```
+
+---
+
 ## If Cloud Build refuses the submission
 
 `gcloud builds submit` failing with `PERMISSION_DENIED: The caller does not
