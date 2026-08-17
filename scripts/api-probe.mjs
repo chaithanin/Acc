@@ -19,6 +19,13 @@
  * put it in a committed file.
  */
 
+/**
+ * Printed on every run. Probing is iterative — the script is corrected as the
+ * target reveals how it behaves — so a report has to say which version
+ * produced it, or an old checkout's output gets read as a new result.
+ */
+const VERSION = 3;
+
 const args = parseArgs(process.argv.slice(2));
 
 const url = args.url ?? process.env.ALLKONS_API_URL;
@@ -117,7 +124,7 @@ async function discover() {
     'receivable', 'payable', 'cashflow', 'expense', 'income',
   ];
 
-  console.log(`\nMapping ${base.host}\n`);
+  console.log(`\nprobe v${VERSION} — mapping ${base.host}\n`);
 
   /**
    * A host that answers unknown paths with 200 makes "did this route exist?"
@@ -382,7 +389,7 @@ function mask(text) {
 }
 
 function report(rows) {
-  console.log(`\nProbed ${mask(url)}  (${rows.length} attempts)\n`);
+  console.log(`\nprobe v${VERSION} — probed ${mask(url)}  (${rows.length} attempts)\n`);
 
   const width = { shape: 16, auth: 22 };
   const header = `${'SHAPE'.padEnd(width.shape)}${'AUTH'.padEnd(width.auth)}${'STATUS'.padEnd(8)}TYPE`;
