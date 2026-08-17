@@ -226,7 +226,24 @@ without them.
 
 ---
 
+## Deployment
+
+```bash
+export GTG_DOMAIN=finance.yourcompany.com
+./deploy/deploy.sh
+```
+
+Deploys to Google Cloud as a single VM with the database on a persistent disk,
+behind Caddy for automatic HTTPS. Cloud SQL was rejected on cost — it has no
+free tier and is the expensive part of a Cloud Run design, while the compute is
+nearly free either way. [`docs/DEPLOY.md`](docs/DEPLOY.md) sets out the
+comparison, the region trade-off between cost and data residency, and what has
+and has not been verified.
+
+---
+
 ## Further reading
 
+* [`docs/DEPLOY.md`](docs/DEPLOY.md) — deploying to Google Cloud, and the cost reasoning
 * [`docs/DATABASE.md`](docs/DATABASE.md) — schema and the PostgreSQL migration path
 * [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record

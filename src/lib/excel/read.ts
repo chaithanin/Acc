@@ -10,8 +10,18 @@ import type { RawWorkbook } from './types';
  * why parsing is isolated rather than done inline.
  */
 
-/** Long enough for a genuinely large workbook, short enough to bound a request. */
-const PARSE_TIMEOUT_MS = 60_000;
+/**
+ * Long enough for a genuinely large workbook, short enough to bound a request.
+ * Both limits are environment-tunable because the sensible ceiling depends on
+ * the host: a 1 GB shared-core VM cannot hand the parser a 1 GB heap.
+ */
+const PARSE_TIMEOUT_MS = positiveInt(process.env.GTG_PARSE_TIMEOUT_MS, 60_000);
+const PARSE_MAX_HEAP_MB = positiveInt(process.env.GTG_PARSE_MAX_HEAP_MB, 1024);
+
+function positiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
 
 const WORKER_PATH = path.join(process.cwd(), 'workers', 'excel-parse.worker.mjs');
 
@@ -33,7 +43,7 @@ export function readWorkbook(filePath: string, fileName: string): Promise<RawWor
       workerData: { filePath, fileName },
       resourceLimits: {
         // Caps the blast radius of a workbook that expands badly in memory.
-        maxOldGenerationSizeMb: 1024,
+        maxOldGenerationSizeMb: PARSE_MAX_HEAP_MB,
       },
     });
 
