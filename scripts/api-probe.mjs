@@ -24,7 +24,7 @@
  * target reveals how it behaves — so a report has to say which version
  * produced it, or an old checkout's output gets read as a new result.
  */
-const VERSION = 3;
+const VERSION = 4;
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -246,11 +246,18 @@ function matchesSignature(r, signature) {
   if (r.status !== signature.status) return false;
   if (r.body.slice(0, 160) === signature.body.slice(0, 160)) return true;
   // A same-shaped page of near-identical length is the same page: only the
-  // echoed path differs.
+  // echoed path differs. Restricted to pages large enough for that to mean
+  // something — on a service whose miss reply is the 13 bytes "404 NOT FOUND",
+  // a tolerance of tens of bytes swallows every short answer it has, including
+  // the banner that proves a route exists and any brief JSON error, which is
+  // the most informative reply an API gives.
+  const LARGE_ENOUGH = 500;
   return (
     r.contentType === signature.contentType &&
-    Math.abs(r.bytes - signature.bytes) <= 80 &&
-    r.contentType.includes('html')
+    r.contentType.includes('html') &&
+    r.bytes > LARGE_ENOUGH &&
+    signature.bytes > LARGE_ENOUGH &&
+    Math.abs(r.bytes - signature.bytes) <= 80
   );
 }
 
