@@ -134,6 +134,55 @@ describe('per-sheet company assignment', () => {
     assert.deepEqual([...projects], ['p-hamonia']);
   });
 
+  it('warns when a sheet is read but yields nothing', async () => {
+    // Read as receivable, a cash-flow grid has nothing a receivable importer
+    // recognises — the same shape as a real sheet whose type was detected
+    // wrongly, which otherwise imports as a silent zero.
+    const result = await processFile(upload(), {
+      ...options,
+      overrides: [
+        {
+          fileName: 'Cashflow_Report_2026.xlsx',
+          sheets: [
+            { sheetName: 'Cashflow 2026', reportType: 'receivable' },
+            sheetOverride('Cashflow 2026 (2)'),
+          ],
+        },
+      ],
+    });
+
+    const empty = result.issues.find((i) => i.code === 'SHEET_NO_RECORDS');
+    assert.ok(empty, 'expected a warning for the sheet that produced nothing');
+    assert.equal(empty.severity, 'warning');
+    assert.match(empty.message, /Cashflow 2026/);
+
+    // And a file-level count, so a workbook of thirty sheets does not need its
+    // losses assembled from thirty separate lines.
+    const summary = result.issues.find((i) => i.code === 'FILE_INCOMPLETE');
+    assert.ok(summary, 'expected a file-level completeness warning');
+    assert.match(summary.message, /1 of 2 imported sheets produced no records/);
+  });
+
+  it('stays quiet when every sheet produced records', async () => {
+    const result = await processFile(upload(), {
+      ...options,
+      overrides: [
+        {
+          fileName: 'Cashflow_Report_2026.xlsx',
+          sheets: [sheetOverride('Cashflow 2026'), sheetOverride('Cashflow 2026 (2)')],
+        },
+      ],
+    });
+
+    // A warning that fires on a clean import is worse than none at all: it
+    // teaches everyone to ignore the one that matters.
+    assert.equal(
+      result.issues.filter((i) => i.code === 'SHEET_NO_RECORDS' || i.code === 'FILE_INCOMPLETE')
+        .length,
+      0,
+    );
+  });
+
   it('reads every month of both sheets', async () => {
     const result = await processFile(upload(), {
       ...options,

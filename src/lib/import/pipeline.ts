@@ -324,6 +324,11 @@ export async function processFile(
   const detections: SheetDetection[] = [];
   let data = emptyDataset();
 
+  // Only the sheets that reached normalization count towards completeness; a
+  // sheet skipped on purpose is not a sheet that failed.
+  const emptySheetNames: string[] = [];
+  let normalizedSheetCount = 0;
+
   for (const sheet of workbook.sheets) {
     const sheetOverride = override?.sheets?.find((s) => s.sheetName === sheet.name);
     if (sheetOverride?.include === false) continue;
@@ -404,10 +409,30 @@ export async function processFile(
       addIssue: (issue) => issues.push(issue),
     };
 
+    normalizedSheetCount += 1;
+
     try {
       const sheetData = normalizeSheet(ctx);
       detection.parsedCount = datasetCount(sheetData);
       data = mergeDatasets(data, sheetData);
+
+      // A sheet the importer recognised, with rows in it, that yielded nothing
+      // is the failure most likely to go unnoticed: the import succeeds, the
+      // dashboard moves, and figures are quietly missing. The sheets it was
+      // never going to import — a data feed, an unrecognised layout — say so
+      // above and are not repeated here.
+      if (detection.parsedCount === 0 && detection.rowCount > 0) {
+        emptySheetNames.push(sheet.name);
+        issues.push({
+          severity: 'warning',
+          code: 'SHEET_NO_RECORDS',
+          message:
+            `Sheet "${sheet.name}" was read as ${REPORT_TYPE_LABELS[detection.reportType]} and has ` +
+            `${detection.rowCount} rows, but produced no records — nothing from it reached the ` +
+            'dashboard. Check the report type and the mapped columns in the preview.',
+          source: { file: file.fileName, sheet: sheet.name },
+        });
+      }
     } catch (err) {
       issues.push({
         severity: 'error',
@@ -416,6 +441,23 @@ export async function processFile(
         source: { file: file.fileName, sheet: sheet.name },
       });
     }
+  }
+
+  // Counted across the file rather than left as one line per sheet, so "11 of
+  // 30 sheets brought nothing" is visible at a glance instead of having to be
+  // assembled from eleven separate warnings. Built from the sheets that were
+  // actually normalized, so the ones deliberately skipped above are not
+  // reported as losses.
+  if (emptySheetNames.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'FILE_INCOMPLETE',
+      message:
+        `${emptySheetNames.length} of ${normalizedSheetCount} imported sheets produced no records: ` +
+        `${emptySheetNames.map((name) => `"${name}"`).join(', ')}. Everything else in the file ` +
+        'imported normally.',
+      source: { file: file.fileName },
+    });
   }
 
   const dominant = dominantReportType(detections);

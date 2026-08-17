@@ -93,6 +93,19 @@ export function ImportPreview({
     });
   };
 
+  /**
+   * Sheets the importer read and understood that yielded nothing.
+   *
+   * Gathered across every file and shown before the table, because one line
+   * buried among a file's warnings is exactly how a missing sheet gets
+   * confirmed into the dashboard.
+   */
+  const emptySheets = preview.files.flatMap((file) =>
+    file.sheets
+      .filter((sheet) => sheet.parsedCount === 0 && sheet.rowCount > 0)
+      .map((sheet) => ({ ...sheet, fileName: file.fileName })),
+  );
+
   const unassigned = preview.files.filter(
     (f) => !f.project.projectId && overrides[f.fileName]?.projectId == null,
   );
@@ -171,6 +184,28 @@ export function ImportPreview({
             </Badge>
           ) : null}
         </div>
+
+        {emptySheets.length > 0 ? (
+          <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+            <p className="font-medium text-ink">
+              <span aria-hidden>◆</span> {emptySheets.length}{' '}
+              {emptySheets.length === 1 ? 'sheet was' : 'sheets were'} read but produced no records
+            </p>
+            <p className="mt-1 text-ink-secondary">
+              Nothing from these reaches the dashboard. That is the failure most likely to pass
+              unnoticed — the import succeeds and figures are quietly missing — so check the report
+              type and mapped columns under Sheets before confirming.
+            </p>
+            <ul className="mt-1.5 space-y-0.5 text-ink-secondary">
+              {emptySheets.map((s) => (
+                <li key={`${s.fileName}-${s.sheetName}`}>
+                  <span className="font-medium text-ink">{s.sheetName}</span> — {s.rowCount} rows,
+                  read as {s.reportTypeLabel} · {s.fileName}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {preview.rejected.length > 0 ? (
           <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
@@ -395,6 +430,11 @@ function SheetList({
               </div>
 
               <div className="flex items-center gap-2">
+                {sheet.parsedCount === 0 && sheet.rowCount > 0 ? (
+                  <Badge tone="warning" icon={<span aria-hidden>◆</span>}>
+                    No records
+                  </Badge>
+                ) : null}
                 <ConfidenceBadge confidence={sheet.confidence} />
                 <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
                   <input
