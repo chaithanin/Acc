@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { calculateMetrics } from '@/lib/calc/kpi';
 import { indexSourceRefs } from '@/lib/calc/aggregate';
+import { runValidations } from '@/lib/validate/rules';
 import { ProjectResolver } from '@/lib/detect/project-resolver';
 import { classifySheet } from '@/lib/detect/sheet-classifier';
 import { normalizeSheet } from '@/lib/normalize';
@@ -249,5 +250,101 @@ describe('unknown project handling', () => {
     const { data } = run(sheet, 'p-hamonia');
     assert.equal(data.receivable[0].projectId, 'p-marina');
     assert.equal(data.receivable[1].projectId, 'p-chtn');
+  });
+});
+
+describe('cash flow stated as a month-per-column matrix', () => {
+  // The layout the client's Cashflow_Report uses: months across the top,
+  // line items down the side, split into INFLOW / OUTFLOW / CASH BALANCE.
+  const sheet = makeSheet('Cashflow 2026', [
+    ['INFLOW (Month / 2026)'],
+    ['', 'Jan', 'Feb', 'Mar'],
+    ['1.2 Operating Income', 100, 200, 300],
+    ['3. Financing Income', 900, 0, 0],
+    ['4. Total Cash Inflow (1+2+3)', 1000, 200, 300],
+    ['7. Total Forecast Cash Inflow Plan (5+6)', 0, 0, 0],
+    [],
+    ['OUTFLOW (Month / 2026)'],
+    ['', 'Jan', 'Feb', 'Mar'],
+    ['1.2 Operating Expenses', -400, -50, -70],
+    ['4. Total Cash Outflow (1+2+3)', -400, -50, -70],
+    [],
+    ['CASH BALANCE (Month / 2026)'],
+    ['', 'Jan', 'Feb', 'Mar'],
+    ['1. Cash at Bank Bal b/f', 5000, 5600, 5750],
+    ['2. Cash Flow Bal (In-Out)', 600, 150, 230],
+    ['3. Total Cash at Bank Bal c/f', 5600, 5750, 5980],
+  ]);
+
+  it('is classified as a cash flow sheet despite having no month column', () => {
+    assert.equal(classifySheet(sheet).reportType, 'cashflow');
+  });
+
+  it('reads one record per month from the columns', () => {
+    const { data } = run(sheet);
+    assert.deepEqual(
+      data.cashflow.map((c) => [c.month, c.expectedIncome, c.expectedExpense]),
+      [
+        ['2026-01', 1000, 400],
+        ['2026-02', 200, 50],
+        ['2026-03', 300, 70],
+      ],
+    );
+  });
+
+  it('takes the stated total rather than summing the components', () => {
+    // Components are 100 + 900; the total row says 1000. Adding both would
+    // report 2000 for January.
+    const { data } = run(sheet);
+    assert.equal(data.cashflow[0].expectedIncome, 1000);
+  });
+
+  it('treats a negative outflow as a positive cost', () => {
+    const { data } = run(sheet);
+    assert.ok(data.cashflow.every((c) => c.expectedExpense >= 0));
+  });
+
+  it('reads the opening and closing balances for reconciliation', () => {
+    const { data } = run(sheet);
+    assert.equal(data.cashflow[0].openingBalance, 5000);
+    assert.equal(data.cashflow[0].closingBalance, 5600);
+  });
+
+  it('starts the projection from the stated opening, not from zero', () => {
+    const { data } = run(sheet);
+    indexSourceRefs(data);
+    const { projection } = calculateMetrics(data, '2026-01-31');
+
+    assert.equal(projection.months[0].openingCash, 5000);
+    assert.equal(projection.months[0].closingCash, 5600);
+    // Its own carry-forward is consistent here, so nothing should disagree.
+    assert.equal(projection.months[0].closingCash, projection.months[0].statedClosing);
+  });
+
+  it('reports a carry-forward that does not tie up', () => {
+    // Closing January is 5600 but February opens at 9999 — a real gap of the
+    // kind found in the client's own statement.
+    const broken = makeSheet('Cashflow 2026', [
+      ['INFLOW (Month / 2026)'],
+      ['', 'Jan', 'Feb'],
+      ['4. Total Cash Inflow (1+2+3)', 1000, 200],
+      [],
+      ['OUTFLOW (Month / 2026)'],
+      ['', 'Jan', 'Feb'],
+      ['4. Total Cash Outflow (1+2+3)', -400, -50],
+      [],
+      ['CASH BALANCE (Month / 2026)'],
+      ['', 'Jan', 'Feb'],
+      ['1. Cash at Bank Bal b/f', 5000, 9999],
+      ['3. Total Cash at Bank Bal c/f', 5600, 10149],
+    ]);
+
+    const { data } = run(broken);
+    indexSourceRefs(data);
+    const calc = calculateMetrics(data, '2026-01-31');
+    const rule = runValidations(data, calc, null).find((r) => r.ruleKey === 'cashflow_running_balance');
+
+    assert.ok(rule);
+    assert.notEqual(rule.status, 'pass');
   });
 });

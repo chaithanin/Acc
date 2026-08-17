@@ -149,6 +149,14 @@ export const SHEET_RULES: SheetRule[] = [
       'cash out',
       'ยอดยกมา',
       'ยอดยกไป',
+      // A month-per-column statement has none of the above as column headers;
+      // these block markers are what identify it instead.
+      'inflow',
+      'outflow',
+      'cash balance',
+      'cash at bank',
+      'total cash inflow',
+      'total cash outflow',
     ],
     signatureFields: ['opening_balance', 'closing_balance', 'expected_income', 'expected_expense'],
     weight: 1.1,

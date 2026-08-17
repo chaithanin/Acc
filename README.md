@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (90) |
+| `npm test` | unit and integration tests (97) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 
@@ -167,8 +167,12 @@ The engine reads the shapes these companies actually produce:
 * **Receivable** — long form (one row per receivable) and wide form (a column
   per category), including per-category received and outstanding columns.
 * **Bank** — per-account tables and labelled summary layouts.
-* **WIP**, **BOQ** (item lists and month-per-column matrices), **cash flow**,
-  income and expense sheets.
+* **Cash flow** in both shapes: one row per month, and the statement layout
+  with months across the columns and INFLOW / OUTFLOW / CASH BALANCE blocks
+  down the side. The latter states its own totals, which are used in preference
+  to summing the component lines so the same money is not counted twice.
+* **WIP**, **BOQ** (item lists and month-per-column matrices), income and
+  expense sheets.
 
 Thai text is handled throughout: month names, Buddhist-era years (2569 → 2026),
 `(1,234)` as negative, `฿` and thousands separators inside text cells.
@@ -213,7 +217,7 @@ Enforced server-side on every route; the navigation filter is convenience only.
 npm test
 ```
 
-90 tests covering text normalisation and alias resolution, header detection and
+97 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation and THB formatting.

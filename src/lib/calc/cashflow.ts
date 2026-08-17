@@ -55,8 +55,15 @@ export function projectCashflow(
   const buckets = collectMonthlyInputs(data, reportDate);
   const months = [...buckets.keys()].sort();
 
+  // A statement that prints its own brought-forward balance is better evidence
+  // of where the projection starts than the bank position — the two cover
+  // different scopes, and the bank figure may be missing entirely when only a
+  // cash-flow sheet was imported.
+  const firstStatedOpening = months.length > 0 ? buckets.get(months[0])!.statedOpening : null;
+  const startingCash = firstStatedOpening ?? openingCash;
+
   const rows: CashflowMonth[] = [];
-  let running = round2(openingCash);
+  let running = round2(startingCash);
 
   for (const month of months) {
     const bucket = buckets.get(month)!;
@@ -86,9 +93,9 @@ export function projectCashflow(
 
   return {
     months: rows,
-    openingCash: round2(openingCash),
-    forecastCash: rows.length > 0 ? rows[rows.length - 1].closingCash : round2(openingCash),
-    lowestCash: lowest ? lowest.closingCash : round2(openingCash),
+    openingCash: round2(startingCash),
+    forecastCash: rows.length > 0 ? rows[rows.length - 1].closingCash : round2(startingCash),
+    lowestCash: lowest ? lowest.closingCash : round2(startingCash),
     lowestMonth: lowest?.month ?? null,
     requiredFunding: lowest && lowest.closingCash < 0 ? round2(Math.abs(lowest.closingCash)) : 0,
     hasShortfall: !!lowest && lowest.closingCash < 0,
@@ -98,6 +105,8 @@ export function projectCashflow(
 interface MonthBucket {
   income: number;
   expense: number;
+  /** Opening balance as printed in the source, when it stated one. */
+  statedOpening: number | null;
   statedClosing: number | null;
   refIndexes: number[];
 }
@@ -109,7 +118,7 @@ function collectMonthlyInputs(data: NormalizedDataset, reportDate: string): Map<
   const bucketFor = (month: string): MonthBucket => {
     let bucket = buckets.get(month);
     if (!bucket) {
-      bucket = { income: 0, expense: 0, statedClosing: null, refIndexes: [] };
+      bucket = { income: 0, expense: 0, statedOpening: null, statedClosing: null, refIndexes: [] };
       buckets.set(month, bucket);
     }
     return bucket;
@@ -121,6 +130,7 @@ function collectMonthlyInputs(data: NormalizedDataset, reportDate: string): Map<
       const bucket = bucketFor(row.month);
       bucket.income += row.expectedIncome;
       bucket.expense += row.expectedExpense;
+      if (row.openingBalance !== null) bucket.statedOpening = row.openingBalance;
       if (row.closingBalance !== null) bucket.statedClosing = row.closingBalance;
       if (row.sourceRefIndex !== undefined) bucket.refIndexes.push(row.sourceRefIndex);
     }

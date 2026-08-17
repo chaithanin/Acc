@@ -1,5 +1,6 @@
 import { parseDateText } from '@/lib/excel/cells';
 import type { CashflowRecord } from '@/lib/types';
+import { isCashflowMatrix, normalizeCashflowMatrix } from './cashflow-matrix';
 import { dataRows, type NormalizeContext } from './context';
 
 /**
@@ -11,6 +12,10 @@ import { dataRows, type NormalizeContext } from './context';
  * columns is kept purely for reconciliation against our own result.
  */
 export function normalizeCashflow(ctx: NormalizeContext): CashflowRecord[] {
+  // Months across the columns rather than down the rows. Checked first: the
+  // tabular reader would find no month column and silently return nothing.
+  if (isCashflowMatrix(ctx.sheet)) return normalizeCashflowMatrix(ctx);
+
   const records: CashflowRecord[] = [];
 
   for (const row of dataRows(ctx)) {
