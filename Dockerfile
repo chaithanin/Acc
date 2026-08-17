@@ -79,9 +79,10 @@ COPY --from=build --chown=node:node /app/workers ./workers
 # Invisible to tracing, because only the .mjs worker requires them.
 COPY --from=build --chown=node:node /worker-modules/ ./node_modules/
 
-# Password recovery. A deployment whose only administrator password was lost
-# has no way back in otherwise, since passwords are stored only as hashes.
-COPY --from=build --chown=node:node /app/scripts/reset-admin.mjs ./scripts/reset-admin.mjs
+# User administration and password recovery. A deployment whose only
+# administrator password was lost has no way back in otherwise, since
+# passwords are stored only as hashes.
+COPY --from=build --chown=node:node /app/scripts/users.mjs ./scripts/users.mjs
 
 # Prove the image actually works before it ships. Each of these has already
 # been a real defect; a failure here costs seconds, whereas the same failure

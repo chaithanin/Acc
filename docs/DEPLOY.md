@@ -158,18 +158,30 @@ Note that whatever hits `/login` first is what consumes it — including a healt
 check or a smoke test, not necessarily a person. That is exactly why it also
 goes to the log.
 
-### If the password was lost
+### Managing users from the command line
 
-Passwords are stored only as scrypt hashes, so a lost one cannot be recovered,
-only replaced. The image carries a tool for it:
+Users are normally managed in the dashboard under Settings → Users & Roles.
+The image also carries a tool for the two cases that screen cannot cover:
+setting a team up before anyone can sign in, and recovering when nobody has a
+working password.
 
 ```bash
-gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command \
-  "sudo docker exec gtg-app-1 node scripts/reset-admin.mjs you@example.com 'a new password'"
+ssh() { gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command "sudo docker exec gtg-app-1 $1"; }
+
+ssh "node scripts/users.mjs list"
+ssh "node scripts/users.mjs add finance@example.com finance"          # generates a password
+ssh "node scripts/users.mjs add you@example.com admin 'chosen password'"
+ssh "node scripts/users.mjs reset you@example.com"                    # forgotten password
+ssh "node scripts/users.mjs role sara@example.com management"
+ssh "node scripts/users.mjs disable someone@example.com"
 ```
 
-It resets that account, creates it if the email is unknown, ensures it is an
-active admin, and revokes every existing session.
+Omitting the password generates a strong one and prints it once. Changing a
+password, a role, or disabling an account revokes that user's sessions, so the
+change takes effect immediately rather than at the next sign-in.
+
+Passwords are stored only as scrypt hashes: a lost one cannot be recovered,
+only replaced.
 
 ---
 
