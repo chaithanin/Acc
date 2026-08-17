@@ -1,0 +1,20 @@
+node_modules
+.next
+.git
+.github
+
+# Never bake the local database or uploaded originals into an image.
+data
+samples
+
+docs
+tests
+*.md
+!README.md
+
+.env
+.env*.local
+coverage
+npm-debug.log*
+.DS_Store
+*.tsbuildinfo

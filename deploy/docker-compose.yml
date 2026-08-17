@@ -1,0 +1,48 @@
+# Runs on the VM: the app plus Caddy, which terminates TLS.
+#
+# Caddy is here because the app handles passwords and financial data, so it
+# must not be served over plain HTTP. Caddy obtains and renews a Let's Encrypt
+# certificate automatically once GTG_DOMAIN points at this VM's IP.
+
+services:
+  app:
+    image: ${GTG_IMAGE}
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: '8080'
+      HOSTNAME: 0.0.0.0
+      GTG_DATA_DIR: /data
+      # An e2-micro has 1 GB total, so the parser gets a modest heap and a
+      # tighter deadline than the default.
+      GTG_PARSE_MAX_HEAP_MB: '320'
+      GTG_PARSE_TIMEOUT_MS: '90000'
+      GTG_ADMIN_EMAIL: ${GTG_ADMIN_EMAIL:-}
+      GTG_ADMIN_PASSWORD: ${GTG_ADMIN_PASSWORD:-}
+    volumes:
+      # The persistent disk. Everything else in the container is disposable.
+      - /mnt/data:/data
+    # Not published to the host: only Caddy may reach the app.
+    expose:
+      - '8080'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      GTG_DOMAIN: ${GTG_DOMAIN}
+    volumes:
+      - /mnt/data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /mnt/data/caddy/data:/data
+      - /mnt/data/caddy/config:/config
+    depends_on:
+      - app

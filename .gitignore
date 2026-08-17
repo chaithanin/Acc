@@ -1,0 +1,26 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Local data — SQLite database + uploaded originals are never committed
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+.env
+.env.local
+.env*.local
+
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+
+# Real client workbooks used for local verification — never committed
+samples/

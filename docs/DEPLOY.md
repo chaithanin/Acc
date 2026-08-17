@@ -1,0 +1,412 @@
+# Deploying to Google Cloud
+
+Target project: **`account-505805`**.
+Target hostname: **`acc.chaithanin.com`** (the default — no export needed).
+
+From Cloud Shell, or any machine with `gcloud` authenticated:
+
+```bash
+git clone https://github.com/chaithanin/Acc.git
+cd Acc
+git checkout claude/global-top-financial-dashboard-2jrq6e
+
+# 1. Reserve the address and print the DNS record to create.
+./deploy/deploy.sh --reserve-ip
+
+# 2. Add that A record at your DNS provider, then:
+./deploy/deploy.sh
+```
+
+Two steps rather than one because DNS has to exist before a certificate can be
+issued. Running `deploy.sh` straight away also works — it reserves the address,
+tells you the record to add and carries on — but the certificate will not be
+issued until the record resolves.
+
+### DNS as it stands
+
+`chaithanin.com` and `www.chaithanin.com` currently resolve to
+`118.139.181.63`, which is a different host. **`acc.chaithanin.com` has no
+record yet**, so it needs to be created. The main site is untouched by any of
+this: only the new `acc` subdomain is involved.
+
+The address is a *reserved static IP*, not an ephemeral one. An ephemeral
+address changes whenever the VM is stopped and started, which would silently
+break both DNS and TLS. Reserved addresses are free while attached to a running
+instance.
+
+---
+
+## Choosing the database — the economical option
+
+The brief was to keep the database cheap. These are the real choices:
+
+| Option | Monthly cost | Code change | Verdict |
+|---|---|---|---|
+| **VM + SQLite on a persistent disk** | **disk only (~$2 for 20 GB); VM free in a US free-tier region, ~$7 in Singapore** | none | **chosen** |
+| Cloud Run + Cloud SQL PostgreSQL | Cloud Run ≈ $0 at this traffic, but Cloud SQL has **no free tier** — the smallest shared-core instance is roughly $10–15 before storage | substantial — see below | rejected on cost |
+| Cloud Run + SQLite on a mounted bucket | ~$1 | none | **unsafe — never do this** |
+| Firestore | generous free tier | total rewrite | wrong shape for a relational ledger |
+
+Prices move; check the pricing calculator before committing. The ordering is
+what matters, and it is stable: **Cloud SQL is the expensive part**, not the
+compute.
+
+**Why not Cloud Run.** Cloud Run is stateless, so SQLite on it would lose every
+import on each cold start. Making Cloud Run viable means PostgreSQL, and that
+is where the cost lands. It is also not a small change: every repository in
+`src/lib/db/repositories/` is synchronous today, because `better-sqlite3` is a
+synchronous driver. A PostgreSQL driver is asynchronous, so the conversion
+reaches every repository, every page and every route. `docs/DATABASE.md`
+describes the path — the schema was written for it — but it is a real piece of
+work, not a config flag. It is worth doing when concurrent editors or
+horizontal scaling justify it; neither applies to a finance team of this size.
+
+**Why not SQLite on Cloud Storage or Filestore.** SQLite's locking assumes a
+local filesystem. Over a network mount, concurrent writes corrupt the database.
+For an accounting system that is not a risk worth taking at any price.
+
+**What the chosen option gives up.** One VM means no autoscaling and manual OS
+patching, and SQLite means one writer at a time. For a handful of finance users
+importing a workbook once a month, neither is a real constraint. The data disk
+is separate from the boot disk, so the VM can be rebuilt or resized without
+touching the database.
+
+---
+
+## Region: cost against data residency
+
+The Always Free tier covers one `e2-micro` **only** in `us-west1`,
+`us-central1` or `us-east1`. Singapore (`asia-southeast1`) costs roughly $7 a
+month for the same machine.
+
+The default here is **`asia-southeast1`**, not the free US region, because the
+data is Thai company financial records. Keeping it in Singapore is far better
+for latency and for a defensible answer under the Thai PDPA on where financial
+records are held.
+
+If saving that $7 matters more than residency:
+
+```bash
+export GTG_REGION=us-central1 GTG_ZONE=us-central1-a
+```
+
+That is a business decision about where financial records live, so it is left
+explicit rather than defaulted to the cheaper answer.
+
+---
+
+## HTTPS is not optional here
+
+The application authenticates with a session cookie and serves financial data,
+so it is never exposed over plain HTTP. The VM runs Caddy in front of the app,
+which obtains and renews a Let's Encrypt certificate automatically.
+
+A managed load balancer would also work and would cost about $18 a month —
+more than the rest of the deployment put together.
+
+The hostname defaults to `acc.chaithanin.com`; override it with `GTG_DOMAIN`.
+This is also why the deployment reserves its IP first: the DNS record can then be
+created and allowed to propagate before anything depends on it.
+
+If Caddy has already failed an attempt it backs off, so after adding the record
+force an immediate retry rather than waiting:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
+  --command 'sudo docker compose --project-name gtg -f /opt/gtg/docker-compose.yml restart caddy'
+```
+
+---
+
+## What gets created
+
+| Resource | Purpose |
+|---|---|
+| Static IP `gtg-financial-ip` | the address `acc.chaithanin.com` points at; survives a stop/start |
+| Artifact Registry repo `gtg` | holds the container image |
+| Cloud Build job | builds the image — an e2-micro cannot run `next build` in 1 GB |
+| (or a local Docker build) | `--local-build` builds in Cloud Shell instead, for projects where Cloud Build permission is unavailable |
+| Persistent disk `gtg-financial-data` (20 GB) | the database and every uploaded original, at `/mnt/data` |
+| VM `gtg-financial` (`e2-micro`, Debian 12) | runs the app and Caddy under Docker |
+| Firewall rule `gtg-allow-web` | 80 for the ACME challenge, 443 for the app |
+| Firewall rule `gtg-allow-iap-ssh` | port 22 from the IAP range only — not from the internet |
+
+The VM's first boot also creates a 2 GB swap file. An e2-micro has 1 GB of RAM,
+and a large workbook parse would otherwise risk being OOM-killed. For the same
+reason the container caps the parser at a 320 MB heap
+(`GTG_PARSE_MAX_HEAP_MB`) rather than the 1 GB default.
+
+---
+
+## First sign-in
+
+The most reliable option is to choose the password yourself, by setting
+`GTG_ADMIN_EMAIL` and `GTG_ADMIN_PASSWORD` before the first deploy. Nothing is
+generated and nothing can be missed.
+
+Otherwise the first start generates one and shows it in two places: on the
+sign-in page, and in the container log.
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
+  --command 'sudo docker logs gtg-app-1 2>&1 | grep "\[gtg\]"'
+```
+
+It is shown once either way. Change it after signing in.
+
+Note that whatever hits `/login` first is what consumes it — including a health
+check or a smoke test, not necessarily a person. That is exactly why it also
+goes to the log.
+
+### Managing users from the command line
+
+Users are normally managed in the dashboard under Settings → Users & Roles.
+The image also carries a tool for the two cases that screen cannot cover:
+setting a team up before anyone can sign in, and recovering when nobody has a
+working password.
+
+```bash
+ssh() { gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command "sudo docker exec gtg-app-1 $1"; }
+
+ssh "node scripts/users.mjs list"
+ssh "node scripts/users.mjs add finance@example.com finance"          # generates a password
+ssh "node scripts/users.mjs add you@example.com admin 'chosen password'"
+ssh "node scripts/users.mjs reset you@example.com"                    # forgotten password
+ssh "node scripts/users.mjs role sara@example.com management"
+ssh "node scripts/users.mjs disable someone@example.com"
+```
+
+Omitting the password generates a strong one and prints it once. Changing a
+password, a role, or disabling an account revokes that user's sessions, so the
+change takes effect immediately rather than at the next sign-in.
+
+Passwords are stored only as scrypt hashes: a lost one cannot be recovered,
+only replaced.
+
+---
+
+## The data volume and the container's user
+
+The app container runs as the unprivileged `node` user, uid 1000. `/data` is a
+bind mount of `/mnt/data` on the host, and **a bind mount takes its ownership
+from the host** — chowning the directory inside the image has no effect once
+the mount covers it. The host directory therefore has to be owned by uid 1000,
+which the VM's startup script and every deploy now assert.
+
+Caddy runs as root and is unaffected either way.
+
+If the health endpoint reports `EACCES: permission denied, mkdir
+'/data/uploads'`, this is the cause. Repair it directly:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command '
+  sudo mkdir -p /mnt/data/uploads
+  sudo chown 1000:1000 /mnt/data
+  sudo chown -R 1000:1000 /mnt/data/uploads
+  sudo docker restart gtg-app-1
+'
+```
+
+---
+
+## Service-account permissions
+
+Two identities need explicit grants beyond what a fresh project gives them, and
+neither failure is obvious from its error message:
+
+* **The deploying user** needs `roles/cloudbuild.builds.editor` to submit a
+  Cloud Build — or use `--local-build` and skip Cloud Build entirely.
+* **The VM's service account** needs `roles/artifactregistry.reader` on the
+  repository, or it cannot pull the image it is supposed to run. The
+  `cloud-platform` scope the VM is created with does *not* grant this: a scope
+  says which APIs the instance may call, not what its identity is permitted to
+  do. `deploy.sh` now grants this automatically, on the repository rather than
+  the whole project.
+
+If the deploy fails at the pull step, grant it by hand:
+
+```bash
+VM_SA=$(gcloud compute instances describe gtg-financial --zone=asia-southeast1-a \
+  --format='get(serviceAccounts[0].email)')
+
+gcloud artifacts repositories add-iam-policy-binding gtg \
+  --location=asia-southeast1 \
+  --member="serviceAccount:${VM_SA}" \
+  --role=roles/artifactregistry.reader
+```
+
+Then redeploy without rebuilding — the image is already in the registry:
+
+```bash
+./deploy/deploy.sh --skip-build
+```
+
+---
+
+## If Cloud Build refuses the submission
+
+`gcloud builds submit` failing with `PERMISSION_DENIED: The caller does not
+have permission` is about the *caller's* IAM, not the project's setup. Check
+what you hold:
+
+```bash
+gcloud projects get-iam-policy account-505805 \
+  --flatten='bindings[].members' \
+  --filter="bindings.members:$(gcloud config get-value account)" \
+  --format='table(bindings.role)'
+```
+
+An Owner can grant the role directly:
+
+```bash
+gcloud projects add-iam-policy-binding account-505805 \
+  --member="user:$(gcloud config get-value account)" \
+  --role=roles/cloudbuild.builds.editor
+```
+
+Otherwise skip Cloud Build altogether — Cloud Shell has its own Docker daemon,
+and the image is identical either way:
+
+```bash
+./deploy/deploy.sh --local-build
+```
+
+The build takes a few minutes longer on a Cloud Shell VM than on a Cloud Build
+worker, and Cloud Shell's disk is small enough that `docker image prune -f` is
+worth running afterwards.
+
+---
+
+## Checking a deployment
+
+```bash
+./deploy/smoke-test.sh
+```
+
+Checks it from outside: DNS resolves, the certificate is present and who
+issued it, `/api/health` reports ok, the sign-in page loads, an anonymous
+request to the dashboard is redirected rather than served, plain HTTP
+redirects to HTTPS, and the security headers are set. Non-zero exit on any
+failure, so it also works in a pipeline.
+
+The redirect check matters most of the six: if `/financial` ever answers 200
+without a session, financial data is being served to anonymous visitors.
+
+---
+
+## Updating
+
+```bash
+./deploy/deploy.sh --update
+```
+
+Rebuilds the image and restarts the container. The data disk is untouched, so
+imports, snapshots and history all survive. Re-running the full script is also
+safe — every step checks for what it creates.
+
+---
+
+## Deploying automatically on merge
+
+A merge into `main` deploys to production without anyone opening a terminal.
+Set it up once:
+
+```bash
+./deploy/setup-cicd.sh
+```
+
+Then add the five variables it prints to the repository, under
+Settings → Secrets and variables → Actions → Variables.
+
+### No key is ever created
+
+The deploy identity is borrowed, not stored. GitHub presents a signed token
+saying which repository and workflow is running; Google exchanges it for
+credentials that last minutes. Nothing in the repository is a credential, so
+there is nothing in it worth stealing — which matters more than usual for a
+project whose disk holds client financial data.
+
+The security boundary is one line in the provider, pinning the repository:
+
+```
+--attribute-condition="assertion.repository=='chaithanin/Acc'"
+```
+
+The token issuer is GitHub's own, shared by every repository on the platform.
+Without that condition, any repository anywhere could mint a token for this
+project.
+
+### What the identity may do
+
+Push to the one Artifact Registry repository, reach the one VM through
+Identity-Aware Proxy, and restart the stack. It cannot enable services, create
+instances or read anything else — `--update` skips the first-deployment steps,
+so those permissions are never needed.
+
+### What runs
+
+Types, tests and a production build run first, and the deploy only starts if
+they pass: a failing test stops the release instead of being discovered on the
+live site. Afterwards the smoke test runs against the domain, so a deploy that
+finishes without the site coming back is reported as a failure rather than a
+green tick.
+
+Two merges in quick succession queue rather than race. The second waits, and
+does not cancel the first — a half-applied deploy is worse than a slow one.
+
+### The manual path still works
+
+`./deploy/deploy.sh --update` from a shell does exactly what the workflow does,
+because the workflow runs that same script. Neither path can drift from the
+other, and a broken pipeline never blocks a release.
+
+---
+
+## Backups
+
+Not automated, deliberately — a backup schedule is a decision about retention,
+not a default worth guessing. The straightforward option:
+
+```bash
+gcloud compute disks snapshot gtg-financial-data \
+  --zone=asia-southeast1-a --snapshot-names=gtg-$(date +%Y%m%d)
+```
+
+Attach a resource policy to take that daily. SQLite in WAL mode is crash-safe,
+so a disk snapshot is a consistent restore point; for a belt-and-braces copy,
+`sqlite3 /mnt/data/gtg-financial.db ".backup /tmp/backup.db"` produces a clean
+file while the app is running.
+
+---
+
+## Verified, and not
+
+The container definition, the build configuration and both scripts are written
+and syntax-checked. The runtime layer was then reproduced locally — the exact
+set of files the Dockerfile copies into the runtime stage — and booted:
+`/api/health` returns ok, the sign-in page renders, and the parsing worker
+reads one of the real GL workbooks end to end.
+
+That rehearsal caught three defects that would each have surfaced only after a
+deploy:
+
+* the Dockerfile copied `bindings` and `file-uri-to-path`, which
+  `better-sqlite3` v13 does not use and which are not installed — the image
+  build would have failed outright;
+* `xlsx` was absent from the image. The parser runs in a plain `.mjs` worker
+  outside Next's build graph, so tracing never saw it and every workbook
+  import would have failed at runtime while the rest of the app looked fine;
+* `xlsx` pulls eight transitive packages that had to come with it.
+
+The image now self-checks at build time: it loads `xlsx`, opens a SQLite
+database through the native binding, and asserts both runtime-read files are
+present. A regression fails the build in seconds instead of producing a
+crash-looping container.
+
+The deployment itself has **not** been executed: this environment has no
+`gcloud`, no Google Cloud credentials and no Docker daemon, so the image has
+never been built or run, and nothing has been created in `account-505805`.
+Expect to fix small things on the first real run — most likely IAM permissions
+on the Cloud Build service account, or the DNS record not having propagated
+when Caddy first asks for a certificate. The `--reserve-ip` step exists to make
+the second of those unlikely.

@@ -1,0 +1,37 @@
+# TLS termination and reverse proxy.
+#
+# Caddy provisions and renews the certificate on its own, so there is no
+# manual certificate step and nothing expires quietly.
+
+{$GTG_DOMAIN} {
+	encode zstd gzip
+
+	# Workbook uploads are large; the default request ceiling would reject them.
+	request_body {
+		max_size 120MB
+	}
+
+	reverse_proxy app:8080 {
+		# Parsing several workbooks in one request legitimately takes minutes.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		# The app is only ever served over TLS once a certificate is issued.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MB
+			roll_keep 5
+		}
+	}
+}
