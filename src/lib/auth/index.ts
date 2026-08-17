@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { getDb, newId, nowIso } from '@/lib/db';
-import { findUserById, findUserByEmail, verifyPassword } from '@/lib/db/repositories/users';
+import { canSignIn, findUserById, findUserByEmail, verifyPassword } from '@/lib/db/repositories/users';
 import type { Role, User } from '@/lib/types';
 
 /**
@@ -15,7 +15,10 @@ const SESSION_DAYS = 7;
 
 export async function signIn(email: string, password: string): Promise<User | null> {
   const user = findUserByEmail(email);
-  if (!user || !user.active) return null;
+  // An expired or deactivated account is refused before the password is even
+  // checked, and refused identically either way so the response cannot be used
+  // to work out which accounts exist.
+  if (!user || !canSignIn(user)) return null;
   if (!verifyPassword(password, user.passwordHash)) return null;
 
   const sessionId = newId();
@@ -34,7 +37,14 @@ export async function signIn(email: string, password: string): Promise<User | nu
     expires: expiresAt,
   });
 
-  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    active: user.active,
+    expiresAt: user.expiresAt,
+  };
 }
 
 export async function signOut(): Promise<void> {
@@ -66,7 +76,10 @@ export async function currentUser(): Promise<User | null> {
   }
 
   const user = findUserById(row.user_id);
-  return user?.active ? user : null;
+  // Re-checked on every request rather than only at sign-in, so an account
+  // that expires or is disabled mid-session loses access immediately.
+  if (!user || !canSignIn(user)) return null;
+  return user;
 }
 
 /**

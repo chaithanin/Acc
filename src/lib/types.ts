@@ -12,6 +12,8 @@ export interface User {
   name: string;
   role: Role;
   active: boolean;
+  /** YYYY-MM-DD. Null means the account never expires. */
+  expiresAt: string | null;
 }
 
 export interface Project {

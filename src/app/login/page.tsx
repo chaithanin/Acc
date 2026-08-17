@@ -11,14 +11,14 @@ import { bootstrapDatabase } from '@/lib/db/bootstrap';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; changed?: string }>;
 }) {
   const seed = bootstrapDatabase();
   purgeExpiredSessions();
 
   if (await currentUser()) redirect('/');
 
-  const { error } = await searchParams;
+  const { error, changed } = await searchParams;
 
   async function authenticate(formData: FormData) {
     'use server';
@@ -73,6 +73,12 @@ export default async function LoginPage({
               />
             </label>
           </div>
+
+          {changed ? (
+            <p className="mb-4 rounded-md border border-good/30 bg-good/10 px-3 py-2 text-xs text-good">
+              Your password was changed. Sign in with the new one.
+            </p>
+          ) : null}
 
           {error ? (
             <p className="mt-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-xs text-critical">

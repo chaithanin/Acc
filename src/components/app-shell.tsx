@@ -151,10 +151,14 @@ function TopBar({ user, onMenu }: { user: User; onMenu: () => void }) {
 
       <div className="ml-auto flex items-center gap-3">
         <ThemeToggle />
-        <div className="text-right">
+        <Link
+          href="/account"
+          className="rounded-md px-2 py-1 text-right transition-colors hover:bg-surface-hover"
+          title="Your account and password"
+        >
           <p className="text-xs font-medium leading-tight text-ink">{user.name}</p>
           <p className="text-[11px] capitalize leading-tight text-ink-muted">{user.role}</p>
-        </div>
+        </Link>
         <form action="/api/auth/logout" method="post">
           <button
             type="submit"

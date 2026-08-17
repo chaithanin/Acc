@@ -49,6 +49,7 @@ interface UserRow {
   name: string;
   role: Role;
   active: number;
+  expires_at: string | null;
   password_hash: string;
 }
 
@@ -59,7 +60,24 @@ function toUser(row: UserRow): User {
     name: row.name,
     role: row.role,
     active: fromDbBool(row.active),
+    expiresAt: row.expires_at ?? null,
   };
+}
+
+/**
+ * Whether an account has passed its expiry date.
+ *
+ * Compared on calendar date rather than timestamp, so an account set to expire
+ * on the 31st is usable for the whole of the 31st.
+ */
+export function isExpired(user: Pick<User, 'expiresAt'>, today = new Date()): boolean {
+  if (!user.expiresAt) return false;
+  return user.expiresAt < today.toISOString().slice(0, 10);
+}
+
+/** An account may sign in only if it is active and not past its expiry. */
+export function canSignIn(user: Pick<User, 'active' | 'expiresAt'>): boolean {
+  return user.active && !isExpired(user);
 }
 
 export function findUserByEmail(email: string): (User & { passwordHash: string }) | null {
@@ -86,16 +104,82 @@ export function createUser(input: {
   name: string;
   password: string;
   role: Role;
+  expiresAt?: string | null;
 }): User {
   const id = newId();
   const now = nowIso();
   getDb()
     .prepare(
-      `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO users (id, email, name, password_hash, role, active, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     )
-    .run(id, input.email.trim().toLowerCase(), input.name, hashPassword(input.password), input.role, now, now);
+    .run(
+      id,
+      input.email.trim().toLowerCase(),
+      input.name,
+      hashPassword(input.password),
+      input.role,
+      input.expiresAt || null,
+      now,
+      now,
+    );
   return findUserById(id)!;
+}
+
+/**
+ * Replaces a user's password and signs them out everywhere.
+ *
+ * Revoking sessions is the point: a password is usually changed because the
+ * old one may be known to someone else, and leaving their sessions alive would
+ * defeat the change entirely.
+ */
+export function setUserPassword(id: string, password: string): void {
+  const db = getDb();
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+    .run(hashPassword(password), nowIso(), id);
+  db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(id);
+}
+
+/** Sets or clears the expiry date. Passing null removes it. */
+export function setUserExpiry(id: string, expiresAt: string | null): void {
+  getDb()
+    .prepare('UPDATE users SET expires_at = ?, updated_at = ? WHERE id = ?')
+    .run(expiresAt || null, nowIso(), id);
+
+  // An account expiring today or earlier should not keep a live session.
+  const user = findUserById(id);
+  if (user && isExpired(user)) {
+    getDb().prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(id);
+  }
+}
+
+/** Updates the editable profile fields in one go. */
+export function updateUser(
+  id: string,
+  input: { name?: string; role?: Role; expiresAt?: string | null; active?: boolean },
+): User | null {
+  const existing = findUserById(id);
+  if (!existing) return null;
+
+  getDb()
+    .prepare(
+      `UPDATE users SET name = ?, role = ?, expires_at = ?, active = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(
+      input.name?.trim() || existing.name,
+      input.role ?? existing.role,
+      input.expiresAt === undefined ? existing.expiresAt : input.expiresAt || null,
+      toDbBool(input.active ?? existing.active),
+      nowIso(),
+      id,
+    );
+
+  const updated = findUserById(id);
+  // Anything that removes access takes effect now rather than at next sign-in.
+  if (updated && !canSignIn(updated)) {
+    getDb().prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(id);
+  }
+  return updated;
 }
 
 export function setUserActive(id: string, active: boolean): void {

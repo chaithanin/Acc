@@ -36,9 +36,37 @@ export function getDb(): Database.Database {
 
   const schema = fs.readFileSync(path.join(process.cwd(), 'src/lib/db/schema.sql'), 'utf8');
   db.exec(schema);
+  applyMigrations(db);
 
   instance = db;
   return db;
+}
+
+/**
+ * Additive migrations for databases created by an earlier version.
+ *
+ * `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it was, so
+ * a column added to the schema never reaches a deployment that already has
+ * data. Each entry below is checked against the live table and added if
+ * missing, which is safe to run on every start.
+ */
+function applyMigrations(db: Database.Database): void {
+  const columns: { table: string; column: string; definition: string }[] = [
+    { table: 'users', column: 'expires_at', definition: 'TEXT' },
+    { table: 'wip_records', column: 'stated_closing', definition: 'NUMERIC' },
+  ];
+
+  for (const { table, column, definition } of columns) {
+    const existing = db
+      .prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
+      .all()
+      .map((c) => c.name);
+
+    if (existing.length === 0) continue; // table not created yet
+    if (existing.includes(column)) continue;
+
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 /** Runs `fn` inside a transaction; any throw rolls the whole thing back. */
