@@ -312,16 +312,22 @@ for attempt in $(seq 1 30); do
 done
 
 say "Copying the stack definition to the VM"
-gcloud compute scp deploy/docker-compose.yml "${VM}:/tmp/docker-compose.yml" \
-  --zone="$ZONE" --tunnel-through-iap --quiet
-gcloud compute scp deploy/Caddyfile "${VM}:/tmp/Caddyfile" \
-  --zone="$ZONE" --tunnel-through-iap --quiet
+# Staged in the login user's own home rather than a fixed name in /tmp. Each
+# identity that deploys — a person, and now the CI service account — logs in as
+# a different Linux user, and /tmp is sticky: whoever writes a given filename
+# there first owns it, and every later identity fails to overwrite it. A path
+# under $HOME cannot collide between users at all.
+gcloud compute ssh "$VM" --zone="$ZONE" --tunnel-through-iap --quiet \
+  --command 'mkdir -p ~/gtg-deploy'
+
+gcloud compute scp deploy/docker-compose.yml deploy/Caddyfile \
+  "${VM}:~/gtg-deploy/" --zone="$ZONE" --tunnel-through-iap --quiet
 
 say "Deploying the application"
 gcloud compute ssh "$VM" --zone="$ZONE" --tunnel-through-iap --quiet --command "
   set -e
-  sudo install -D -m 0644 /tmp/docker-compose.yml /opt/gtg/docker-compose.yml
-  sudo install -D -m 0644 /tmp/Caddyfile /mnt/data/caddy/Caddyfile
+  sudo install -D -m 0644 ~/gtg-deploy/docker-compose.yml /opt/gtg/docker-compose.yml
+  sudo install -D -m 0644 ~/gtg-deploy/Caddyfile /mnt/data/caddy/Caddyfile
   sudo GTG_IMAGE='${IMAGE}' GTG_DOMAIN='${DOMAIN}' /opt/gtg/run.sh
 "
 
