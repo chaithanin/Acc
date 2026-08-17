@@ -56,18 +56,18 @@ export async function loadDashboard(filters: DashboardFilters): Promise<Dashboar
   // this structure exists to prevent, so until company-level metrics are
   // calculated, an unset project resolves to a real project of this company
   // and the selector says which.
-  const requested =
+  const projectId =
     filters.projectId && projects.some((p) => p.id === filters.projectId)
       ? filters.projectId
       : null;
-  const projectId = requested ?? projects[0]?.id ?? null;
 
   let comparisons: MetricComparison[] = [];
-  // With no project there is nothing this company can be shown, and the
-  // group-wide set is not a substitute for it.
-  if (snapshot && projectId) {
-    const current = getMetrics(snapshot.id, projectId);
-    const baseline = previous ? getMetrics(previous.id, projectId) : null;
+  if (snapshot) {
+    // A null project means every project of this company and nothing beyond
+    // it: the company is passed either way, so "all projects" can only ever
+    // widen as far as the company's own edge.
+    const current = getMetrics(snapshot.id, projectId, company.id);
+    const baseline = previous ? getMetrics(previous.id, projectId, company.id) : null;
     comparisons = compareMetrics(current, baseline);
   }
 

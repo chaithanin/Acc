@@ -38,9 +38,19 @@ export interface PreviewFile {
   sheets: PreviewSheet[];
 }
 
+/** A file whose contents name a project owned by another company. */
+export interface CompanyMismatch {
+  fileName: string;
+  matchedAlias: string | null;
+  projectName: string;
+  companyId: string | null;
+}
+
 export interface PreviewResponse {
   previewId: string;
   reportDate: string;
+  company: { id: string; displayName: string; companyCode: string };
+  mismatches: CompanyMismatch[];
   rejected: { fileName: string; reason: string }[];
   archiveIssues: ImportIssue[];
   duplicates: DuplicateMatch[];

@@ -50,6 +50,26 @@ export function getDb(): Database.Database {
  * data. Each entry below is checked against the live table and added if
  * missing, which is safe to run on every start.
  */
+/**
+ * Tables whose rows belong to exactly one company.
+ *
+ * Listed once so a new fact table cannot be added to the schema and quietly
+ * left out of the isolation — the migration, the backfill and the index all
+ * read from here.
+ */
+export const COMPANY_SCOPED_TABLES = [
+  'imports',
+  'bank_balances',
+  'income_records',
+  'expense_records',
+  'receivable_records',
+  'boq_records',
+  'wip_records',
+  'gl_entries',
+  'cashflow_forecasts',
+  'calculated_metrics',
+] as const;
+
 function applyMigrations(db: Database.Database): void {
   const columns: { table: string; column: string; definition: string }[] = [
     { table: 'users', column: 'expires_at', definition: 'TEXT' },
@@ -60,6 +80,15 @@ function applyMigrations(db: Database.Database): void {
       column: 'active_company_id',
       definition: 'TEXT REFERENCES companies(id)',
     },
+    // Every fact table carries the company as its own column. It could be
+    // reached through project_id each time, but a record whose project is
+    // unassigned would then belong to no company and fall out of every scoped
+    // query — and a join is one more place a filter can be left off.
+    ...COMPANY_SCOPED_TABLES.map((table) => ({
+      table,
+      column: 'company_id',
+      definition: 'TEXT REFERENCES companies(id)',
+    })),
   ];
 
   for (const { table, column, definition } of columns) {
@@ -77,8 +106,56 @@ function applyMigrations(db: Database.Database): void {
   // Indexes on migrated columns belong here rather than in the schema file,
   // which runs before these columns exist on an upgraded database.
   db.exec('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
+  for (const table of COMPANY_SCOPED_TABLES) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_company ON ${table}(company_id)`);
+  }
 
   backfillCompanies(db);
+  backfillRecordCompanies(db);
+}
+
+/**
+ * Fills company_id on data imported before companies existed.
+ *
+ * Derived from the project each record already names. A record with no project
+ * is left null rather than guessed at: it belongs to no company, and no
+ * company's dashboard should quietly acquire it.
+ */
+function backfillRecordCompanies(db: Database.Database): void {
+  for (const table of COMPANY_SCOPED_TABLES) {
+    const columns = db
+      .prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
+      .all()
+      .map((c) => c.name);
+
+    if (!columns.includes('company_id') || !columns.includes('project_id')) continue;
+
+    db.exec(`
+      UPDATE ${table}
+         SET company_id = (SELECT p.company_id FROM projects p WHERE p.id = ${table}.project_id)
+       WHERE company_id IS NULL AND project_id IS NOT NULL
+    `);
+  }
+
+  // An import predating companies has no company of its own; it takes the one
+  // its records agree on, and stays null when they do not agree.
+  const importColumns = db
+    .prepare<[], { name: string }>('PRAGMA table_info(imports)')
+    .all()
+    .map((c) => c.name);
+
+  if (importColumns.includes('company_id')) {
+    db.exec(`
+      UPDATE imports
+         SET company_id = (
+           SELECT MIN(company_id) FROM income_records r
+            WHERE r.import_id = imports.id AND r.company_id IS NOT NULL
+              AND (SELECT COUNT(DISTINCT company_id) FROM income_records x
+                    WHERE x.import_id = imports.id AND x.company_id IS NOT NULL) = 1
+         )
+       WHERE company_id IS NULL
+    `);
+  }
 }
 
 /**

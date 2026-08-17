@@ -26,6 +26,8 @@ import { getDb, newId, nowIso, parseJson, toDbBool, transaction } from '../index
 const RAW_ROW_SAMPLE_LIMIT = 500;
 
 export interface PersistImportArgs {
+  /** Company this import belongs to. Every record it writes carries it. */
+  companyId: string;
   reportDate: string;
   label: string | null;
   userId: string | null;
@@ -81,11 +83,12 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
 
     db.prepare(
       `INSERT INTO imports
-         (id, report_date, label, status, uploaded_by, file_count, row_count,
+         (id, company_id, report_date, label, status, uploaded_by, file_count, row_count,
           warning_count, error_count, notes, replaces_import_id, created_at, completed_at)
-       VALUES (?, ?, ?, 'processing', ?, ?, 0, ?, ?, NULL, ?, ?, NULL)`,
+       VALUES (?, ?, ?, ?, 'processing', ?, ?, 0, ?, ?, NULL, ?, ?, NULL)`,
     ).run(
       importId,
+      args.companyId,
       args.reportDate,
       args.label,
       args.userId,
@@ -148,7 +151,7 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
     const refs = indexSourceRefs(data);
     const refIds = persistSourceRefs(importId, refs, args.files, fileIdByName, now);
 
-    const rowCount = persistRecords(db, snapshotId, importId, args.reportDate, data, refIds);
+    const rowCount = persistRecords(db, snapshotId, importId, args.reportDate, data, refIds, args.companyId);
 
     // ------------------------------------------------- metrics + validations
     const projectIds = projectIdsIn(data);
@@ -161,7 +164,9 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
     for (const projectId of scopes) {
       const scoped = filterByProject(data, projectId);
       const calc = calculateMetrics(scoped, args.reportDate);
-      metricCount += persistMetrics(snapshotId, importId, projectId, args.reportDate, calc.metrics, refIds, now);
+      metricCount += persistMetrics(
+        snapshotId, importId, projectId, args.companyId, args.reportDate, calc.metrics, refIds, now,
+      );
 
       const validations = runValidations(scoped, calc, projectId);
       validationCount += persistValidations(snapshotId, importId, validations, refIds, now);
@@ -326,32 +331,52 @@ function persistRecords(
   reportDate: string,
   data: NormalizedDataset,
   refIds: string[],
+  companyId: string,
 ): number {
   const refIdOf = (index: number | undefined) =>
     index !== undefined && index >= 0 && index < refIds.length ? refIds[index] : null;
+
+  /**
+   * The company a record belongs to.
+   *
+   * A project decides it when the record has one, because a project belongs to
+   * exactly one company and a file can carry rows for several projects. A row
+   * with no project falls back to the company being imported into — it was
+   * uploaded there deliberately, and leaving it null would hide it from every
+   * company at once.
+   */
+  const companyOf = (projectId: string | null | undefined): string =>
+    (projectId ? projectCompany.get(projectId) : null) ?? companyId;
+
+  const projectCompany = new Map<string, string | null>(
+    db
+      .prepare<[], { id: string; company_id: string | null }>('SELECT id, company_id FROM projects')
+      .all()
+      .map((r) => [r.id, r.company_id]),
+  );
 
   let count = 0;
 
   const bank = db.prepare(
     `INSERT INTO bank_balances
-       (id, snapshot_id, import_id, project_id, report_date, bank_name, account_no,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, bank_name, account_no,
         current_amount, pending_expense, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.bank) {
-    bank.run(newId(), snapshotId, importId, r.projectId, reportDate, r.bankName, r.accountNo,
+    bank.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.bankName, r.accountNo,
       r.currentAmount, r.pendingExpense, refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
   const receivable = db.prepare(
     `INSERT INTO receivable_records
-       (id, snapshot_id, import_id, project_id, report_date, category, customer, unit,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, category, customer, unit,
         contractual_amount, receive_amount, accrue_amount, computed_accrue, due_date, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.receivable) {
-    receivable.run(newId(), snapshotId, importId, r.projectId, reportDate, r.category, r.customer,
+    receivable.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.customer,
       r.unit, r.contractualAmount, r.receiveAmount, r.accrueAmount,
       r.contractualAmount - r.receiveAmount, r.dueDate, refIdOf(r.sourceRefIndex));
     count += 1;
@@ -359,12 +384,12 @@ function persistRecords(
 
   const income = db.prepare(
     `INSERT INTO income_records
-       (id, snapshot_id, import_id, project_id, report_date, category, description, month,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, category, description, month,
         contractual_amount, received_amount, accrued_amount, is_forecast, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.income) {
-    income.run(newId(), snapshotId, importId, r.projectId, reportDate, r.category, r.description,
+    income.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.description,
       r.month, r.contractualAmount, r.receivedAmount, r.accruedAmount, toDbBool(r.isForecast),
       refIdOf(r.sourceRefIndex));
     count += 1;
@@ -372,12 +397,12 @@ function persistRecords(
 
   const expense = db.prepare(
     `INSERT INTO expense_records
-       (id, snapshot_id, import_id, project_id, report_date, category, description, month,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, category, description, month,
         amount, paid_amount, pending_amount, is_forecast, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.expense) {
-    expense.run(newId(), snapshotId, importId, r.projectId, reportDate, r.category, r.description,
+    expense.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.description,
       r.month, r.amount, r.paidAmount, r.pendingAmount, toDbBool(r.isForecast),
       refIdOf(r.sourceRefIndex));
     count += 1;
@@ -385,12 +410,12 @@ function persistRecords(
 
   const boq = db.prepare(
     `INSERT INTO boq_records
-       (id, snapshot_id, import_id, project_id, report_date, account_code, description, contractor,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, account_code, description, contractor,
         cost_category, month, boq_amount, boq_to_date, paid_amount, pending_amount, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.boq) {
-    boq.run(newId(), snapshotId, importId, r.projectId, reportDate, r.accountCode, r.description,
+    boq.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.accountCode, r.description,
       r.contractor, r.costCategory, r.month, r.boqAmount, r.boqToDate, r.paidAmount,
       r.pendingAmount, refIdOf(r.sourceRefIndex));
     count += 1;
@@ -398,25 +423,25 @@ function persistRecords(
 
   const wip = db.prepare(
     `INSERT INTO wip_records
-       (id, snapshot_id, import_id, project_id, report_date, account_code, account_name,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, account_code, account_name,
         current_period, ytd, advance_payment, stated_closing, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.wip) {
-    wip.run(newId(), snapshotId, importId, r.projectId, reportDate, r.accountCode, r.accountName,
+    wip.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.accountCode, r.accountName,
       r.currentPeriod, r.ytd, r.advancePayment, r.statedClosing, refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
   const gl = db.prepare(
     `INSERT INTO gl_entries
-       (id, snapshot_id, import_id, project_id, report_date, account_code, account_name,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, account_code, account_name,
         entry_date, voucher_no, vendor, description, cost_code, module, job,
         debit, credit, balance, is_opening, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.gl) {
-    gl.run(newId(), snapshotId, importId, r.projectId, reportDate, r.accountCode, r.accountName,
+    gl.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.accountCode, r.accountName,
       r.entryDate, r.voucherNo, r.vendor, r.description, r.costCode, r.module, r.job,
       r.debit, r.credit, r.balance, toDbBool(r.isOpeningBalance), refIdOf(r.sourceRefIndex));
     count += 1;
@@ -424,12 +449,12 @@ function persistRecords(
 
   const cashflow = db.prepare(
     `INSERT INTO cashflow_forecasts
-       (id, snapshot_id, import_id, project_id, report_date, month, opening_balance,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, month, opening_balance,
         expected_income, expected_expense, net_cashflow, closing_balance, is_computed, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.cashflow) {
-    cashflow.run(newId(), snapshotId, importId, r.projectId, reportDate, r.month, r.openingBalance,
+    cashflow.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.month, r.openingBalance,
       r.expectedIncome, r.expectedExpense, r.netCashflow, r.closingBalance,
       toDbBool(r.isComputed), refIdOf(r.sourceRefIndex));
     count += 1;
@@ -442,6 +467,7 @@ function persistMetrics(
   snapshotId: string,
   importId: string,
   projectId: string | null,
+  companyId: string,
   reportDate: string,
   metrics: Metric[],
   refIds: string[],
@@ -449,9 +475,9 @@ function persistMetrics(
 ): number {
   const stmt = getDb().prepare(
     `INSERT INTO calculated_metrics
-       (id, snapshot_id, import_id, project_id, report_date, metric_key, label, section,
+       (id, snapshot_id, import_id, project_id, company_id, report_date, metric_key, label, section,
         value, unit, formula, inputs_json, source_ref_ids_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   for (const metric of metrics) {
@@ -463,7 +489,7 @@ function persistMetrics(
       .slice(0, 500);
 
     stmt.run(
-      newId(), snapshotId, importId, projectId, reportDate, metric.key, metric.label,
+      newId(), snapshotId, importId, projectId, companyId, reportDate, metric.key, metric.label,
       metric.section, metric.value, metric.unit, metric.formula,
       JSON.stringify(metric.inputs), JSON.stringify(ids), now,
     );

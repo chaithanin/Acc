@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { UPLOAD_DIR, getDb, nowIso } from '@/lib/db';
 import { findDuplicates } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
@@ -83,7 +83,24 @@ export async function POST(request: Request) {
     );
   }
 
-  const resolver = new ProjectResolver(listProjects());
+  const company = await activeCompany();
+  if (!company) {
+    return NextResponse.json({ error: 'Select a company before importing.' }, { status: 409 });
+  }
+
+  const allProjects = listProjects();
+  const companyProjects = allProjects.filter((p) => p.companyId === company.id);
+
+  // Matching runs against this company's projects only, so nothing from
+  // another company can be filed here by accident.
+  const resolver = new ProjectResolver(companyProjects);
+
+  // A second resolver over every project exists purely to recognise a file
+  // that belongs somewhere else. Without it such a file simply looks
+  // unrecognised, and "no project matched" reads as a mapping problem rather
+  // than as what it is: the wrong company.
+  const groupResolver = new ProjectResolver(allProjects);
+
   const templates = listTemplates();
 
   const expanded = await expandUploads(uploads, uploadRoot);
@@ -94,6 +111,35 @@ export async function POST(request: Request) {
     templates,
     defaultReportDate,
   });
+
+  /**
+   * Files that name a project belonging to a different company.
+   *
+   * Reported rather than acted on: the importer does not quietly redirect the
+   * upload, and does not quietly accept it either. Whoever is importing
+   * decides — cancel, or switch company and upload again.
+   */
+  const mismatches = results
+    .filter((r) => !r.project.projectId)
+    .map((r) => {
+      const elsewhere = groupResolver.resolveFile(
+        r.fileName,
+        r.sheets.map((sheet) => sheet.sheetName),
+        [],
+      );
+      if (!elsewhere.projectId) return null;
+
+      const owner = allProjects.find((p) => p.id === elsewhere.projectId);
+      if (!owner || owner.companyId === company.id) return null;
+
+      return {
+        fileName: r.fileName,
+        matchedAlias: elsewhere.matchedAlias,
+        projectName: owner.name,
+        companyId: owner.companyId,
+      };
+    })
+    .filter((m): m is NonNullable<typeof m> => m !== null);
 
   const duplicates = findDuplicates(
     results.map((r) => ({
@@ -115,6 +161,7 @@ export async function POST(request: Request) {
   const payload = {
     previewId,
     uploadRoot,
+    companyId: company.id,
     reportDate,
     files: expanded.files.map((f) => ({
       filePath: f.filePath,
@@ -145,6 +192,8 @@ export async function POST(request: Request) {
     rejected,
     archiveIssues: expanded.issues,
     duplicates,
+    company: { id: company.id, displayName: company.displayName, companyCode: company.companyCode },
+    mismatches,
     files: results.map((r) => ({
       fileName: r.fileName,
       containerFile: r.containerFile,

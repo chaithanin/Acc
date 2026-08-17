@@ -83,19 +83,39 @@ export interface StoredMetric extends Metric {
   sourceRefIds: string[];
 }
 
-export function getMetrics(snapshotId: string, projectId: string | null): StoredMetric[] {
+/**
+ * Metrics for one scope of a snapshot.
+ *
+ * The company is required, not optional. A project-level read is already
+ * narrow enough on its own, but the whole-company read — project_id IS NULL —
+ * would otherwise return the figures of whichever import produced them,
+ * across companies. Making the argument mandatory means that read cannot be
+ * written without saying whose numbers it wants.
+ *
+ * Data imported before companies existed carries no company on its
+ * whole-import row, so it answers with nothing rather than with another
+ * company's totals. Empty is recoverable by re-importing; wrong is not
+ * recoverable at all, because nobody can see that it happened.
+ */
+export function getMetrics(
+  snapshotId: string,
+  projectId: string | null,
+  companyId: string,
+): StoredMetric[] {
   const db = getDb();
   const rows = projectId
     ? db
-        .prepare<[string, string], MetricRow>(
-          `SELECT * FROM calculated_metrics WHERE snapshot_id = ? AND project_id = ?`,
+        .prepare<[string, string, string], MetricRow>(
+          `SELECT * FROM calculated_metrics
+            WHERE snapshot_id = ? AND project_id = ? AND company_id = ?`,
         )
-        .all(snapshotId, projectId)
+        .all(snapshotId, projectId, companyId)
     : db
-        .prepare<[string], MetricRow>(
-          `SELECT * FROM calculated_metrics WHERE snapshot_id = ? AND project_id IS NULL`,
+        .prepare<[string, string], MetricRow>(
+          `SELECT * FROM calculated_metrics
+            WHERE snapshot_id = ? AND project_id IS NULL AND company_id = ?`,
         )
-        .all(snapshotId);
+        .all(snapshotId, companyId);
 
   return rows.map(toStoredMetric);
 }
@@ -130,9 +150,10 @@ function toStoredMetric(row: MetricRow): StoredMetric {
 export function getMetric(
   snapshotId: string,
   projectId: string | null,
+  companyId: string,
   metricKey: string,
 ): StoredMetric | null {
-  return getMetrics(snapshotId, projectId).find((m) => m.key === metricKey) ?? null;
+  return getMetrics(snapshotId, projectId, companyId).find((m) => m.key === metricKey) ?? null;
 }
 
 // -------------------------------------------------------------- validations
@@ -400,9 +421,9 @@ export function recalculateSnapshot(snapshotId: string): { metrics: number; vali
 
     const metricStmt = db.prepare(
       `INSERT INTO calculated_metrics
-         (id, snapshot_id, import_id, project_id, report_date, metric_key, label, section,
-          value, unit, formula, inputs_json, source_ref_ids_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, snapshot_id, import_id, project_id, company_id, report_date, metric_key, label,
+          section, value, unit, formula, inputs_json, source_ref_ids_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const validationStmt = db.prepare(
@@ -411,6 +432,25 @@ export function recalculateSnapshot(snapshotId: string): { metrics: number; vali
           imported_value, difference, status, severity, message, source_ref_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+
+    // A recalculation must not move a metric between companies, so the company
+    // is read from the project rather than recomputed from whatever is in
+    // session when the button is pressed.
+    const projectCompany = new Map<string, string | null>(
+      db
+        .prepare<[], { id: string; company_id: string | null }>(
+          'SELECT id, company_id FROM projects',
+        )
+        .all()
+        .map((r) => [r.id, r.company_id]),
+    );
+    const snapshotCompany = db
+      .prepare<[string], { company_id: string | null }>(
+        'SELECT company_id FROM imports WHERE id = ?',
+      )
+      .get(snapshot.importId)?.company_id ?? null;
+    const companyOf = (projectId: string | null) =>
+      (projectId ? projectCompany.get(projectId) : null) ?? snapshotCompany;
 
     for (const projectId of [null, ...projectIdsIn(data)]) {
       const scoped = filterByProject(data, projectId);
@@ -423,7 +463,8 @@ export function recalculateSnapshot(snapshotId: string): { metrics: number; vali
           .slice(0, 500);
 
         metricStmt.run(
-          newId(), snapshotId, snapshot.importId, projectId, snapshot.reportDate, metric.key,
+          newId(), snapshotId, snapshot.importId, projectId, companyOf(projectId),
+          snapshot.reportDate, metric.key,
           metric.label, metric.section, metric.value, metric.unit, metric.formula,
           JSON.stringify(metric.inputs), JSON.stringify(ids), now,
         );

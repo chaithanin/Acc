@@ -95,7 +95,11 @@ export function FilterBar({
         onChange={(e) => update('projectId', e.target.value)}
         disabled={projects.length === 0}
       >
-        {projects.length === 0 ? <option value="">No projects</option> : null}
+        {projects.length === 0 ? (
+          <option value="">No projects</option>
+        ) : (
+          <option value="">All Projects</option>
+        )}
         {projects.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { getDb, parseJson } from '@/lib/db';
 import { persistImport } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
@@ -37,6 +37,17 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
   if (!can(user, 'import:run')) {
     return NextResponse.json({ error: 'Your role cannot import data.' }, { status: 403 });
+  }
+
+  // Data is imported into the company in session, resolved here rather than
+  // taken from the request. A browser cannot name the company its upload lands
+  // in, which is the only way this stays true when someone edits a request.
+  const company = await activeCompany();
+  if (!company) {
+    return NextResponse.json(
+      { error: 'Select a company before importing.' },
+      { status: 409 },
+    );
   }
 
   const body = (await request.json()) as {
@@ -83,7 +94,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'The report date is not a valid date.' }, { status: 400 });
   }
 
-  const resolver = new ProjectResolver(listProjects());
+  // Only this company's projects can be matched. A file naming another
+  // company's project therefore resolves to nothing here rather than silently
+  // filing rows under a project the importer is not allowed to touch.
+  const companyProjects = listProjects().filter((p) => p.companyId === company.id);
+  const resolver = new ProjectResolver(companyProjects);
 
   let results;
   try {
@@ -111,6 +126,7 @@ export async function POST(request: Request) {
   let outcome;
   try {
     outcome = persistImport({
+      companyId: company.id,
       reportDate,
       label: body.label?.trim() || null,
       userId: user.id,

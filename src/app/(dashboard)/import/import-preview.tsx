@@ -185,6 +185,45 @@ export function ImportPreview({
           ) : null}
         </div>
 
+        {preview.mismatches.length > 0 ? (
+          <div className="mb-4 rounded-md border border-critical/40 bg-critical/10 px-3 py-3 text-xs">
+            <p className="text-sm font-medium text-ink">
+              <span aria-hidden>▲</span> Company mismatch detected
+            </p>
+            <p className="mt-1 text-ink-secondary">
+              {preview.mismatches.length === 1 ? 'This file appears' : 'These files appear'} to
+              contain data belonging to another company, but you are importing into{' '}
+              <span className="font-medium text-ink">{preview.company.displayName}</span>. Nothing
+              has been imported. Cancel, or switch company and upload again — importing it here
+              would file another company&rsquo;s figures under this one, where no one would think
+              to look for them.
+            </p>
+            <ul className="mt-2 space-y-0.5 text-ink-secondary">
+              {preview.mismatches.map((m) => (
+                <li key={m.fileName}>
+                  <span className="font-medium text-ink">{m.fileName}</span> — matched{' '}
+                  {m.matchedAlias ? `“${m.matchedAlias}”` : 'a project'} belonging to{' '}
+                  {m.projectName}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <a
+                href="/companies"
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              >
+                Change company
+              </a>
+              <a
+                href="/import"
+                className="rounded-md border border-border-strong px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-hover"
+              >
+                Cancel import
+              </a>
+            </div>
+          </div>
+        ) : null}
+
         {emptySheets.length > 0 ? (
           <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
             <p className="font-medium text-ink">
