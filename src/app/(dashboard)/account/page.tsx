@@ -2,9 +2,8 @@ import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader, Stat } from '@/components/ui/primitives';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, currentUser, signOut } from '@/lib/auth';
 import { findUserByEmail, setUserPassword, verifyPassword } from '@/lib/db/repositories/users';
+import { MIN_PASSWORD, passwordTooShort } from '@/config/password-policy';
 import { formatDate } from '@/lib/format/number';
-
-const MIN_PASSWORD = 12;
 
 /**
  * Self-service account page.
@@ -36,7 +35,7 @@ export default async function AccountPage({
       redirect(`/account?error=${encodeURIComponent(message)}`);
 
     if (next !== confirm) fail('The new passwords do not match.');
-    if (next.length < MIN_PASSWORD) fail(`Passwords must be at least ${MIN_PASSWORD} characters.`);
+    if (passwordTooShort(next)) fail(`Passwords must be at least ${MIN_PASSWORD} characters.`);
     if (next === current) fail('The new password is the same as the current one.');
 
     // The current password is required so that someone who walks up to an

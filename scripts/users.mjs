@@ -33,7 +33,9 @@ const SCRYPT_P = 1;
 const KEY_LENGTH = 64;
 
 const ROLES = ['admin', 'finance', 'management', 'viewer'];
-const MIN_PASSWORD = 12;
+// Kept in step with src/config/password-policy.ts. This script deliberately
+// imports nothing from the app, so the value is repeated rather than shared.
+const MIN_PASSWORD = 8;
 
 function hashPassword(password) {
   const salt = randomBytes(16);
