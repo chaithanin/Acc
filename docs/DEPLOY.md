@@ -306,9 +306,26 @@ safe — every step checks for what it creates.
 
 ---
 
-## Deploying automatically on merge
+## Deploying automatically on push
 
-A merge into `main` deploys to production without anyone opening a terminal.
+A push to a working branch deploys to production without anyone opening a
+terminal or a pull request. `main` is then fast-forwarded to whatever was
+deployed, so it always names exactly what production is running rather than
+being a separate thing to remember to update.
+
+```
+push  →  typecheck, tests, build  →  deploy  →  smoke test  →  main moves
+```
+
+Nothing reaches the site unless every check passes, and `main` only moves once
+the deployed site has answered — so a green `main` means a release that worked,
+not one that was attempted.
+
+**This trades away the review step.** Whatever passes the checks goes live,
+which makes those checks the only thing between a push and live financial data.
+Opening a pull request still runs them and still holds the deploy back until it
+is merged, for a change worth a second pair of eyes.
+
 Set it up once:
 
 ```bash

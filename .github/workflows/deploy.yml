@@ -1,19 +1,26 @@
 name: Deploy
 
-# Deploys what is on main. A merged pull request reaches acc.chaithanin.com
-# without anyone opening Cloud Shell.
+# A push reaches acc.chaithanin.com on its own — no pull request, no Cloud
+# Shell. Pushing a working branch deploys it and then moves main to match, so
+# main still names exactly what production is running.
 #
 # The checks run first and the deploy only starts if they pass, so a failing
-# test stops the release rather than being discovered on the live site. The
-# manual trigger exists for redeploying the same commit after a change made
+# test stops the release rather than being discovered on the live site.
+#
+# What this gives up is the review step: whatever passes the checks goes live.
+# That is the trade the team asked for, and it makes the checks the only thing
+# standing between a push and live financial data — worth remembering before
+# ever weakening them.
+#
+# The manual trigger exists for redeploying the same commit after a change made
 # outside the repository — a rotated secret, a resized disk.
 #
-# The same checks also run on a pull request, where they are worth more: a
+# The same checks also run on a pull request, for when one is opened anyway: a
 # problem caught before the merge costs a commit, and one caught after costs a
 # release.
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -96,3 +103,28 @@ jobs:
         # A deploy that finishes without the site coming back is a failure, and
         # the run should say so rather than turn green on a broken release.
         run: ./deploy/smoke-test.sh
+
+  promote:
+    # Moves main to whatever was just deployed from a working branch, so main
+    # is never a guess about what production runs. Only after the deploy and
+    # the smoke test have both passed: main should describe a release that
+    # answered, not one that was merely attempted.
+    needs: deploy
+    if: github.event_name == 'push' && github.ref_name != 'main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward main to the deployed commit
+        # A push made with GITHUB_TOKEN starts no further workflow run, which
+        # is what keeps this from deploying the same commit a second time.
+        #
+        # Not forced: if main has moved on its own, the push is refused and
+        # this fails loudly rather than discarding whatever landed there.
+        run: git push origin HEAD:main
