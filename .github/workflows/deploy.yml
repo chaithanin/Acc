@@ -7,8 +7,14 @@ name: Deploy
 # test stops the release rather than being discovered on the live site. The
 # manual trigger exists for redeploying the same commit after a change made
 # outside the repository — a rotated secret, a resized disk.
+#
+# The same checks also run on a pull request, where they are worth more: a
+# problem caught before the merge costs a commit, and one caught after costs a
+# release.
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -43,6 +49,9 @@ jobs:
 
   deploy:
     needs: check
+    # A pull request runs the checks and stops there. Deploying from an
+    # unmerged branch would put code on the live site that nobody has approved.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
 
