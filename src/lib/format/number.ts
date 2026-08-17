@@ -83,6 +83,23 @@ export function formatPercent(value: number | null | undefined, decimals = 2): s
   return `${sign}${value.toFixed(decimals)}%`;
 }
 
+/** Liquidity ratios read as "1.42×"; null means the ratio was not calculable. */
+export function formatRatio(value: number | null | undefined, decimals = 2): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  return `${value.toFixed(decimals)}×`;
+}
+
+/** Formats a metric according to its own unit, so callers never branch on it. */
+export function formatByUnit(
+  value: number | null | undefined,
+  unit: 'THB' | 'PERCENT' | 'COUNT' | 'RATIO',
+): string {
+  if (unit === 'PERCENT') return value === null || value === undefined ? 'N/A' : `${value.toFixed(1)}%`;
+  if (unit === 'RATIO') return formatRatio(value);
+  if (unit === 'COUNT') return formatNumber(value);
+  return formatCompactTHB(value);
+}
+
 export function formatNumber(value: number | null | undefined, decimals = 0): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   return group(value, decimals);

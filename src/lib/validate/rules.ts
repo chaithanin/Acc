@@ -28,8 +28,78 @@ export function runValidations(
   results.push(...validateExpenseComponents(data, calc, projectId));
   results.push(...validateBoq(data, calc, projectId));
   results.push(...validateCashflowMonths(calc, projectId));
+  results.push(...validateLedgerFooters(data, projectId));
 
   return results;
+}
+
+/**
+ * Our recomputed ledger balance against the accounting system's own printed
+ * total.
+ *
+ * This is the strongest check available: the source system independently
+ * states the closing balance, so a mismatch means our reading of the postings
+ * is wrong, not merely inconsistent.
+ */
+function validateLedgerFooters(data: NormalizedDataset, projectId: string | null): ValidationResult[] {
+  const stated = data.wip.filter((row) => row.statedClosing !== null);
+
+  if (stated.length === 0) {
+    return [
+      skipped('ledger_footer', 'Recomputed ledger balance = printed total', 'General Ledger', projectId,
+        'No ledger report with a printed total was imported.'),
+    ];
+  }
+
+  const mismatched = stated.filter(
+    (row) => Math.abs(round2(row.ytd - (row.statedClosing ?? 0))) > TOLERANCE,
+  );
+
+  if (mismatched.length === 0) {
+    const total = round2(stated.reduce((sum, r) => sum + r.ytd, 0));
+    return [
+      {
+        ruleKey: 'ledger_footer',
+        label: 'Recomputed ledger balance = printed total',
+        scope: 'General Ledger',
+        projectId,
+        expected: total,
+        imported: total,
+        difference: 0,
+        status: 'pass',
+        severity: 'info',
+        message:
+          `All ${stated.length} ledger account(s) reconcile with the printed Grand Total.`,
+        sourceRefIndexes: stated
+          .map((r) => r.sourceRefIndex)
+          .filter((i): i is number => i !== undefined),
+      },
+    ];
+  }
+
+  const worst = mismatched.reduce((a, b) =>
+    Math.abs(a.ytd - (a.statedClosing ?? 0)) > Math.abs(b.ytd - (b.statedClosing ?? 0)) ? a : b,
+  );
+
+  return [
+    {
+      ruleKey: 'ledger_footer',
+      label: 'Recomputed ledger balance = printed total',
+      scope: 'General Ledger',
+      projectId,
+      expected: worst.statedClosing,
+      imported: round2(worst.ytd),
+      difference: round2((worst.statedClosing ?? 0) - worst.ytd),
+      status: 'error',
+      severity: 'error',
+      message:
+        `${mismatched.length} of ${stated.length} ledger account(s) do not match the printed total; ` +
+        `the largest gap is on account ${worst.accountCode ?? '—'}. Some postings may not have been read.`,
+      sourceRefIndexes: mismatched
+        .map((r) => r.sourceRefIndex)
+        .filter((i): i is number => i !== undefined),
+    },
+  ];
 }
 
 /**

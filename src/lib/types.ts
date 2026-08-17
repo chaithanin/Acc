@@ -103,6 +103,13 @@ export interface WipRecord extends NormalizedBase {
   currentPeriod: number;
   ytd: number;
   advancePayment: number;
+  /**
+   * Closing balance as printed by the source system (a ledger's "Total A/C" or
+   * "Grand Total" footer). Never used as the value — it exists so
+   * reconciliation can check our own arithmetic against the accounting
+   * system's, which is the strongest correctness signal available.
+   */
+  statedClosing: number | null;
 }
 
 export interface CashflowRecord extends NormalizedBase {
@@ -249,7 +256,8 @@ export interface Metric {
   label: string;
   section: MetricSection;
   value: number | null;
-  unit: 'THB' | 'PERCENT' | 'COUNT';
+  /** RATIO renders as "1.42×"; PERCENT as "13.3%"; COUNT unformatted. */
+  unit: 'THB' | 'PERCENT' | 'COUNT' | 'RATIO';
   formula: string;
   inputs: MetricInput[];
   /** Source references backing this figure, as indexes into the import's list. */

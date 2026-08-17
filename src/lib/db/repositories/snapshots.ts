@@ -336,6 +336,7 @@ export function loadDataset(
       projectId: row.project_id, projectLabel: null,
       accountCode: row.account_code, accountName: row.account_name,
       currentPeriod: row.current_period, ytd: row.ytd, advancePayment: row.advance_payment,
+      statedClosing: row.stated_closing ?? null,
     });
   }
 

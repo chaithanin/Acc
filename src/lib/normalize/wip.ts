@@ -38,6 +38,9 @@ export function normalizeWip(ctx: NormalizeContext): WipRecord[] {
       currentPeriod: current ?? fallback ?? 0,
       ytd: ytd ?? 0,
       advancePayment: advance ?? 0,
+      // A tabular WIP sheet states each account directly, so there is no
+      // separate printed total to reconcile against.
+      statedClosing: null,
     });
   }
 

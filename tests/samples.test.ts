@@ -5,8 +5,11 @@ import path from 'node:path';
 import { describe, it, before } from 'node:test';
 
 import { DEFAULT_PROJECTS } from '@/config/projects.default';
+import { calculateMetrics } from '@/lib/calc/kpi';
+import { indexSourceRefs } from '@/lib/calc/aggregate';
 import { ProjectResolver } from '@/lib/detect/project-resolver';
 import { processFile, type ParsedFileResult } from '@/lib/import/pipeline';
+import { runValidations } from '@/lib/validate/rules';
 
 /**
  * End-to-end coverage against the real exports from the accounting system.
@@ -57,6 +60,9 @@ describe('real GL exports', { skip: available.length === 0 && 'samples/ not pres
         },
         { resolver, templates: [], defaultReportDate: '2026-08-31' },
       );
+      // The pipeline leaves indexing to the persistence step; the calculation
+      // engine expects it, so do it here as the import would.
+      indexSourceRefs(result.data);
       parsed.set(fileName, result);
     }
   });
@@ -135,6 +141,30 @@ describe('real GL exports', { skip: available.length === 0 && 'samples/ not pres
         Math.abs(total - expectedClosing[key]) < 1,
         `${fileName}: computed closing ${total} should match the Grand Total ${expectedClosing[key]}`,
       );
+    }
+  });
+
+  it('reconciles our arithmetic against the printed footer, and says so', () => {
+    // The strongest available check: the accounting system independently
+    // prints the closing balance, so this rule catches a misread ledger.
+    for (const [fileName, result] of parsed) {
+      const calc = calculateMetrics(result.data, result.reportDate);
+      const rule = runValidations(result.data, calc, null).find((r) => r.ruleKey === 'ledger_footer');
+
+      assert.ok(rule, `${fileName} should run the ledger footer rule`);
+      assert.equal(rule.status, 'pass', `${fileName}: ${rule.message}`);
+    }
+  });
+
+  it('captures the printed total separately from the computed one', () => {
+    for (const [fileName, result] of parsed) {
+      for (const account of result.data.wip) {
+        assert.notEqual(
+          account.statedClosing,
+          null,
+          `${fileName}: the printed Grand Total should have been captured`,
+        );
+      }
     }
   });
 

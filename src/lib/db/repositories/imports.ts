@@ -399,12 +399,12 @@ function persistRecords(
   const wip = db.prepare(
     `INSERT INTO wip_records
        (id, snapshot_id, import_id, project_id, report_date, account_code, account_name,
-        current_period, ytd, advance_payment, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        current_period, ytd, advance_payment, stated_closing, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.wip) {
     wip.run(newId(), snapshotId, importId, r.projectId, reportDate, r.accountCode, r.accountName,
-      r.currentPeriod, r.ytd, r.advancePayment, refIdOf(r.sourceRefIndex));
+      r.currentPeriod, r.ytd, r.advancePayment, r.statedClosing, refIdOf(r.sourceRefIndex));
     count += 1;
   }
 

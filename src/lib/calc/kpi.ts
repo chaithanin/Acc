@@ -462,9 +462,151 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
     }),
   );
 
+  // ------------------------------------------------- income statement (P&L)
+  // Direct costs. For a developer these are the construction inputs; anything
+  // else is an operating cost.
+  const directCost = sumBy(
+    data.expense.filter((r) => DIRECT_COST_CATEGORIES.has(r.category)),
+    (r) => r.amount,
+  );
+  const taxes = sumBy(data.expense.filter((r) => r.category === 'tax'), (r) => r.amount);
+
+  const totalIncome = totalContractual.value;
+  const cogs = directCost.value;
+  const grossProfit = round2(totalIncome - cogs);
+  // Taxes are excluded here so they are not counted twice: the statement
+  // subtracts them once, below operating profit.
+  const operatingExpenses = round2(expenseTotal.value - cogs - taxes.value);
+  const operatingProfit = round2(grossProfit - operatingExpenses);
+  const netProfit = round2(operatingProfit - taxes.value);
+  const netProfitMargin = totalIncome === 0 ? null : round2((netProfit / totalIncome) * 100);
+
+  metrics.push(
+    metric({
+      key: 'cost_of_goods_sold',
+      label: 'Cost of Goods Sold',
+      section: 'expense',
+      value: cogs,
+      formula: 'SUM(construction, contractor and material expense)',
+      inputs: [input('Direct cost', directCost)],
+      refIndexes: directCost.refIndexes,
+    }),
+    metric({
+      key: 'gross_profit',
+      label: 'Gross Profit',
+      section: 'position',
+      value: grossProfit,
+      formula: 'Total Income − Cost of Goods Sold',
+      inputs: [plain('Total Income', totalIncome), plain('Cost of Goods Sold', cogs)],
+      refIndexes: [...totalContractual.refIndexes, ...directCost.refIndexes],
+    }),
+    metric({
+      key: 'operating_expenses',
+      label: 'Total Operating Expenses',
+      section: 'expense',
+      value: operatingExpenses,
+      formula: 'Total Expense − Cost of Goods Sold − Taxes',
+      inputs: [
+        input('Total Expense', expenseTotal),
+        plain('Cost of Goods Sold', cogs),
+        input('Taxes', taxes),
+      ],
+      refIndexes: expenseTotal.refIndexes,
+    }),
+    metric({
+      key: 'operating_profit',
+      label: 'Operating Profit (EBIT)',
+      section: 'position',
+      value: operatingProfit,
+      formula: 'Gross Profit − Total Operating Expenses',
+      inputs: [plain('Gross Profit', grossProfit), plain('Operating Expenses', operatingExpenses)],
+      refIndexes: [...totalContractual.refIndexes, ...expenseTotal.refIndexes],
+    }),
+    metric({
+      key: 'taxes',
+      label: 'Taxes',
+      section: 'expense',
+      value: taxes.value,
+      formula: 'SUM(expense recorded against the tax category)',
+      inputs: [input('Tax expense', taxes)],
+      refIndexes: taxes.refIndexes,
+    }),
+    metric({
+      key: 'net_profit',
+      label: 'Net Profit',
+      section: 'position',
+      value: netProfit,
+      formula: 'Operating Profit (EBIT) − Taxes',
+      inputs: [plain('Operating Profit', operatingProfit), input('Taxes', taxes)],
+      refIndexes: [...totalContractual.refIndexes, ...expenseTotal.refIndexes],
+    }),
+    metric({
+      key: 'net_profit_margin',
+      label: 'Net Profit Margin',
+      section: 'position',
+      value: netProfitMargin,
+      unit: 'PERCENT',
+      formula:
+        totalIncome === 0
+          ? 'Not calculable — total income is zero'
+          : '(Net Profit ÷ Total Income) × 100',
+      inputs: [plain('Net Profit', netProfit), plain('Total Income', totalIncome)],
+      refIndexes: totalContractual.refIndexes,
+    }),
+  );
+
+  // ------------------------------------------------------------ liquidity
+  // Both ratios are undefined without payables to divide by, so they report
+  // null rather than infinity.
+  const payables = outstandingExpense;
+  const quickAssets = round2(availableCash + totalReceivableOutstanding);
+  const currentAssets = round2(quickAssets + advanceOutstanding.value + wipYtd.value);
+
+  metrics.push(
+    metric({
+      key: 'quick_ratio',
+      label: 'Quick Ratio',
+      section: 'position',
+      value: payables === 0 ? null : round2(quickAssets / payables),
+      unit: 'RATIO',
+      formula:
+        payables === 0
+          ? 'Not calculable — there are no payables to divide by'
+          : '(Available Cash + Accounts Receivable) ÷ Accounts Payable',
+      inputs: [
+        plain('Available Cash', availableCash),
+        plain('Accounts Receivable', totalReceivableOutstanding),
+        plain('Accounts Payable', payables),
+      ],
+      refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
+    }),
+    metric({
+      key: 'current_ratio',
+      label: 'Current Ratio',
+      section: 'position',
+      value: payables === 0 ? null : round2(currentAssets / payables),
+      unit: 'RATIO',
+      formula:
+        payables === 0
+          ? 'Not calculable — there are no payables to divide by'
+          : '(Available Cash + Accounts Receivable + Advances + Work In Progress) ÷ Accounts Payable',
+      inputs: [
+        plain('Available Cash', availableCash),
+        plain('Accounts Receivable', totalReceivableOutstanding),
+        plain('Advances & Deposits', advanceOutstanding.value),
+        plain('Work In Progress', wipYtd.value),
+        plain('Accounts Payable', payables),
+      ],
+      refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
+    }),
+  );
+
   const byKey = new Map(metrics.map((m) => [m.key, m]));
   return { metrics, byKey, projection };
 }
+
+/** Expense categories treated as direct cost of sales. */
+const DIRECT_COST_CATEGORIES = new Set(['construction', 'contractor', 'material']);
 
 /** Renders a metric's inputs as the literal arithmetic behind it. */
 export function renderCalculation(m: Metric): string {

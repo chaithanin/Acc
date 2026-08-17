@@ -6,7 +6,8 @@ import { projectCashflow } from '@/lib/calc/cashflow';
 import { calculateMetrics } from '@/lib/calc/kpi';
 import { compareMetrics, percentChange, sentimentOf } from '@/lib/compare';
 import { parseDateText, parseNumeric, normalizeYear, endOfMonth } from '@/lib/excel/cells';
-import { formatTHB, formatDelta, formatPercent, formatCompactTHB } from '@/lib/format/number';
+import { formatTHB, formatDelta, formatPercent, formatCompactTHB, formatByUnit } from '@/lib/format/number';
+import { utilisation } from '@/lib/db/repositories/budgets';
 import { runValidations } from '@/lib/validate/rules';
 import { emptyDataset, type NormalizedDataset, type SourceRef } from '@/lib/types';
 
@@ -224,6 +225,121 @@ describe('cash flow projection', () => {
     assert.equal(projection.months.length, 1);
     assert.equal(projection.months[0].closingCash, -2_000_000);
     assert.equal(projection.requiredFunding, 2_000_000);
+  });
+});
+
+describe('income statement and liquidity', () => {
+  const data = dataset({
+    receivable: [
+      { kind: 'receivable', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'contract', customer: 'A', unit: null,
+        contractualAmount: 10_000_000, receiveAmount: 6_000_000, accrueAmount: 4_000_000, dueDate: null },
+    ],
+    expense: [
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'construction', description: 'Structure', month: '2026-08',
+        amount: 4_000_000, paidAmount: 4_000_000, pendingAmount: 0, isForecast: false },
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'marketing', description: 'Launch', month: '2026-08',
+        amount: 1_000_000, paidAmount: 1_000_000, pendingAmount: 0, isForecast: false },
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'tax', description: 'SBT', month: '2026-08',
+        amount: 500_000, paidAmount: 0, pendingAmount: 500_000, isForecast: false },
+    ],
+    bank: [
+      { kind: 'bank', sourceRef: REF, projectId: null, projectLabel: null,
+        bankName: 'SCB', accountNo: null, currentAmount: 3_000_000, pendingExpense: 0 },
+    ],
+  });
+
+  const { byKey } = calculateMetrics(data, REPORT_DATE);
+
+  it('treats construction, contractor and material as cost of goods sold', () => {
+    assert.equal(byKey.get('cost_of_goods_sold')?.value, 4_000_000);
+  });
+
+  it('computes gross profit as income less direct cost', () => {
+    assert.equal(byKey.get('gross_profit')?.value, 6_000_000);
+  });
+
+  it('excludes tax from operating expenses so it is deducted only once', () => {
+    // 5.5M total expense − 4M COGS − 0.5M tax
+    assert.equal(byKey.get('operating_expenses')?.value, 1_000_000);
+    assert.equal(byKey.get('taxes')?.value, 500_000);
+  });
+
+  it('reconciles the statement: net profit equals income minus total expense', () => {
+    const income = byKey.get('total_contractual_income')!.value!;
+    const totalExpense = byKey.get('total_expense')!.value!;
+    assert.equal(byKey.get('operating_profit')?.value, 5_000_000);
+    assert.equal(byKey.get('net_profit')?.value, 4_500_000);
+    assert.equal(byKey.get('net_profit')?.value, income - totalExpense);
+  });
+
+  it('expresses net profit margin as a percentage of income', () => {
+    assert.equal(byKey.get('net_profit_margin')?.value, 45);
+    assert.equal(byKey.get('net_profit_margin')?.unit, 'PERCENT');
+  });
+
+  it('computes the liquidity ratios against payables', () => {
+    // The unpaid tax is pending, so it both reduces available cash and forms
+    // the payable: cash 3.0M − 0.5M = 2.5M; payables = 0.5M.
+    assert.equal(byKey.get('available_cash')?.value, 2_500_000);
+    assert.equal(byKey.get('total_outstanding_expense')?.value, 500_000);
+    // Quick = (2.5M available + 4.0M receivable outstanding) ÷ 0.5M
+    assert.equal(byKey.get('quick_ratio')?.value, 13);
+    assert.equal(byKey.get('quick_ratio')?.unit, 'RATIO');
+  });
+
+  it('reports a ratio as not calculable rather than dividing by zero', () => {
+    const noPayables = dataset({
+      bank: [{ kind: 'bank', sourceRef: REF, projectId: null, projectLabel: null,
+        bankName: null, accountNo: null, currentAmount: 1_000_000, pendingExpense: 0 }],
+    });
+    const result = calculateMetrics(noPayables, REPORT_DATE);
+    assert.equal(result.byKey.get('quick_ratio')?.value, null);
+    assert.equal(result.byKey.get('current_ratio')?.value, null);
+  });
+
+  it('reports a margin as not calculable when there is no income', () => {
+    const noIncome = dataset({
+      expense: [{ kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'marketing', description: null, month: null,
+        amount: 1_000, paidAmount: 1_000, pendingAmount: 0, isForecast: false }],
+    });
+    assert.equal(calculateMetrics(noIncome, REPORT_DATE).byKey.get('net_profit_margin')?.value, null);
+  });
+});
+
+describe('budget utilisation', () => {
+  it('returns no percentage when no budget has been entered', () => {
+    const result = utilisation(null, 500);
+    assert.equal(result.percent, null);
+    assert.equal(result.balance, null);
+  });
+
+  it('computes utilisation and the remaining balance', () => {
+    const result = utilisation(5000, 4719);
+    assert.equal(result.percent, 94.4);
+    assert.equal(result.balance, 281);
+  });
+
+  it('reports an overspend as a negative balance', () => {
+    assert.equal(utilisation(3500, 3730).balance, -230);
+  });
+
+  it('avoids dividing by a zero budget', () => {
+    assert.equal(utilisation(0, 100).percent, null);
+  });
+});
+
+describe('unit-aware formatting', () => {
+  it('formats each metric according to its own unit', () => {
+    assert.equal(formatByUnit(13.3, 'PERCENT'), '13.3%');
+    assert.equal(formatByUnit(1.42, 'RATIO'), '1.42×');
+    assert.equal(formatByUnit(null, 'RATIO'), 'N/A');
+    assert.equal(formatByUnit(537, 'COUNT'), '537');
+    assert.equal(formatByUnit(4_719_000, 'THB'), '฿4.72M');
   });
 });
 

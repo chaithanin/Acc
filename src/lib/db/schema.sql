@@ -277,6 +277,9 @@ CREATE TABLE IF NOT EXISTS wip_records (
   current_period  NUMERIC NOT NULL DEFAULT 0,
   ytd             NUMERIC NOT NULL DEFAULT 0,
   advance_payment NUMERIC NOT NULL DEFAULT 0,
+  /* Closing balance printed by the source system, kept only so reconciliation
+     can compare it with our own recomputed figure. */
+  stated_closing  NUMERIC,
   source_ref_id   TEXT REFERENCES source_references(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_wip_snapshot ON wip_records(snapshot_id, project_id);
@@ -417,6 +420,23 @@ CREATE TABLE IF NOT EXISTS import_previews (
   expires_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_previews_expiry ON import_previews(expires_at);
+
+-- Budget figures entered by Finance. There is no budget in the source
+-- workbooks, so the budget-utilisation dials read from here; without a row the
+-- dials say so rather than inventing a denominator.
+CREATE TABLE IF NOT EXISTS budgets (
+  id             TEXT PRIMARY KEY,
+  /* YYYY-MM. NULL project_id means the group-wide budget. */
+  month          TEXT NOT NULL,
+  project_id     TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  income_budget  NUMERIC,
+  expense_budget NUMERIC,
+  created_by     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_period
+  ON budgets(month, IFNULL(project_id, ''));
 
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,

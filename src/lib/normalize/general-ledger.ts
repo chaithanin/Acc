@@ -67,7 +67,13 @@ export function normalizeGeneralLedger(ctx: NormalizeContext): GlResult {
       continue;
     }
 
-    if (TOTAL_ROW.test(firstText)) continue;
+    // The footer states the accounting system's own closing balance. It is
+    // captured for reconciliation but never imported as a transaction.
+    if (TOTAL_ROW.test(firstText)) {
+      const stated = row.num('balance');
+      if (stated !== null) accumulatorFor(accumulators, account).statedClosing = stated;
+      continue;
+    }
     if (MONTH_SUMMARY.test(firstText)) continue;
 
     const debit = row.amount('debit');
@@ -87,7 +93,6 @@ export function normalizeGeneralLedger(ctx: NormalizeContext): GlResult {
 
     if (isOpening) {
       accumulator.opening = balance ?? debit - credit;
-      accumulator.openingRefIndexHint = row.rowIndex;
     } else {
       accumulator.debit += debit;
       accumulator.credit += credit;
@@ -130,6 +135,7 @@ export function normalizeGeneralLedger(ctx: NormalizeContext): GlResult {
     // These ledgers are advance/deposit accounts, so the balance IS the
     // outstanding advance still to be cleared.
     advancePayment: round2(acc.closing ?? acc.opening + acc.debit - acc.credit),
+    statedClosing: acc.statedClosing,
   }));
 
   return { entries, accounts };
@@ -144,9 +150,11 @@ interface AccountAccumulator extends AccountRef {
   opening: number;
   debit: number;
   credit: number;
+  /** Running balance from the last posting read. */
   closing: number | null;
+  /** Balance printed on the account's Total / Grand Total footer. */
+  statedClosing: number | null;
   lastRow: number;
-  openingRefIndexHint: number | null;
 }
 
 function accumulatorFor(
@@ -163,8 +171,8 @@ function accumulatorFor(
       debit: 0,
       credit: 0,
       closing: null,
+      statedClosing: null,
       lastRow: 0,
-      openingRefIndexHint: null,
     };
     map.set(key, acc);
   }
