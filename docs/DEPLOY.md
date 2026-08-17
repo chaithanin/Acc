@@ -140,16 +140,36 @@ reason the container caps the parser at a 320 MB heap
 
 ## First sign-in
 
-The first start creates an administrator account and prints the password to the
-container log **once**:
+The most reliable option is to choose the password yourself, by setting
+`GTG_ADMIN_EMAIL` and `GTG_ADMIN_PASSWORD` before the first deploy. Nothing is
+generated and nothing can be missed.
+
+Otherwise the first start generates one and shows it in two places: on the
+sign-in page, and in the container log.
 
 ```bash
 gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
-  --command 'sudo docker logs gtg-app-1 | head -40'
+  --command 'sudo docker logs gtg-app-1 2>&1 | grep "\[gtg\]"'
 ```
 
-Set your own instead by exporting `GTG_ADMIN_EMAIL` and `GTG_ADMIN_PASSWORD`
-before deploying. Change it after first sign-in either way.
+It is shown once either way. Change it after signing in.
+
+Note that whatever hits `/login` first is what consumes it — including a health
+check or a smoke test, not necessarily a person. That is exactly why it also
+goes to the log.
+
+### If the password was lost
+
+Passwords are stored only as scrypt hashes, so a lost one cannot be recovered,
+only replaced. The image carries a tool for it:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command \
+  "sudo docker exec gtg-app-1 node scripts/reset-admin.mjs you@example.com 'a new password'"
+```
+
+It resets that account, creates it if the email is unknown, ensures it is an
+active admin, and revokes every existing session.
 
 ---
 

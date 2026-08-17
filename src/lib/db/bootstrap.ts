@@ -69,9 +69,23 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
 
   if (countUsers() === 0) {
     const email = process.env.GTG_ADMIN_EMAIL ?? 'admin@globaltopgroup.local';
-    const password = options.adminPassword ?? process.env.GTG_ADMIN_PASSWORD ?? generatePassword();
+    const supplied = options.adminPassword ?? process.env.GTG_ADMIN_PASSWORD;
+    const password = supplied ?? generatePassword();
     createUser({ email, name: 'Administrator', password, role: 'admin' });
     result.createdAdmin = { email, password };
+
+    // Also written to the server log. The sign-in page shows this once, but
+    // whoever triggers that first render may be a health check rather than a
+    // person — in which case the only copy of the password would be discarded.
+    // Nothing is logged when the password was supplied, since it is already known.
+    if (!supplied) {
+      console.warn(
+        `\n[gtg] Created the first administrator account.\n` +
+          `[gtg]   email:    ${email}\n` +
+          `[gtg]   password: ${password}\n` +
+          `[gtg] Shown once. Sign in and change it, or set GTG_ADMIN_PASSWORD to choose your own.\n`,
+      );
+    }
   }
 
   return result;
