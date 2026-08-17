@@ -184,8 +184,26 @@ file while the app is running.
 ## Verified, and not
 
 The container definition, the build configuration and both scripts are written
-and syntax-checked, and the production build has been verified to produce a
-working standalone bundle with `schema.sql` and the parsing worker in place.
+and syntax-checked. The runtime layer was then reproduced locally — the exact
+set of files the Dockerfile copies into the runtime stage — and booted:
+`/api/health` returns ok, the sign-in page renders, and the parsing worker
+reads one of the real GL workbooks end to end.
+
+That rehearsal caught three defects that would each have surfaced only after a
+deploy:
+
+* the Dockerfile copied `bindings` and `file-uri-to-path`, which
+  `better-sqlite3` v13 does not use and which are not installed — the image
+  build would have failed outright;
+* `xlsx` was absent from the image. The parser runs in a plain `.mjs` worker
+  outside Next's build graph, so tracing never saw it and every workbook
+  import would have failed at runtime while the rest of the app looked fine;
+* `xlsx` pulls eight transitive packages that had to come with it.
+
+The image now self-checks at build time: it loads `xlsx`, opens a SQLite
+database through the native binding, and asserts both runtime-read files are
+present. A regression fails the build in seconds instead of producing a
+crash-looping container.
 
 The deployment itself has **not** been executed: this environment has no
 `gcloud`, no Google Cloud credentials and no Docker daemon, so the image has
