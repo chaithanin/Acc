@@ -125,6 +125,7 @@ gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
 | Static IP `gtg-financial-ip` | the address `acc.chaithanin.com` points at; survives a stop/start |
 | Artifact Registry repo `gtg` | holds the container image |
 | Cloud Build job | builds the image — an e2-micro cannot run `next build` in 1 GB |
+| (or a local Docker build) | `--local-build` builds in Cloud Shell instead, for projects where Cloud Build permission is unavailable |
 | Persistent disk `gtg-financial-data` (20 GB) | the database and every uploaded original, at `/mnt/data` |
 | VM `gtg-financial` (`e2-micro`, Debian 12) | runs the app and Caddy under Docker |
 | Firewall rule `gtg-allow-web` | 80 for the ACME challenge, 443 for the app |
@@ -149,6 +150,40 @@ gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
 
 Set your own instead by exporting `GTG_ADMIN_EMAIL` and `GTG_ADMIN_PASSWORD`
 before deploying. Change it after first sign-in either way.
+
+---
+
+## If Cloud Build refuses the submission
+
+`gcloud builds submit` failing with `PERMISSION_DENIED: The caller does not
+have permission` is about the *caller's* IAM, not the project's setup. Check
+what you hold:
+
+```bash
+gcloud projects get-iam-policy account-505805 \
+  --flatten='bindings[].members' \
+  --filter="bindings.members:$(gcloud config get-value account)" \
+  --format='table(bindings.role)'
+```
+
+An Owner can grant the role directly:
+
+```bash
+gcloud projects add-iam-policy-binding account-505805 \
+  --member="user:$(gcloud config get-value account)" \
+  --role=roles/cloudbuild.builds.editor
+```
+
+Otherwise skip Cloud Build altogether — Cloud Shell has its own Docker daemon,
+and the image is identical either way:
+
+```bash
+./deploy/deploy.sh --local-build
+```
+
+The build takes a few minutes longer on a Cloud Shell VM than on a Cloud Build
+worker, and Cloud Shell's disk is small enough that `docker image prune -f` is
+worth running afterwards.
 
 ---
 

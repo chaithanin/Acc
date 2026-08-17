@@ -28,14 +28,21 @@ DOMAIN="${GTG_DOMAIN:-acc.chaithanin.com}"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE_NAME}:latest"
 UPDATE_ONLY=false
 IP_ONLY=false
-case "${1:-}" in
-  --update) UPDATE_ONLY=true ;;
-  # Reserves the address and prints it, so the DNS record can be created and
-  # allowed to propagate before anything else is built.
-  --reserve-ip) IP_ONLY=true ;;
-  '') ;;
-  *) echo "Usage: $0 [--reserve-ip | --update]" >&2; exit 1 ;;
-esac
+# Cloud Build is the default because it needs nothing installed locally. On a
+# project where the caller lacks Cloud Build permission, --local-build does the
+# same work with the Docker daemon that Cloud Shell already provides.
+BUILD_MODE="${GTG_BUILD:-cloudbuild}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --update) UPDATE_ONLY=true ;;
+    # Reserves the address and prints it, so the DNS record can be created and
+    # allowed to propagate before anything else is built.
+    --reserve-ip) IP_ONLY=true ;;
+    --local-build) BUILD_MODE=local ;;
+    *) echo "Usage: $0 [--reserve-ip] [--update] [--local-build]" >&2; exit 1 ;;
+  esac
+done
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -80,12 +87,49 @@ gcloud artifacts repositories describe "$REPO" --location="$REGION" >/dev/null 2
     --description="Global Top Group financial dashboard" \
     --quiet
 
-say "Building the image with Cloud Build"
-# Built remotely: an e2-micro cannot complete `next build` in 1 GB of RAM.
-gcloud builds submit \
-  --config deploy/cloudbuild.yaml \
-  --substitutions="_REGION=${REGION},_REPO=${REPO},_IMAGE=${IMAGE_NAME}" \
-  --quiet
+# Built away from the VM either way: an e2-micro cannot complete `next build`
+# in 1 GB of RAM.
+if [[ "$BUILD_MODE" == "local" ]]; then
+  say "Building the image locally with Docker"
+
+  if ! docker info >/dev/null 2>&1; then
+    echo "No Docker daemon is reachable. Run this from Cloud Shell, or drop --local-build." >&2
+    exit 1
+  fi
+
+  gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+  docker build -t "$IMAGE" .
+  docker push "$IMAGE"
+else
+  say "Building the image with Cloud Build"
+  if ! gcloud builds submit \
+      --config deploy/cloudbuild.yaml \
+      --substitutions="_REGION=${REGION},_REPO=${REPO},_IMAGE=${IMAGE_NAME}" \
+      --quiet; then
+    cat >&2 <<'MSG'
+
+Cloud Build refused the submission. That is almost always the caller's IAM
+rather than anything about this project's setup. Check which roles you hold:
+
+  gcloud projects get-iam-policy "$(gcloud config get-value project)" \
+    --flatten='bindings[].members' \
+    --filter="bindings.members:$(gcloud config get-value account)" \
+    --format='table(bindings.role)'
+
+Grant yourself the build role if you are an Owner:
+
+  gcloud projects add-iam-policy-binding "$(gcloud config get-value project)" \
+    --member="user:$(gcloud config get-value account)" \
+    --role=roles/cloudbuild.builds.editor
+
+Or skip Cloud Build entirely — Cloud Shell has a Docker daemon:
+
+  ./deploy/deploy.sh --local-build
+
+MSG
+    exit 1
+  fi
+fi
 
 if [[ "$UPDATE_ONLY" == false ]]; then
   say "Reserving a static external IP"
