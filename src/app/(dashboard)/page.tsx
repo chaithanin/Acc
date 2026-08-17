@@ -12,7 +12,7 @@ export default async function OverviewPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const headline = pickMetrics(context, [
     'bank_current_amount',

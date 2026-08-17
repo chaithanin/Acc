@@ -34,21 +34,60 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL,
+  -- Which company this session is working in. Held server-side rather than in
+  -- the cookie or the browser, so the scope of every query is decided by
+  -- something the user cannot edit.
+  active_company_id TEXT REFERENCES companies(id),
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 
 -- ------------------------------------------------------------------ projects
+-- ----------------------------------------------------------------- companies
+-- A company owns projects; a project owns financial data. The two are separate
+-- columns everywhere and never collapsed into one field, because a company
+-- with two projects and a project that moves between companies both have to be
+-- expressible.
+CREATE TABLE IF NOT EXISTS companies (
+  id           TEXT PRIMARY KEY,
+  company_code TEXT NOT NULL UNIQUE,
+  legal_name   TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  logo         TEXT,
+  sort_order   INTEGER NOT NULL DEFAULT 100,
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+
+-- Which companies a user may see. Absence of a row is absence of access: the
+-- selection screen lists what is granted here and nothing else, and every
+-- company-scoped query is checked against it on the server. A user with no
+-- rows sees no companies rather than all of them.
+CREATE TABLE IF NOT EXISTS user_companies (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_companies_user ON user_companies(user_id);
+
 CREATE TABLE IF NOT EXISTS projects (
   id         TEXT PRIMARY KEY,
   code       TEXT NOT NULL UNIQUE,
   name       TEXT NOT NULL,
   company    TEXT,
+  company_id TEXT REFERENCES companies(id),
   sort_order INTEGER NOT NULL DEFAULT 100,
   active     INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- The index on company_id is created by the migration step, not here. On a
+-- database that already has a projects table, CREATE TABLE IF NOT EXISTS is a
+-- no-op and the column arrives via ALTER — so an index named here would run
+-- against a column that does not exist yet and fail the whole schema.
 
 -- Alias table is what keeps project naming out of the code (requirement 2).
 CREATE TABLE IF NOT EXISTS project_aliases (

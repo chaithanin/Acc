@@ -14,7 +14,6 @@ export type ComparisonMode = 'previous' | 'period';
 export interface DashboardFilters {
   snapshotId?: string;
   projectId?: string;
-  company?: string;
   compareTo?: string;
 }
 
@@ -24,22 +23,15 @@ export interface DashboardContext {
   snapshot: SnapshotInfo | null;
   previous: SnapshotInfo | null;
   projectId: string | null;
-  company: string | null;
+  /** Display name of the company this page is scoped to. Never null: a
+   *  dashboard without a company does not render. */
+  company: string;
+  companyId: string;
+  companyCode: string;
   /** Every KPI for the current scope, paired with its previous value. */
   comparisons: MetricComparison[];
   byKey: Map<string, MetricComparison>;
   hasData: boolean;
-}
-
-/** Company list for the Company filter, derived from the project registry. */
-export function companiesOf(projects: Project[]): string[] {
-  return [...new Set(projects.map((p) => p.company).filter((c): c is string => !!c))].sort();
-}
-
-/** Projects belonging to a company, used when the Company filter is set. */
-export function projectsForCompany(projects: Project[], company: string | null): Project[] {
-  if (!company) return projects;
-  return projects.filter((p) => p.company === company);
 }
 
 /**

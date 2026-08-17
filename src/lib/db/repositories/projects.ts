@@ -6,6 +6,7 @@ interface ProjectRow {
   id: string;
   code: string;
   name: string;
+  company_id: string | null;
   company: string | null;
   sort_order: number;
   active: number;
@@ -15,7 +16,7 @@ export function listProjects(includeInactive = false): Project[] {
   const db = getDb();
   const rows = db
     .prepare<[], ProjectRow>(
-      `SELECT id, code, name, company, sort_order, active
+      `SELECT id, code, name, company, company_id, sort_order, active
          FROM projects
         ${includeInactive ? '' : 'WHERE active = 1'}
         ORDER BY sort_order, name`,
@@ -40,6 +41,7 @@ export function listProjects(includeInactive = false): Project[] {
     code: row.code,
     name: row.name,
     company: row.company,
+    companyId: row.company_id ?? null,
     sortOrder: row.sort_order,
     active: fromDbBool(row.active),
     aliases: aliases.get(row.id) ?? [],

@@ -22,7 +22,7 @@ export default async function FinancialDashboardPage({
   if (!user) redirect('/login');
 
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const keys = [
     'total_contractual_income',

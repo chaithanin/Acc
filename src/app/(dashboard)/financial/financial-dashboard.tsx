@@ -10,7 +10,7 @@ import { DrilldownTable, type DrilldownResponse } from '@/components/drilldown-t
 import { Modal } from '@/components/ui/controls';
 import { Badge, Card, CardHeader, EmptyState, PageHeader } from '@/components/ui/primitives';
 import type { TARGETS, TARGET_LABELS } from '@/config/targets';
-import { companiesOf, type DashboardContext } from '@/lib/dashboard/types';
+import type { DashboardContext } from '@/lib/dashboard/types';
 import type { MonthPoint } from '@/lib/dashboard/queries';
 import type { BudgetUtilisation } from '@/lib/db/repositories/budgets';
 import { formatByUnit, formatDate, formatMonth, formatTHB, formatPercent } from '@/lib/format/number';
@@ -126,7 +126,6 @@ export function FinancialDashboard({
         projects={context.projects}
         projectId={context.projectId}
         company={context.company}
-        companies={companiesOf(context.projects)}
       />
 
       {/* KPI tiles arranged around the central margin dial. */}

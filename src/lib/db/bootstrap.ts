@@ -1,7 +1,8 @@
 import { DEFAULT_PROJECTS } from '@/config/projects.default';
 import { DEFAULT_TEMPLATES } from '@/config/templates';
 import { normalizeKey } from '@/lib/detect/normalize-text';
-import { getDb } from './index';
+import { backfillCompanies, getDb } from './index';
+import { grantCompany, listAllCompanies } from './repositories/companies';
 import { createProject, listProjects } from './repositories/projects';
 import { createTemplate, listTemplates } from './repositories/templates';
 import { countUsers, createUser } from './repositories/users';
@@ -40,6 +41,12 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
     result.createdProjects += 1;
   }
 
+  // Companies are derived from the projects just seeded. On a fresh database
+  // the migration step runs before any project exists, so this is the call
+  // that actually creates them; on an upgrade it has already happened and this
+  // returns immediately.
+  backfillCompanies();
+
   const projects = listProjects(true);
   const projectByAliasKey = new Map<string, string>();
   for (const project of projects) {
@@ -71,8 +78,13 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
     const email = process.env.GTG_ADMIN_EMAIL ?? 'admin@globaltopgroup.local';
     const supplied = options.adminPassword ?? process.env.GTG_ADMIN_PASSWORD;
     const password = supplied ?? generatePassword();
-    createUser({ email, name: 'Administrator', password, role: 'admin' });
+    const admin = createUser({ email, name: 'Administrator', password, role: 'admin' });
     result.createdAdmin = { email, password };
+
+    // The first administrator is granted every company. Grants are what the
+    // company chooser lists, so without this the only account that exists
+    // would sign in to an empty screen with no way to grant itself anything.
+    for (const company of listAllCompanies()) grantCompany(admin.id, company.id);
 
     // Also written to the server log. The sign-in page shows this once, but
     // whoever triggers that first render may be a health check rather than a

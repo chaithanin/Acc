@@ -53,7 +53,23 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-export function AppShell({ user, children }: { user: User; children: React.ReactNode }) {
+export interface ActiveCompany {
+  id: string;
+  companyCode: string;
+  displayName: string;
+  legalName: string;
+  projectCount: number;
+}
+
+export function AppShell({
+  user,
+  company,
+  children,
+}: {
+  user: User;
+  company: ActiveCompany;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -78,9 +94,11 @@ export function AppShell({ user, children }: { user: User; children: React.React
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold leading-tight text-sidebar-ink">
-              Global Top Group
+              {company.displayName}
             </p>
-            <p className="mt-0.5 text-[11px] text-sidebar-ink-muted">Financial Management</p>
+            <p className="mt-0.5 truncate text-[11px] text-sidebar-ink-muted">
+              {company.companyCode} · Financial Management
+            </p>
           </div>
         </div>
 
@@ -119,6 +137,20 @@ export function AppShell({ user, children }: { user: User; children: React.React
             );
           })}
         </nav>
+
+        {/*
+          Leaving the company is its own action at the foot of the navigation
+          rather than a menu item among the pages, because it changes which
+          data every other link shows.
+        */}
+        <div className="border-t border-sidebar-border px-2 py-3">
+          <Link
+            href="/companies"
+            className="block rounded-md px-2 py-1.5 text-sm text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+          >
+            ⇄ Switch Company
+          </Link>
+        </div>
       </aside>
 
       {mobileOpen ? (
@@ -130,14 +162,22 @@ export function AppShell({ user, children }: { user: User; children: React.React
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar user={user} onMenu={() => setMobileOpen(true)} />
+        <TopBar user={user} company={company} onMenu={() => setMobileOpen(true)} />
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
     </div>
   );
 }
 
-function TopBar({ user, onMenu }: { user: User; onMenu: () => void }) {
+function TopBar({
+  user,
+  company,
+  onMenu,
+}: {
+  user: User;
+  company: ActiveCompany;
+  onMenu: () => void;
+}) {
   return (
     <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-surface/95 px-4 py-2.5 backdrop-blur sm:px-6 lg:px-8">
       <button
@@ -148,6 +188,21 @@ function TopBar({ user, onMenu }: { user: User; onMenu: () => void }) {
       >
         ☰
       </button>
+
+      {/*
+        The company sits in the top bar on every page. Someone reading a figure
+        should never have to work out whose figure it is.
+      */}
+      <Link
+        href="/companies"
+        className="min-w-0 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+        title="Switch company"
+      >
+        <p className="truncate text-xs font-semibold leading-tight text-ink">
+          {company.displayName}
+        </p>
+        <p className="text-[11px] leading-tight text-ink-muted">Switch company ▾</p>
+      </Link>
 
       <div className="ml-auto flex items-center gap-3">
         <ThemeToggle />

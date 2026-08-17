@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { getDb, newId, nowIso } from '@/lib/db';
+import { companyForUser, type Company } from '@/lib/db/repositories/companies';
 import { canSignIn, findUserById, findUserByEmail, verifyPassword } from '@/lib/db/repositories/users';
 import type { Role, User } from '@/lib/types';
 
@@ -56,15 +57,21 @@ export async function signOut(): Promise<void> {
   store.delete(SESSION_COOKIE);
 }
 
-/** Current user, or null when signed out or the session has lapsed. */
-export async function currentUser(): Promise<User | null> {
+interface SessionRow {
+  user_id: string;
+  expires_at: string;
+  active_company_id: string | null;
+}
+
+/** The live session row, or null when signed out, lapsed, or barred. */
+async function currentSession(): Promise<{ id: string; row: SessionRow; user: User } | null> {
   const store = await cookies();
   const sessionId = store.get(SESSION_COOKIE)?.value;
   if (!sessionId) return null;
 
   const row = getDb()
-    .prepare<[string], { user_id: string; expires_at: string }>(
-      'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?',
+    .prepare<[string], SessionRow>(
+      'SELECT user_id, expires_at, active_company_id FROM auth_sessions WHERE id = ?',
     )
     .get(sessionId);
 
@@ -79,7 +86,58 @@ export async function currentUser(): Promise<User | null> {
   // Re-checked on every request rather than only at sign-in, so an account
   // that expires or is disabled mid-session loses access immediately.
   if (!user || !canSignIn(user)) return null;
-  return user;
+
+  return { id: sessionId, row, user };
+}
+
+/** Current user, or null when signed out or the session has lapsed. */
+export async function currentUser(): Promise<User | null> {
+  return (await currentSession())?.user ?? null;
+}
+
+/**
+ * The company this session is working in — re-checked against the user's
+ * grants on every request, not trusted from the session row alone.
+ *
+ * A grant removed while someone is signed in therefore takes effect at once,
+ * and a session row that names a company the user can no longer see resolves
+ * to nothing rather than to that company.
+ */
+export async function activeCompany(): Promise<Company | null> {
+  const session = await currentSession();
+  if (!session?.row.active_company_id) return null;
+  return companyForUser(session.user.id, session.row.active_company_id);
+}
+
+/**
+ * Chooses the company for this session.
+ *
+ * Refuses a company the user has no grant for, so the choice cannot be made by
+ * posting an id — the request names a company, the server decides whether it
+ * is allowed.
+ */
+export async function setActiveCompany(companyId: string): Promise<Company | null> {
+  const session = await currentSession();
+  if (!session) return null;
+
+  const company = companyForUser(session.user.id, companyId);
+  if (!company) return null;
+
+  getDb()
+    .prepare('UPDATE auth_sessions SET active_company_id = ? WHERE id = ?')
+    .run(company.id, session.id);
+
+  return company;
+}
+
+/** Returns to the company chooser without ending the session. */
+export async function clearActiveCompany(): Promise<void> {
+  const session = await currentSession();
+  if (!session) return;
+
+  getDb()
+    .prepare('UPDATE auth_sessions SET active_company_id = NULL WHERE id = ?')
+    .run(session.id);
 }
 
 /**

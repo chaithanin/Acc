@@ -20,7 +20,10 @@ export interface Project {
   id: string;
   code: string;
   name: string;
+  /** Legacy free-text company label, kept while data still carries it. */
   company: string | null;
+  /** The company that owns this project. What every scoped query filters on. */
+  companyId: string | null;
   sortOrder: number;
   active: boolean;
   aliases: string[];

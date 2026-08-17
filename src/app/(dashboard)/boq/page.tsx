@@ -11,7 +11,7 @@ export default async function BoqPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const metrics = pickMetrics(context, [
     'boq_total',

@@ -21,7 +21,7 @@ export default async function ReconciliationPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const validations: ValidationRow[] = context.snapshot
     ? getAllValidations(context.snapshot.id).map((row) => ({

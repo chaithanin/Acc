@@ -17,7 +17,7 @@ export default async function ProjectsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const selected = context.projects.find((p) => p.id === context.projectId) ?? null;
 

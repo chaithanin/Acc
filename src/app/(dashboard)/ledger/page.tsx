@@ -17,7 +17,7 @@ export default async function LedgerPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const context = loadDashboard(params);
+  const context = await loadDashboard(params);
 
   const metrics = pickMetrics(context, ['advance_outstanding', 'wip_ytd', 'gl_entry_count']);
 

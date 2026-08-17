@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { FilterBar } from './filter-bar';
 import { EmptyState, PageHeader } from './ui/primitives';
-import { companiesOf, type DashboardContext } from '@/lib/dashboard/types';
+import type { DashboardContext } from '@/lib/dashboard/types';
 
 /**
  * Common frame for the dashboard pages: heading, global filters, and the
@@ -31,7 +31,6 @@ export function DashboardPage({
         projects={context.projects}
         projectId={context.projectId}
         company={context.company}
-        companies={companiesOf(context.projects)}
       />
 
       {context.snapshot ? (

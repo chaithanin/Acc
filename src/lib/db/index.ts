@@ -54,6 +54,12 @@ function applyMigrations(db: Database.Database): void {
   const columns: { table: string; column: string; definition: string }[] = [
     { table: 'users', column: 'expires_at', definition: 'TEXT' },
     { table: 'wip_records', column: 'stated_closing', definition: 'NUMERIC' },
+    { table: 'projects', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
+    {
+      table: 'auth_sessions',
+      column: 'active_company_id',
+      definition: 'TEXT REFERENCES companies(id)',
+    },
   ];
 
   for (const { table, column, definition } of columns) {
@@ -67,6 +73,88 @@ function applyMigrations(db: Database.Database): void {
 
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+
+  // Indexes on migrated columns belong here rather than in the schema file,
+  // which runs before these columns exist on an upgraded database.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
+
+  backfillCompanies(db);
+}
+
+/**
+ * Turns the old free-text `projects.company` into real company rows.
+ *
+ * Companies used to exist only as a label repeated on each project. A
+ * deployment that already holds a year of data cannot be asked to re-enter
+ * them, so each distinct spelling becomes a company and its projects are
+ * linked to it.
+ *
+ * Everyone who could already sign in is granted every company that results.
+ * The alternative — starting with no grants — would lock every existing user
+ * out of their own data at the moment of upgrade, which is a worse failure
+ * than the permissive default an administrator can narrow afterwards.
+ */
+export function backfillCompanies(db: Database.Database = getDb()): void {
+  const hasCompanies = db
+    .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='companies'")
+    .get();
+  if (!hasCompanies) return;
+
+  const alreadyDone = db.prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM companies').get();
+  if ((alreadyDone?.n ?? 0) > 0) return;
+
+  const labels = db
+    .prepare<[], { company: string }>(
+      "SELECT DISTINCT company FROM projects WHERE company IS NOT NULL AND TRIM(company) <> ''",
+    )
+    .all();
+
+  if (labels.length === 0) return;
+
+  const now = new Date().toISOString();
+
+  db.transaction(() => {
+    for (const [index, { company }] of labels.entries()) {
+      const id = crypto.randomUUID();
+
+      // The old data has no company codes, so one is derived. A Thai company
+      // name yields nothing under this rule, and most of these names are Thai,
+      // so the fallback is the code of a project the company owns — MARINA_VTR
+      // reads as that company far better than COMPANY_4 does. An administrator
+      // can rename it either way.
+      const candidate = company
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 24);
+
+      // A Thai name that happens to contain a digit — "…เรสซิเด้นซ์ 9 จำกัด" —
+      // would otherwise reduce to the code "9". A usable code has a letter in
+      // it and is more than one character; anything else falls through.
+      const fromName = /[A-Z]/.test(candidate) && candidate.length > 1 ? candidate : '';
+
+      const projectCode = db
+        .prepare<[string], { code: string }>(
+          'SELECT code FROM projects WHERE company = ? ORDER BY sort_order, code LIMIT 1',
+        )
+        .get(company)?.code;
+
+      const code = fromName || projectCode?.toUpperCase().slice(0, 24) || `COMPANY_${index + 1}`;
+
+      db.prepare(
+        `INSERT INTO companies
+           (id, company_code, legal_name, display_name, logo, sort_order, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
+      ).run(id, code, company, company, (index + 1) * 10, now, now);
+
+      db.prepare('UPDATE projects SET company_id = ? WHERE company = ?').run(id, company);
+
+      db.prepare(
+        `INSERT OR IGNORE INTO user_companies (id, user_id, company_id, created_at)
+         SELECT lower(hex(randomblob(16))), id, ?, ? FROM users`,
+      ).run(id, now);
+    }
+  })();
 }
 
 /** Runs `fn` inside a transaction; any throw rolls the whole thing back. */

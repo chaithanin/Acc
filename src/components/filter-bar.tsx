@@ -22,15 +22,14 @@ export function FilterBar({
   projects,
   projectId,
   company,
-  companies,
 }: {
   snapshots: SnapshotInfo[];
   snapshot: SnapshotInfo | null;
   previous: SnapshotInfo | null;
   projects: Project[];
   projectId: string | null;
-  company: string | null;
-  companies: string[];
+  /** Display name of the company in session. Shown, never chosen from here. */
+  company: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -42,13 +41,8 @@ export function FilterBar({
     if (value) next.set(key, value);
     else next.delete(key);
 
-    // Changing company invalidates a project selection outside it.
-    if (key === 'company') next.delete('projectId');
-
     startTransition(() => router.push(`${pathname}?${next}`));
   };
-
-  const visibleProjects = company ? projects.filter((p) => p.company === company) : projects;
 
   return (
     <div className="no-print mb-6 flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-border bg-surface px-4 py-3">
@@ -84,22 +78,25 @@ export function FilterBar({
           ))}
       </Select>
 
-      <Select label="Company" value={company ?? ''} onChange={(e) => update('company', e.target.value)}>
-        <option value="">All Companies</option>
-        {companies.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </Select>
+      {/*
+        The company is not a filter. It is chosen once on the selection screen
+        and held server-side, so it is shown here as context rather than as
+        something a dropdown could widen. The projects listed are that
+        company's; there is no option that reaches past it.
+      */}
+      <div className="pb-1.5">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Company</p>
+        <p className="mt-1 text-sm font-medium text-ink">{company}</p>
+      </div>
 
       <Select
         label="Project"
         value={projectId ?? ''}
         onChange={(e) => update('projectId', e.target.value)}
+        disabled={projects.length === 0}
       >
-        <option value="">All Projects</option>
-        {visibleProjects.map((p) => (
+        {projects.length === 0 ? <option value="">No projects</option> : null}
+        {projects.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>

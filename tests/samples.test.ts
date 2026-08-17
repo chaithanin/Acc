@@ -28,6 +28,7 @@ const resolver = new ProjectResolver(
     code: p.code,
     name: p.name,
     company: p.company,
+    companyId: null,
     sortOrder: p.sortOrder,
     active: true,
     aliases: p.aliases,

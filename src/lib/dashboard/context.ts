@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { redirect } from 'next/navigation';
+import { activeCompany } from '@/lib/auth';
 import { compareMetrics } from '@/lib/compare';
 import { listProjects } from '@/lib/db/repositories/projects';
 import {
@@ -22,8 +24,16 @@ import type { DashboardContext, DashboardFilters } from './types';
  * The shapes and pure helpers live in `./types`, which client components can
  * import; this module touches the database and must not.
  */
-export function loadDashboard(filters: DashboardFilters): DashboardContext {
-  const projects = listProjects();
+export async function loadDashboard(filters: DashboardFilters): Promise<DashboardContext> {
+  // The company comes from the session, never from the query string. A page
+  // cannot be pointed at another company by editing a URL, and no caller can
+  // forget to pass it.
+  const company = await activeCompany();
+  if (!company) redirect('/companies');
+
+  // Scoped before anything is read, so a project outside this company is not
+  // available to be selected, summed, or drilled into.
+  const projects = listProjects().filter((p) => p.companyId === company.id);
   const snapshots = listSnapshots();
 
   const snapshot = filters.snapshotId
@@ -36,15 +46,26 @@ export function loadDashboard(filters: DashboardFilters): DashboardContext {
       : getPreviousSnapshot(snapshot.id)
     : null;
 
-  // A project filter naming something that no longer exists is ignored rather
-  // than showing an empty dashboard with no explanation.
-  const projectId =
+  // A project filter naming something outside this company — or nothing at
+  // all — falls back to the company's first project rather than to the
+  // group-wide figures.
+  //
+  // That fallback matters more than it looks. Metrics are stored per project
+  // and once for the whole group; there is no company-level set yet. Showing
+  // the group's numbers under a company's name would be exactly the mixing
+  // this structure exists to prevent, so until company-level metrics are
+  // calculated, an unset project resolves to a real project of this company
+  // and the selector says which.
+  const requested =
     filters.projectId && projects.some((p) => p.id === filters.projectId)
       ? filters.projectId
       : null;
+  const projectId = requested ?? projects[0]?.id ?? null;
 
   let comparisons: MetricComparison[] = [];
-  if (snapshot) {
+  // With no project there is nothing this company can be shown, and the
+  // group-wide set is not a substitute for it.
+  if (snapshot && projectId) {
     const current = getMetrics(snapshot.id, projectId);
     const baseline = previous ? getMetrics(previous.id, projectId) : null;
     comparisons = compareMetrics(current, baseline);
@@ -56,12 +77,14 @@ export function loadDashboard(filters: DashboardFilters): DashboardContext {
     snapshot,
     previous,
     projectId,
-    company: filters.company ?? null,
+    company: company.displayName,
+    companyId: company.id,
+    companyCode: company.companyCode,
     comparisons,
     byKey: new Map(comparisons.map((c) => [c.key, c])),
-    hasData: snapshots.length > 0,
+    hasData: snapshots.length > 0 && projects.length > 0,
   };
 }
 
-export { companiesOf, pickMetrics, projectsForCompany } from './types';
+export { pickMetrics } from './types';
 export type { DashboardContext, DashboardFilters } from './types';
