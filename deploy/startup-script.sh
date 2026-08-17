@@ -40,6 +40,14 @@ mount -a
 
 mkdir -p "$MOUNT/caddy/data" "$MOUNT/caddy/config"
 
+# The app container runs as the unprivileged `node` user, uid 1000. A bind
+# mount takes its ownership from the host, so chowning inside the image has no
+# effect once /mnt/data is mounted over /data — the directory must be owned by
+# that uid on the host side. Caddy runs as root and is unaffected.
+chown 1000:1000 "$MOUNT"
+mkdir -p "$MOUNT/uploads"
+chown -R 1000:1000 "$MOUNT/uploads"
+
 # ----------------------------------------------------------------------- swap
 # An e2-micro has 1 GB of RAM. Swap keeps a large workbook parse from being
 # OOM-killed; it is slow to touch but far better than losing the request.
@@ -66,6 +74,15 @@ set -euo pipefail
 : "${GTG_DOMAIN:?GTG_DOMAIN must be set}"
 
 cd /opt/gtg
+
+# Re-asserted on every deploy so an instance created before this was fixed
+# repairs itself rather than needing manual intervention. uid 1000 is the
+# `node` user the app container runs as; a bind mount ignores whatever the
+# image did, so ownership has to be right on the host.
+mkdir -p /mnt/data/uploads
+chown 1000:1000 /mnt/data
+chown -R 1000:1000 /mnt/data/uploads
+find /mnt/data -maxdepth 1 -name 'gtg-financial.db*' -exec chown 1000:1000 {} +
 
 gcloud auth configure-docker "$(echo "$GTG_IMAGE" | cut -d/ -f1)" --quiet
 docker pull "$GTG_IMAGE"

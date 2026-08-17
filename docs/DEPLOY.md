@@ -153,6 +153,30 @@ before deploying. Change it after first sign-in either way.
 
 ---
 
+## The data volume and the container's user
+
+The app container runs as the unprivileged `node` user, uid 1000. `/data` is a
+bind mount of `/mnt/data` on the host, and **a bind mount takes its ownership
+from the host** — chowning the directory inside the image has no effect once
+the mount covers it. The host directory therefore has to be owned by uid 1000,
+which the VM's startup script and every deploy now assert.
+
+Caddy runs as root and is unaffected either way.
+
+If the health endpoint reports `EACCES: permission denied, mkdir
+'/data/uploads'`, this is the cause. Repair it directly:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a --command '
+  sudo mkdir -p /mnt/data/uploads
+  sudo chown 1000:1000 /mnt/data
+  sudo chown -R 1000:1000 /mnt/data/uploads
+  sudo docker restart gtg-app-1
+'
+```
+
+---
+
 ## Service-account permissions
 
 Two identities need explicit grants beyond what a fresh project gives them, and
