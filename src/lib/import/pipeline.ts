@@ -70,6 +70,16 @@ export interface SheetOverride {
   columns?: { field: CanonicalField; columnIndex: number }[];
   /** Set false to leave a sheet out of the import entirely. */
   include?: boolean;
+  /**
+   * Company this sheet belongs to, when it differs from the file's.
+   *
+   * A cash-flow workbook often carries one sheet per company under names that
+   * say nothing about which — "Cashflow 2026", "Sheet1". Without this the whole
+   * file has to take a single company, and a multi-company workbook can only be
+   * imported by splitting it by hand first. Explicit null means "no company",
+   * which is different from leaving it undefined (inherit the file's).
+   */
+  projectId?: string | null;
 }
 
 export interface FileOverride {
@@ -370,13 +380,26 @@ export async function processFile(
       continue;
     }
 
+    // A sheet may name its own company, which then wins over the file's. Rows
+    // that carry a company of their own still win over both — this only sets
+    // what a row falls back to.
+    const sheetProject =
+      sheetOverride?.projectId === undefined
+        ? null
+        : sheetOverride.projectId
+          ? options.resolver.byId(sheetOverride.projectId) ?? null
+          : null;
+    const sheetProjectChosen = sheetOverride?.projectId !== undefined;
+
     const ctx: NormalizeContext = {
       fileName: file.fileName,
       sheet,
       detection,
       resolver: options.resolver,
-      defaultProjectId: project.projectId,
-      defaultProjectLabel: project.projectName ?? project.matchedAlias,
+      defaultProjectId: sheetProjectChosen ? (sheetProject?.id ?? null) : project.projectId,
+      defaultProjectLabel: sheetProjectChosen
+        ? (sheetProject?.name ?? null)
+        : (project.projectName ?? project.matchedAlias),
       reportDate,
       addIssue: (issue) => issues.push(issue),
     };

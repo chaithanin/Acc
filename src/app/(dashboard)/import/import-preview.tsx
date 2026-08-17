@@ -76,6 +76,23 @@ export function ImportPreview({
     });
   };
 
+  const setSheetProject = (fileName: string, sheetName: string, projectId: string) => {
+    setOverrides((prev) => {
+      const file = prev[fileName] ?? { fileName };
+      const sheets = [...(file.sheets ?? [])];
+      const index = sheets.findIndex((s) => s.sheetName === sheetName);
+      // '' means "follow the file", which is not the same as choosing no
+      // company — the first inherits, the second overrides with nothing.
+      const next = {
+        ...(index >= 0 ? sheets[index] : { sheetName }),
+        projectId: projectId === '' ? undefined : projectId,
+      };
+      if (index >= 0) sheets[index] = next;
+      else sheets.push(next);
+      return { ...prev, [fileName]: { ...file, fileName, sheets } };
+    });
+  };
+
   const unassigned = preview.files.filter(
     (f) => !f.project.projectId && overrides[f.fileName]?.projectId == null,
   );
@@ -287,6 +304,10 @@ export function ImportPreview({
             onIncludeChange={(sheet, include) =>
               setSheetIncluded(inspecting.fileName, sheet, include)
             }
+            projects={preview.projects}
+            onProjectChange={(sheet, projectId) =>
+              setSheetProject(inspecting.fileName, sheet, projectId)
+            }
           />
         ) : null}
       </Modal>
@@ -339,11 +360,15 @@ function SheetList({
   override,
   onTypeChange,
   onIncludeChange,
+  projects,
+  onProjectChange,
 }: {
   file: PreviewFile;
   override: FileOverridePayload | undefined;
   onTypeChange: (sheetName: string, type: ReportType | '') => void;
   onIncludeChange: (sheetName: string, include: boolean) => void;
+  projects: { id: string; name: string }[];
+  onProjectChange: (sheetName: string, projectId: string) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -394,7 +419,25 @@ function SheetList({
                   </option>
                 ))}
               </Select>
+
+              <Select
+                label="Company"
+                value={sheetOverride?.projectId ?? ''}
+                onChange={(e) => onProjectChange(sheet.sheetName, e.target.value)}
+              >
+                <option value="">Same as the file</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
             </div>
+
+            <p className="mt-1.5 text-xs text-ink-muted">
+              Set a company here when one workbook covers several — a cash-flow file with a sheet
+              per company, under names that do not say which.
+            </p>
 
             {sheet.columns.length > 0 ? (
               <div className="mt-3">
