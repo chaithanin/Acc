@@ -56,16 +56,158 @@ const SHAPES = [
   { name: 'POST {service}', method: 'POST', body: { service: '', method: '', data: {} } },
 ];
 
-const results = [];
+if (args.discover) {
+  await discover();
+} else {
+  const results = [];
+  for (const shape of SHAPES) {
+    for (const style of AUTH_STYLES) {
+      results.push(await probe(shape, style));
+    }
+  }
+  report(results);
+}
 
-for (const shape of SHAPES) {
-  for (const style of AUTH_STYLES) {
-    // The no-token control is only worth running once per shape.
-    results.push(await probe(shape, style));
+/**
+ * Finds what routes the service actually has.
+ *
+ * Used when the given URL turns out not to be a route: rather than guess
+ * endpoint names one at a time, this walks the path upwards and asks for the
+ * documentation routes that API frameworks expose by default. One of those, if
+ * it is reachable, names every endpoint and its payload — which is the whole
+ * question answered in a single request.
+ */
+async function discover() {
+  const base = new URL(url);
+  const segments = base.pathname.split('/').filter(Boolean);
+
+  // Every ancestor of the given path, longest first.
+  const ancestors = [];
+  for (let i = segments.length; i >= 0; i -= 1) {
+    ancestors.push(`/${segments.slice(0, i).join('/')}`.replace(/\/+$/, '') || '/');
+  }
+
+  const DOC_ROUTES = [
+    'v3/api-docs',
+    'v2/api-docs',
+    'api-docs',
+    'openapi.json',
+    'swagger.json',
+    'swagger-ui/index.html',
+    'swagger-ui.html',
+    'docs',
+    'health',
+    'actuator/health',
+  ];
+
+  const candidates = new Set(ancestors);
+  for (const ancestor of ancestors) {
+    for (const route of DOC_ROUTES) {
+      candidates.add(`${ancestor === '/' ? '' : ancestor}/${route}`);
+    }
+  }
+
+  console.log(`\nLooking for real routes on ${base.host}  (${candidates.size} paths)\n`);
+
+  const found = [];
+  for (const pathname of candidates) {
+    const target = new URL(base);
+    target.pathname = pathname;
+    const r = await fetchPath(target);
+    if (r.networkError) {
+      console.log(`  —    ${pathname}  ${r.body}`);
+      continue;
+    }
+    const missing = saysNotFound(r);
+    console.log(
+      `  ${String(r.status).padEnd(4)} ${pathname.padEnd(44)} ${missing ? 'not a route' : `${r.contentType.split(';')[0]} ${r.bytes}B`}`,
+    );
+    if (!missing) found.push({ pathname, ...r });
+  }
+
+  // Paths that do not exist cannot all answer identically unless something
+  // other than the service is answering. Without this check a blocking proxy
+  // reads as "every path exists", which is the opposite of the truth.
+  const answered = found.filter((r) => !r.networkError);
+  if (answered.length === candidates.size && answered.length > 1) {
+    const first = answered[0];
+    if (answered.every((r) => r.status === first.status && r.body === first.body)) {
+      console.log(`\nEvery path answered identically (${first.status}), including ones that cannot exist.`);
+      console.log('That is not the service replying — something in between is answering for it:');
+      console.log(`  ${first.body}`);
+      console.log('Nothing about the real routes has been learned. Run this from a machine with');
+      console.log('direct outbound HTTPS.');
+      return;
+    }
+  }
+
+  if (!found.length) {
+    console.log('\nNo route answered with anything but a "not found" page. The service is up but');
+    console.log('none of these paths exist on it, and it publishes no documentation route.');
+    console.log('The endpoint URL needs to come from whoever issued the credential — including');
+    console.log('whether SIT is served on this host at all.');
+    return;
+  }
+
+  console.log('\n--- Routes that exist ---');
+  for (const r of found) {
+    console.log(`\n[${r.status}] ${r.pathname}  (${r.contentType.split(';')[0]}, ${r.bytes} bytes)`);
+    console.log(`  ${r.body.slice(0, 400) || '(empty body)'}`);
+
+    // An OpenAPI document is the jackpot: it lists every endpoint and the shape
+    // of each payload, so it is worth unpacking rather than printing raw.
+    const spec = tryParseSpec(r.raw);
+    if (spec) {
+      const paths = Object.keys(spec.paths ?? {});
+      console.log(`\n  This is an API specification: ${spec.info?.title ?? 'untitled'} — ${paths.length} endpoints`);
+      for (const p of paths.slice(0, 60)) {
+        const methods = Object.keys(spec.paths[p]).join(', ').toUpperCase();
+        console.log(`    ${methods.padEnd(18)} ${p}`);
+      }
+      if (paths.length > 60) console.log(`    … and ${paths.length - 60} more`);
+    }
   }
 }
 
-report(results);
+async function fetchPath(target) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const started = Date.now();
+  try {
+    const res = await fetch(target, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json, */*',
+        'User-Agent': 'gtg-dashboard-probe/1',
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+      redirect: 'manual',
+    });
+    const text = await res.text();
+    return {
+      status: res.status,
+      contentType: res.headers.get('content-type') ?? '',
+      ms: Date.now() - started,
+      body: mask(text.replace(/\s+/g, ' ').trim().slice(0, bodyMax)),
+      raw: text,
+      bytes: text.length,
+    };
+  } catch (err) {
+    return { status: 0, contentType: '', ms: Date.now() - started, body: mask(describeNetworkError(err)), raw: '', bytes: 0, networkError: true };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function tryParseSpec(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && parsed.paths ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 async function probe(shape, style) {
   const target = new URL(url);
@@ -135,6 +277,21 @@ function describeNetworkError(err) {
   return `NETWORK: ${code || err?.message || 'unknown transport failure'}`;
 }
 
+/**
+ * Whether a response is an error page for a route that does not exist.
+ *
+ * Checked on the body rather than the status because gateways routinely serve
+ * their "not found" page with a 200.
+ */
+function saysNotFound(r) {
+  if (!r || r.networkError) return false;
+  if (r.status === 404) return true;
+  // Kept tight: only a short body that is essentially the words themselves, so
+  // a real payload that happens to contain "not found" in a message field is
+  // not mistaken for a missing route.
+  return r.bytes < 2000 && /^\W*(404|not found|404 not found)\b/i.test(r.body);
+}
+
 /** Keeps the credential out of terminal scrollback and pasted output. */
 function mask(text) {
   if (!token) return text;
@@ -180,18 +337,39 @@ function report(rows) {
     console.log(`  ${r.body || '(empty body)'}`);
   }
 
-  const accepted = rows.filter((r) => r.status >= 200 && r.status < 300);
+  // A 2xx is not by itself an acceptance. A gateway that serves an error page
+  // for an unknown path often serves it with status 200, so a body that says
+  // "not found" outranks the status line — otherwise every unknown path reads
+  // as a success and the report sends you off writing an adapter for a route
+  // that does not exist.
+  const accepted = rows.filter((r) => r.status >= 200 && r.status < 300 && !saysNotFound(r));
   const authFailed = rows.filter((r) => r.status === 401 || r.status === 403);
 
   console.log('\n--- Reading this ---');
 
-  // A proxy standing between you and the API answers every attempt the same
-  // way, credential or not. Reporting that as "unauthorised" would send you to
-  // ask for a new token when the network is what is actually refusing.
+  // An intermediary — or a route that never reaches the API — answers every
+  // attempt the same way, credential or not. Reporting that as an
+  // authorisation verdict would send you to ask for a new token when the
+  // token was never looked at.
   const control = rows.find((r) => r.auth === 'none (control)' && r.shape === 'POST {}');
   const sameWithoutToken =
     control && rows.every((r) => r.status === control.status && r.body === control.body);
   const proxyWorded = rows.some((r) => /allowlist|egress|proxy|blocked by|forbidden by policy/i.test(r.body));
+
+  if (sameWithoutToken && saysNotFound(control)) {
+    console.log('The server answered, but this path is not a route on it. Every attempt got the');
+    console.log(`same "not found" page — including the one sending no credential — so the token`);
+    console.log('was never evaluated and nothing here says whether it is valid.');
+    if (control.status >= 200 && control.status < 300) {
+      console.log(`\nNote the status was ${control.status}, not 404: the gateway serves its error page`);
+      console.log('with a success code, so only the body tells you the route is missing.');
+    }
+    console.log('\nFind the real route:');
+    console.log(`  node scripts/api-probe.mjs --url ${mask(url)} --token <token> --discover`);
+    console.log('That walks the path upwards and tries the usual API-documentation routes, which');
+    console.log('name every endpoint this service has if any of them are exposed.');
+    return;
+  }
 
   if (!accepted.length && (proxyWorded || (sameWithoutToken && authFailed.length === rows.length))) {
     console.log('This is not the API answering. Every attempt got the same reply, including the');
