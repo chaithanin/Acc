@@ -187,6 +187,23 @@ worth running afterwards.
 
 ---
 
+## Checking a deployment
+
+```bash
+./deploy/smoke-test.sh
+```
+
+Checks it from outside: DNS resolves, the certificate is present and who
+issued it, `/api/health` reports ok, the sign-in page loads, an anonymous
+request to the dashboard is redirected rather than served, plain HTTP
+redirects to HTTPS, and the security headers are set. Non-zero exit on any
+failure, so it also works in a pipeline.
+
+The redirect check matters most of the six: if `/financial` ever answers 200
+without a session, financial data is being served to anonymous visitors.
+
+---
+
 ## Updating
 
 ```bash
