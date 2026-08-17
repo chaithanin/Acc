@@ -1,0 +1,89 @@
+name: Deploy
+
+# Deploys what is on main. A merged pull request reaches acc.chaithanin.com
+# without anyone opening Cloud Shell.
+#
+# The checks run first and the deploy only starts if they pass, so a failing
+# test stops the release rather than being discovered on the live site. The
+# manual trigger exists for redeploying the same commit after a change made
+# outside the repository — a rotated secret, a resized disk.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Two pushes deploying at once would race over the same VM and registry tag.
+# The later one waits; it does not cancel the earlier, because a half-applied
+# deploy is worse than a slow one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: production
+
+    permissions:
+      # Mints the short-lived token that Google exchanges for credentials.
+      # Without a stored service-account key there is nothing in this
+      # repository worth stealing.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy
+        env:
+          GTG_PROJECT: ${{ vars.GCP_PROJECT }}
+          GTG_REGION: ${{ vars.GCP_REGION }}
+          GTG_DOMAIN: ${{ vars.GTG_DOMAIN }}
+          # gcloud generates an SSH key on first use and would otherwise wait
+          # for a passphrase that no one is there to type.
+          CLOUDSDK_COMPUTE_SSH_GENERATE_KEY: '1'
+        # The same script that a person runs by hand. Keeping one deploy path
+        # means the automated release cannot drift from the manual one, and
+        # --update leaves the VM, the disk and the reserved address alone.
+        #
+        # Built on the runner rather than by Cloud Build: the runner has a
+        # Docker daemon and ample memory, and it saves this identity from
+        # needing build and staging-bucket permissions across the project.
+        run: ./deploy/deploy.sh --update --local-build
+
+      - name: Verify the deployment answers
+        env:
+          GTG_DOMAIN: ${{ vars.GTG_DOMAIN }}
+        # A deploy that finishes without the site coming back is a failure, and
+        # the run should say so rather than turn green on a broken release.
+        run: ./deploy/smoke-test.sh

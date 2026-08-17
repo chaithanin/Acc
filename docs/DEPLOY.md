@@ -306,6 +306,62 @@ safe — every step checks for what it creates.
 
 ---
 
+## Deploying automatically on merge
+
+A merge into `main` deploys to production without anyone opening a terminal.
+Set it up once:
+
+```bash
+./deploy/setup-cicd.sh
+```
+
+Then add the five variables it prints to the repository, under
+Settings → Secrets and variables → Actions → Variables.
+
+### No key is ever created
+
+The deploy identity is borrowed, not stored. GitHub presents a signed token
+saying which repository and workflow is running; Google exchanges it for
+credentials that last minutes. Nothing in the repository is a credential, so
+there is nothing in it worth stealing — which matters more than usual for a
+project whose disk holds client financial data.
+
+The security boundary is one line in the provider, pinning the repository:
+
+```
+--attribute-condition="assertion.repository=='chaithanin/Acc'"
+```
+
+The token issuer is GitHub's own, shared by every repository on the platform.
+Without that condition, any repository anywhere could mint a token for this
+project.
+
+### What the identity may do
+
+Push to the one Artifact Registry repository, reach the one VM through
+Identity-Aware Proxy, and restart the stack. It cannot enable services, create
+instances or read anything else — `--update` skips the first-deployment steps,
+so those permissions are never needed.
+
+### What runs
+
+Types, tests and a production build run first, and the deploy only starts if
+they pass: a failing test stops the release instead of being discovered on the
+live site. Afterwards the smoke test runs against the domain, so a deploy that
+finishes without the site coming back is reported as a failure rather than a
+green tick.
+
+Two merges in quick succession queue rather than race. The second waits, and
+does not cancel the first — a half-applied deploy is worse than a slow one.
+
+### The manual path still works
+
+`./deploy/deploy.sh --update` from a shell does exactly what the workflow does,
+because the workflow runs that same script. Neither path can drift from the
+other, and a broken pipeline never blocks a release.
+
+---
+
 ## Backups
 
 Not automated, deliberately — a backup schedule is a decision about retention,

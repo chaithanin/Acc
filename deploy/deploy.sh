@@ -92,21 +92,27 @@ MSG
   exit 0
 fi
 
-say "Enabling the APIs this deployment uses"
-gcloud services enable \
-  compute.googleapis.com \
-  artifactregistry.googleapis.com \
-  cloudbuild.googleapis.com \
-  iap.googleapis.com \
-  --quiet
-
-say "Ensuring the Artifact Registry repository exists"
-gcloud artifacts repositories describe "$REPO" --location="$REGION" >/dev/null 2>&1 || \
-  gcloud artifacts repositories create "$REPO" \
-    --repository-format=docker \
-    --location="$REGION" \
-    --description="Global Top Group financial dashboard" \
+# Enabling APIs and creating the registry are first-deployment steps. On
+# --update both are already done, and skipping them keeps the permissions an
+# automated deploy needs down to pushing an image and reaching the VM — a CI
+# identity has no business being able to turn project-wide services on.
+if [[ "$UPDATE_ONLY" == false ]]; then
+  say "Enabling the APIs this deployment uses"
+  gcloud services enable \
+    compute.googleapis.com \
+    artifactregistry.googleapis.com \
+    cloudbuild.googleapis.com \
+    iap.googleapis.com \
     --quiet
+
+  say "Ensuring the Artifact Registry repository exists"
+  gcloud artifacts repositories describe "$REPO" --location="$REGION" >/dev/null 2>&1 || \
+    gcloud artifacts repositories create "$REPO" \
+      --repository-format=docker \
+      --location="$REGION" \
+      --description="Global Top Group financial dashboard" \
+      --quiet
+fi
 
 # Built away from the VM either way: an e2-micro cannot complete `next build`
 # in 1 GB of RAM.
