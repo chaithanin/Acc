@@ -121,12 +121,17 @@ else
   # repository, the pool accepts tokens from anywhere on GitHub.
   echo "  provider already exists — checking it fits before relying on it"
 
-  existing=$(gcloud iam workload-identity-pools providers describe "$PROVIDER" \
-    --location=global --workload-identity-pool="$POOL" \
-    --format='value[delimiter="|"](attributeMapping,attributeCondition)')
+  # Asked for one at a time. The mapping is itself a list, so reading both in
+  # one call and splitting on a delimiter mixes the two together — the trailing
+  # mapping entries end up looking like part of the condition, which would let
+  # a provider with no condition at all appear to have one.
+  provider_field() {
+    gcloud iam workload-identity-pools providers describe "$PROVIDER" \
+      --location=global --workload-identity-pool="$POOL" --format="value($1)"
+  }
 
-  mapping="${existing%%|*}"
-  condition="${existing#*|}"
+  mapping=$(provider_field attributeMapping)
+  condition=$(provider_field attributeCondition)
 
   echo "    mapping:   ${mapping:-(none)}"
   echo "    condition: ${condition:-(none)}"
