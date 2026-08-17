@@ -1,0 +1,37 @@
+{
+  "name": "gtg-financial-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Global Top Group – Financial Management Dashboard",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./scripts/register-ts.mjs --test tests/*.test.ts",
+    "db:reset": "node --import ./scripts/register-ts.mjs scripts/reset-db.mjs",
+    "seed": "node --import ./scripts/register-ts.mjs scripts/seed.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "fflate": "^0.8.2",
+    "lucide-react": "^0.545.0",
+    "next": "^15.5.23",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "recharts": "^3.2.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@tailwindcss/postcss": "^4.1.14",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.9.3"
+  }
+}
