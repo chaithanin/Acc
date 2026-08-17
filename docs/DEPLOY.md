@@ -1,13 +1,32 @@
 # Deploying to Google Cloud
 
 Target project: **`gtg-crm-499607`**.
+Target hostname: **`acc.chaithanin.com`** (the default — no export needed).
 
 ```bash
-export GTG_DOMAIN=finance.yourcompany.com   # DNS A record → the VM's IP
+# 1. Reserve the address and print the DNS record to create.
+./deploy/deploy.sh --reserve-ip
+
+# 2. Add that A record at your DNS provider, then:
 ./deploy/deploy.sh
 ```
 
-That is the whole deployment. What it does and why is below.
+Two steps rather than one because DNS has to exist before a certificate can be
+issued. Running `deploy.sh` straight away also works — it reserves the address,
+tells you the record to add and carries on — but the certificate will not be
+issued until the record resolves.
+
+### DNS as it stands
+
+`chaithanin.com` and `www.chaithanin.com` currently resolve to
+`118.139.181.63`, which is a different host. **`acc.chaithanin.com` has no
+record yet**, so it needs to be created. The main site is untouched by any of
+this: only the new `acc` subdomain is involved.
+
+The address is a *reserved static IP*, not an ephemeral one. An ephemeral
+address changes whenever the VM is stopped and started, which would silently
+break both DNS and TLS. Reserved addresses are free while attached to a running
+instance.
 
 ---
 
@@ -76,13 +95,20 @@ The application authenticates with a session cookie and serves financial data,
 so it is never exposed over plain HTTP. The VM runs Caddy in front of the app,
 which obtains and renews a Let's Encrypt certificate automatically.
 
-This is why `deploy.sh` refuses to run without `GTG_DOMAIN`. A managed load
-balancer would also work and would cost about $18 a month — more than the rest
-of the deployment put together.
+A managed load balancer would also work and would cost about $18 a month —
+more than the rest of the deployment put together.
 
-If the domain does not exist yet: run the deploy once to create the VM (it will
-stop at the domain check — create the VM first with `GTG_DOMAIN` set to the
-eventual name), point DNS at the printed IP, then re-run.
+The hostname defaults to `acc.chaithanin.com`; override it with `GTG_DOMAIN`.
+This is also why the deployment reserves its IP first: the DNS record can then be
+created and allowed to propagate before anything depends on it.
+
+If Caddy has already failed an attempt it backs off, so after adding the record
+force an immediate retry rather than waiting:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
+  --command 'sudo docker compose --project-name gtg -f /opt/gtg/docker-compose.yml restart caddy'
+```
 
 ---
 
@@ -90,6 +116,7 @@ eventual name), point DNS at the printed IP, then re-run.
 
 | Resource | Purpose |
 |---|---|
+| Static IP `gtg-financial-ip` | the address `acc.chaithanin.com` points at; survives a stop/start |
 | Artifact Registry repo `gtg` | holds the container image |
 | Cloud Build job | builds the image — an e2-micro cannot run `next build` in 1 GB |
 | Persistent disk `gtg-financial-data` (20 GB) | the database and every uploaded original, at `/mnt/data` |
@@ -158,4 +185,5 @@ The deployment itself has **not** been executed: this environment has no
 never been built or run, and nothing has been created in `gtg-crm-499607`.
 Expect to fix small things on the first real run — most likely IAM permissions
 on the Cloud Build service account, or the DNS record not having propagated
-when Caddy first asks for a certificate.
+when Caddy first asks for a certificate. The `--reserve-ip` step exists to make
+the second of those unlikely.

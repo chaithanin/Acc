@@ -229,11 +229,11 @@ without them.
 ## Deployment
 
 ```bash
-export GTG_DOMAIN=finance.yourcompany.com
-./deploy/deploy.sh
+./deploy/deploy.sh --reserve-ip   # prints the DNS A record to create
+./deploy/deploy.sh                # once the record resolves
 ```
 
-Deploys to Google Cloud as a single VM with the database on a persistent disk,
+Deploys to `acc.chaithanin.com` on Google Cloud as a single VM with the database on a persistent disk,
 behind Caddy for automatic HTTPS. Cloud SQL was rejected on cost — it has no
 free tier and is the expensive part of a Cloud Run design, while the compute is
 nearly free either way. [`docs/DEPLOY.md`](docs/DEPLOY.md) sets out the

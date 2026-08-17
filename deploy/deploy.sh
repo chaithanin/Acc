@@ -22,32 +22,47 @@ DISK_GB="${GTG_DISK_GB:-20}"
 REPO="${GTG_REPO:-gtg}"
 IMAGE_NAME="${GTG_IMAGE_NAME:-financial-dashboard}"
 MACHINE="${GTG_MACHINE:-e2-micro}"
-DOMAIN="${GTG_DOMAIN:-}"
+ADDRESS="${GTG_ADDRESS:-gtg-financial-ip}"
+DOMAIN="${GTG_DOMAIN:-acc.chaithanin.com}"
 
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE_NAME}:latest"
 UPDATE_ONLY=false
-[[ "${1:-}" == "--update" ]] && UPDATE_ONLY=true
+IP_ONLY=false
+case "${1:-}" in
+  --update) UPDATE_ONLY=true ;;
+  # Reserves the address and prints it, so the DNS record can be created and
+  # allowed to propagate before anything else is built.
+  --reserve-ip) IP_ONLY=true ;;
+  '') ;;
+  *) echo "Usage: $0 [--reserve-ip | --update]" >&2; exit 1 ;;
+esac
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 if [[ -z "$DOMAIN" ]]; then
-  cat >&2 <<'MSG'
-GTG_DOMAIN is not set.
-
-This application handles passwords and financial data, so it is only deployed
-behind HTTPS. Caddy will obtain a certificate automatically, but it needs a
-domain name whose DNS A record points at this VM.
-
-  export GTG_DOMAIN=finance.yourcompany.com
-  ./deploy/deploy.sh
-
-If the domain does not exist yet, create the VM first, note its external IP,
-point the DNS record at it, then re-run with GTG_DOMAIN set.
-MSG
+  echo "GTG_DOMAIN is empty. This app is only served over HTTPS, so it needs a domain." >&2
   exit 1
 fi
 
 gcloud config set project "$PROJECT" >/dev/null
+
+if [[ "$IP_ONLY" == true ]]; then
+  gcloud services enable compute.googleapis.com --quiet
+  gcloud compute addresses describe "$ADDRESS" --region="$REGION" >/dev/null 2>&1 || \
+    gcloud compute addresses create "$ADDRESS" --region="$REGION" --quiet
+
+  RESERVED_IP=$(gcloud compute addresses describe "$ADDRESS" --region="$REGION" --format='get(address)')
+  cat <<MSG
+
+Reserved ${RESERVED_IP} in ${REGION}.
+
+Create this DNS record, then run ./deploy/deploy.sh:
+
+    ${DOMAIN}.   A   ${RESERVED_IP}
+
+MSG
+  exit 0
+fi
 
 say "Enabling the APIs this deployment uses"
 gcloud services enable \
@@ -72,6 +87,39 @@ gcloud builds submit \
   --quiet
 
 if [[ "$UPDATE_ONLY" == false ]]; then
+  say "Reserving a static external IP"
+  # Reserved before the VM so the DNS record can be created up front, and so
+  # the address survives a stop/start — an ephemeral IP would change and
+  # silently break both DNS and the certificate.
+  gcloud compute addresses describe "$ADDRESS" --region="$REGION" >/dev/null 2>&1 || \
+    gcloud compute addresses create "$ADDRESS" --region="$REGION" --quiet
+
+  RESERVED_IP=$(gcloud compute addresses describe "$ADDRESS" --region="$REGION" --format='get(address)')
+
+  # Point DNS at the address now: the certificate is issued on first request,
+  # so a record that already resolves means TLS works immediately.
+  CURRENT_DNS=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
+  if [[ "$CURRENT_DNS" != "$RESERVED_IP" ]]; then
+    cat <<MSG
+
+$(printf '\033[1mDNS is not pointing at this deployment yet.\033[0m')
+
+  Create or update this record with your DNS provider:
+
+      ${DOMAIN}.   A   ${RESERVED_IP}
+
+  Currently resolving to: ${CURRENT_DNS:-(no record)}
+
+  The deployment continues regardless — the certificate is requested on the
+  first HTTPS request, so add the record and it will be issued then. If Caddy
+  has already backed off after a failed attempt, force an immediate retry with:
+
+      gcloud compute ssh ${VM} --zone=${ZONE} \\
+        --command 'sudo docker compose --project-name gtg -f /opt/gtg/docker-compose.yml restart caddy'
+
+MSG
+  fi
+
   say "Ensuring the data disk exists"
   # A separate disk from the boot disk, so the VM can be rebuilt or resized
   # without touching the database or the uploaded originals.
@@ -100,6 +148,7 @@ if [[ "$UPDATE_ONLY" == false ]]; then
       --boot-disk-size=20GB \
       --boot-disk-type=pd-balanced \
       --disk="name=${DISK},device-name=gtgdata,mode=rw,auto-delete=no" \
+      --address="$ADDRESS" \
       --tags=gtg-web \
       --scopes=https://www.googleapis.com/auth/cloud-platform \
       --metadata-from-file=startup-script=deploy/startup-script.sh \
@@ -111,6 +160,7 @@ fi
 
 IP=$(gcloud compute instances describe "$VM" --zone="$ZONE" \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+DNS_NOW=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
 
 say "Waiting for the VM to finish its first-boot setup"
 # The startup script installs Docker and formats the data disk; on a fresh VM
@@ -148,16 +198,21 @@ $(printf '\033[1mDeployed.\033[0m')
 
   URL         https://${DOMAIN}
   VM          ${VM} (${MACHINE}) in ${ZONE}
-  External IP ${IP}
+  External IP ${IP} (static)
   Data disk   ${DISK} (${DISK_GB} GB), mounted at /mnt/data
+  DNS         ${DOMAIN} -> ${DNS_NOW:-(no record yet)}$( [[ "$DNS_NOW" == "$IP" ]] && echo '  [ok]' || echo "  [needs an A record pointing at ${IP}]" )
 
-Point the DNS A record for ${DOMAIN} at ${IP} if it is not already.
-Caddy issues the certificate on first request, which can take a minute.
+Caddy issues the certificate on the first HTTPS request, which takes a moment.
 
 The first start creates an administrator account and prints the password to
 the container log exactly once:
 
   gcloud compute ssh ${VM} --zone=${ZONE} --command 'sudo docker logs gtg-app-1 | head -40'
+
+If HTTPS does not come up, the cause is almost always DNS. Check what Caddy
+is doing:
+
+  gcloud compute ssh ${VM} --zone=${ZONE} --command 'sudo docker logs gtg-caddy-1 --tail 40'
 
 To update the application later:
 
