@@ -112,7 +112,53 @@ if ! gcloud iam workload-identity-pools providers describe "$PROVIDER" \
     --attribute-condition="assertion.repository=='${GITHUB_REPO}'" \
     --quiet
 else
-  echo "  provider already exists — leaving its conditions as they are"
+  # A provider set up for something else is left alone — rewriting its
+  # conditions could break whatever already relies on it. But leaving it
+  # unexamined is not safe either: the binding created below grants access to
+  # whatever carries attribute.repository, so if this provider never sets that
+  # attribute, the binding matches nothing and the first deploy fails on
+  # credentials that look correct. And if its condition does not pin a
+  # repository, the pool accepts tokens from anywhere on GitHub.
+  echo "  provider already exists — checking it fits before relying on it"
+
+  existing=$(gcloud iam workload-identity-pools providers describe "$PROVIDER" \
+    --location=global --workload-identity-pool="$POOL" \
+    --format='value[delimiter="|"](attributeMapping,attributeCondition)')
+
+  mapping="${existing%%|*}"
+  condition="${existing#*|}"
+
+  echo "    mapping:   ${mapping:-(none)}"
+  echo "    condition: ${condition:-(none)}"
+
+  if [[ "$mapping" != *"attribute.repository"* ]]; then
+    cat >&2 <<MSG
+
+  This provider does not map attribute.repository, which the access below is
+  granted on. Authentication would succeed and authorisation would then match
+  nothing. Add the mapping, keeping any the provider already has:
+
+    gcloud iam workload-identity-pools providers update-oidc ${PROVIDER} \\
+      --location=global --workload-identity-pool=${POOL} \\
+      --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner"
+
+MSG
+  fi
+
+  if [[ -z "$condition" ]]; then
+    cat >&2 <<MSG
+
+  This provider has no attribute condition. Its token issuer is shared by every
+  repository on GitHub, so as it stands any of them can obtain tokens from this
+  pool. Only this repository can reach the deployment account — that is the
+  binding below — but any other account bound to this pool is exposed. Consider:
+
+    gcloud iam workload-identity-pools providers update-oidc ${PROVIDER} \\
+      --location=global --workload-identity-pool=${POOL} \\
+      --attribute-condition="assertion.repository=='${GITHUB_REPO}'"
+
+MSG
+  fi
 fi
 
 say "Letting that repository borrow the deployment account"
