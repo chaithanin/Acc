@@ -10,12 +10,12 @@ import {
   setUserPassword,
   updateUser,
 } from '@/lib/db/repositories/users';
+import { MIN_PASSWORD, passwordTooShort } from '@/config/password-policy';
 import { formatDate } from '@/lib/format/number';
 import type { Role } from '@/lib/types';
 import { UserRow } from './user-row';
 
 const ROLES: Role[] = ['admin', 'finance', 'management', 'viewer'];
-const MIN_PASSWORD = 12;
 
 /** Users, roles, account expiry and passwords (requirement 30). */
 export default async function UserSettingsPage({
@@ -48,7 +48,7 @@ export default async function UserSettingsPage({
     const expiresAt = String(formData.get('expiresAt') ?? '').trim() || null;
 
     if (!email || !name || !password) return;
-    if (password.length < MIN_PASSWORD) {
+    if (passwordTooShort(password)) {
       redirect(`/settings/users?error=${encodeURIComponent(`Passwords must be at least ${MIN_PASSWORD} characters.`)}`);
     }
 
@@ -105,7 +105,7 @@ export default async function UserSettingsPage({
     const target = findUserById(id);
     if (!target) return;
 
-    if (password.length < MIN_PASSWORD) {
+    if (passwordTooShort(password)) {
       redirect(`/settings/users?error=${encodeURIComponent(`Passwords must be at least ${MIN_PASSWORD} characters.`)}`);
     }
 
