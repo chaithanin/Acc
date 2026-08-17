@@ -100,17 +100,57 @@ async function discover() {
     'actuator/health',
   ];
 
-  const candidates = new Set(ancestors);
+  /**
+   * Names an API service is likely to route under. A guessed name is only
+   * worth trying because the fingerprint below makes a wrong guess cheap to
+   * recognise — without it, a soft-404 host answers every guess with 200 and
+   * the whole list reads as a hit.
+   */
+  const GUESSES = [
+    'adapter', 'adapters', 'v1', 'v2', 'service', 'services', 'list', 'query',
+    'auth', 'login', 'token', 'oauth/token', 'authenticate',
+    'project', 'projects', 'company', 'companies', 'organization',
+    'invoice', 'invoices', 'billing', 'payment', 'payments',
+    'ledger', 'gl', 'account', 'accounts', 'journal',
+    'budget', 'boq', 'contract', 'contracts', 'vendor', 'vendors',
+    'report', 'reports', 'master', 'masterdata', 'data', 'export',
+    'receivable', 'payable', 'cashflow', 'expense', 'income',
+  ];
+
+  console.log(`\nMapping ${base.host}\n`);
+
+  /**
+   * A host that answers unknown paths with 200 makes "did this route exist?"
+   * unanswerable from one response. So each prefix is asked for a path that
+   * cannot exist, and its reply becomes that prefix's signature for "missing".
+   * Anything matching the signature is absent however it is labelled; anything
+   * differing is real. This replaces guessing at error wording, which is what
+   * let a Next.js catch-all page read as nine separate routes.
+   */
+  const signatures = new Map();
   for (const ancestor of ancestors) {
-    for (const route of DOC_ROUTES) {
-      candidates.add(`${ancestor === '/' ? '' : ancestor}/${route}`);
+    const target = new URL(base);
+    target.pathname = joinPath(ancestor, 'zz-probe-no-such-route-4718');
+    const r = await fetchPath(target);
+    signatures.set(ancestor, r);
+    console.log(
+      `  signature ${ancestor.padEnd(30)} ${r.networkError ? r.body : `${r.status} ${r.contentType.split(';')[0]} ${r.bytes}B`}`,
+    );
+  }
+
+  const candidates = [];
+  for (const ancestor of ancestors) candidates.push({ pathname: ancestor, prefix: parentOf(ancestor, ancestors) });
+  for (const ancestor of ancestors) {
+    if (ancestor === '/') continue; // the site root is a website, not the API
+    for (const route of [...DOC_ROUTES, ...GUESSES]) {
+      candidates.push({ pathname: joinPath(ancestor, route), prefix: ancestor });
     }
   }
 
-  console.log(`\nLooking for real routes on ${base.host}  (${candidates.size} paths)\n`);
+  console.log(`\n  ${candidates.length} paths to check\n`);
 
   const found = [];
-  for (const pathname of candidates) {
+  for (const { pathname, prefix } of candidates) {
     const target = new URL(base);
     target.pathname = pathname;
     const r = await fetchPath(target);
@@ -118,27 +158,27 @@ async function discover() {
       console.log(`  —    ${pathname}  ${r.body}`);
       continue;
     }
-    const missing = saysNotFound(r);
-    console.log(
-      `  ${String(r.status).padEnd(4)} ${pathname.padEnd(44)} ${missing ? 'not a route' : `${r.contentType.split(';')[0]} ${r.bytes}B`}`,
-    );
-    if (!missing) found.push({ pathname, ...r });
+
+    const signature = signatures.get(prefix);
+    const missing = saysNotFound(r) || matchesSignature(r, signature);
+    // Only the hits are printed. A wall of misses is what buried the real
+    // finding last time.
+    if (!missing) {
+      console.log(`  ${String(r.status).padEnd(4)} ${pathname.padEnd(44)} ${r.contentType.split(';')[0]} ${r.bytes}B`);
+      found.push({ pathname, ...r });
+    }
   }
 
-  // Paths that do not exist cannot all answer identically unless something
-  // other than the service is answering. Without this check a blocking proxy
-  // reads as "every path exists", which is the opposite of the truth.
-  const answered = found.filter((r) => !r.networkError);
-  if (answered.length === candidates.size && answered.length > 1) {
-    const first = answered[0];
-    if (answered.every((r) => r.status === first.status && r.body === first.body)) {
-      console.log(`\nEvery path answered identically (${first.status}), including ones that cannot exist.`);
-      console.log('That is not the service replying — something in between is answering for it:');
-      console.log(`  ${first.body}`);
-      console.log('Nothing about the real routes has been learned. Run this from a machine with');
-      console.log('direct outbound HTTPS.');
-      return;
-    }
+  // Paths that cannot exist must not all answer identically; when they do,
+  // something other than the service is answering for it.
+  const sigs = [...signatures.values()].filter((r) => !r.networkError);
+  if (sigs.length > 1 && sigs.every((r) => r.status === sigs[0].status && r.body === sigs[0].body) && !found.length) {
+    console.log(`\nEvery path answered identically (${sigs[0].status}), including ones that cannot exist.`);
+    console.log('That is not the service replying — something in between is answering for it:');
+    console.log(`  ${sigs[0].body}`);
+    console.log('Nothing about the real routes has been learned. Run this from a machine with');
+    console.log('direct outbound HTTPS.');
+    return;
   }
 
   if (!found.length) {
@@ -153,6 +193,14 @@ async function discover() {
   for (const r of found) {
     console.log(`\n[${r.status}] ${r.pathname}  (${r.contentType.split(';')[0]}, ${r.bytes} bytes)`);
     console.log(`  ${r.body.slice(0, 400) || '(empty body)'}`);
+
+    // Asked per route rather than once, since which methods are allowed is the
+    // difference between "send a GET" and "send a POST with a payload".
+    const target = new URL(base);
+    target.pathname = r.pathname;
+    const options = await fetchPath(target, 'OPTIONS');
+    if (options.allow) console.log(`  Methods accepted: ${options.allow}`);
+    if (r.server) console.log(`  Served by: ${r.server}`);
 
     // An OpenAPI document is the jackpot: it lists every endpoint and the shape
     // of each payload, so it is worth unpacking rather than printing raw.
@@ -169,13 +217,43 @@ async function discover() {
   }
 }
 
-async function fetchPath(target) {
+function joinPath(prefix, route) {
+  return `${prefix === '/' ? '' : prefix}/${route}`;
+}
+
+/** The nearest enclosing prefix that has a signature of its own. */
+function parentOf(pathname, ancestors) {
+  return ancestors.find((a) => a !== pathname && (pathname === '/' || pathname.startsWith(`${a === '/' ? '' : a}/`))) ?? '/';
+}
+
+/**
+ * Whether a response is the same "nothing here" reply the prefix gives for a
+ * path that cannot exist.
+ *
+ * Compared on the opening of the body rather than the whole of it, because a
+ * catch-all page usually echoes the requested path back into itself and so is
+ * never byte-identical between two misses.
+ */
+function matchesSignature(r, signature) {
+  if (!signature || signature.networkError) return false;
+  if (r.status !== signature.status) return false;
+  if (r.body.slice(0, 160) === signature.body.slice(0, 160)) return true;
+  // A same-shaped page of near-identical length is the same page: only the
+  // echoed path differs.
+  return (
+    r.contentType === signature.contentType &&
+    Math.abs(r.bytes - signature.bytes) <= 80 &&
+    r.contentType.includes('html')
+  );
+}
+
+async function fetchPath(target, method = 'GET') {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const started = Date.now();
   try {
     const res = await fetch(target, {
-      method: 'GET',
+      method,
       headers: {
         Accept: 'application/json, */*',
         'User-Agent': 'gtg-dashboard-probe/1',
@@ -188,6 +266,10 @@ async function fetchPath(target) {
     return {
       status: res.status,
       contentType: res.headers.get('content-type') ?? '',
+      // A route that exists but rejects the method answers with the list of
+      // methods it does accept, which is the request shape stated outright.
+      allow: res.headers.get('allow') ?? '',
+      server: res.headers.get('server') ?? '',
       ms: Date.now() - started,
       body: mask(text.replace(/\s+/g, ' ').trim().slice(0, bodyMax)),
       raw: text,
