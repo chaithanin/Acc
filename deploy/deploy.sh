@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-PROJECT="${GTG_PROJECT:-gtg-crm-499607}"
+PROJECT="${GTG_PROJECT:-account-505805}"
 REGION="${GTG_REGION:-asia-southeast1}"
 ZONE="${GTG_ZONE:-${REGION}-a}"
 VM="${GTG_VM:-gtg-financial}"

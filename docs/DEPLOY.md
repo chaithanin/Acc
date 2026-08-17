@@ -1,6 +1,6 @@
 # Deploying to Google Cloud
 
-Target project: **`gtg-crm-499607`**.
+Target project: **`account-505805`**.
 Target hostname: **`acc.chaithanin.com`** (the default — no export needed).
 
 ```bash
@@ -182,7 +182,7 @@ working standalone bundle with `schema.sql` and the parsing worker in place.
 
 The deployment itself has **not** been executed: this environment has no
 `gcloud`, no Google Cloud credentials and no Docker daemon, so the image has
-never been built or run, and nothing has been created in `gtg-crm-499607`.
+never been built or run, and nothing has been created in `account-505805`.
 Expect to fix small things on the first real run — most likely IAM permissions
 on the Cloud Build service account, or the DNS record not having propagated
 when Caddy first asks for a certificate. The `--reserve-ip` step exists to make
