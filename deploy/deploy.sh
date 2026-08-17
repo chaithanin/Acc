@@ -69,6 +69,7 @@ gcloud services enable \
   compute.googleapis.com \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
+  iap.googleapis.com \
   --quiet
 
 say "Ensuring the Artifact Registry repository exists"
@@ -136,6 +137,19 @@ MSG
       --allow=tcp:80,tcp:443 \
       --target-tags=gtg-web \
       --description="HTTP for the ACME challenge, HTTPS for the app" \
+      --quiet
+
+  say "Ensuring SSH is reachable through IAP"
+  # The deploy step reaches the VM with --tunnel-through-iap. That traffic
+  # arrives from Google's IAP range, so it needs its own rule rather than
+  # relying on the default VPC's allow-ssh-from-anywhere, which may not exist
+  # and should not be depended on in any case.
+  gcloud compute firewall-rules describe gtg-allow-iap-ssh >/dev/null 2>&1 || \
+    gcloud compute firewall-rules create gtg-allow-iap-ssh \
+      --allow=tcp:22 \
+      --source-ranges=35.235.240.0/20 \
+      --target-tags=gtg-web \
+      --description="SSH from Identity-Aware Proxy only" \
       --quiet
 
   if ! gcloud compute instances describe "$VM" --zone="$ZONE" >/dev/null 2>&1; then

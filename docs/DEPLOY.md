@@ -3,7 +3,13 @@
 Target project: **`account-505805`**.
 Target hostname: **`acc.chaithanin.com`** (the default — no export needed).
 
+From Cloud Shell, or any machine with `gcloud` authenticated:
+
 ```bash
+git clone https://github.com/chaithanin/Acc.git
+cd Acc
+git checkout claude/global-top-financial-dashboard-2jrq6e
+
 # 1. Reserve the address and print the DNS record to create.
 ./deploy/deploy.sh --reserve-ip
 
@@ -122,6 +128,7 @@ gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
 | Persistent disk `gtg-financial-data` (20 GB) | the database and every uploaded original, at `/mnt/data` |
 | VM `gtg-financial` (`e2-micro`, Debian 12) | runs the app and Caddy under Docker |
 | Firewall rule `gtg-allow-web` | 80 for the ACME challenge, 443 for the app |
+| Firewall rule `gtg-allow-iap-ssh` | port 22 from the IAP range only — not from the internet |
 
 The VM's first boot also creates a 2 GB swap file. An e2-micro has 1 GB of RAM,
 and a large workbook parse would otherwise risk being OOM-killed. For the same
