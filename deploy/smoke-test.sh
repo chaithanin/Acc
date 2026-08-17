@@ -33,7 +33,37 @@ else
   ok "DNS resolves to $resolved"
 fi
 
-# ------------------------------------------------------------------ 2. TLS
+# --------------------------------------------------------- 2. reachability
+# Checked before TLS so that "nothing is listening" is never reported as a
+# certificate problem. They need completely different fixes.
+port_open() { timeout 6 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null; }
+
+https_open=false
+http_open=false
+port_open "$DOMAIN" 443 && https_open=true
+port_open "$DOMAIN" 80  && http_open=true
+
+if [[ "$https_open" == false && "$http_open" == false ]]; then
+  bad "Nothing is listening on 443 or 80"
+  note ""
+  note "DNS is correct, so this is not a name-resolution problem: no server is"
+  note "answering. The usual cause is that the deployment has not run to"
+  note "completion — the VM is created after the image is built, so a failed"
+  note "build leaves nothing to connect to."
+  note ""
+  note "Check whether the VM exists at all:"
+  note "  gcloud compute instances list --filter='name=gtg-financial'"
+  note ""
+  note "If it is missing, run the deployment:"
+  note "  ./deploy/deploy.sh --local-build"
+  note ""
+  printf '\n%d passed, %d failed\n\n' "$pass" $((fail + 7))
+  exit 1
+fi
+
+[[ "$https_open" == true ]] && ok "Port 443 is open" || bad "Port 443 is closed"
+
+# ------------------------------------------------------------------ 3. TLS
 # --max-time bounds the whole check; a certificate still being issued shows up
 # as a handshake failure rather than a hang.
 if tls=$(echo | timeout 20 openssl s_client -servername "$DOMAIN" -connect "$DOMAIN:443" 2>/dev/null); then
@@ -54,7 +84,7 @@ else
   note "    --command 'sudo docker compose --project-name gtg -f /opt/gtg/docker-compose.yml restart caddy'"
 fi
 
-# --------------------------------------------------------------- 3. health
+# --------------------------------------------------------------- 4. health
 health=$(curl -sS --max-time 20 "https://${DOMAIN}/api/health" 2>/dev/null)
 if [[ "$health" == *'"status":"ok"'* ]]; then
   ok "Health endpoint reports ok"
@@ -63,11 +93,11 @@ else
   note "got: ${health:-<no response>}"
 fi
 
-# ---------------------------------------------------------------- 4. login
+# ---------------------------------------------------------------- 5. login
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://${DOMAIN}/login" 2>/dev/null)
 [[ "$code" == "200" ]] && ok "Sign-in page returns 200" || bad "Sign-in page returned ${code:-no response}"
 
-# ----------------------------------------------------- 5. auth is enforced
+# ----------------------------------------------------- 6. auth is enforced
 # The dashboard must never be served to an anonymous request.
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://${DOMAIN}/financial" 2>/dev/null)
 if [[ "$code" == "307" || "$code" == "302" ]]; then
@@ -78,13 +108,13 @@ else
   bad "Dashboard returned ${code:-no response}"
 fi
 
-# ------------------------------------------------------- 6. HTTP redirect
+# ------------------------------------------------------- 7. HTTP redirect
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://${DOMAIN}/" 2>/dev/null)
 [[ "$code" == "308" || "$code" == "301" || "$code" == "302" ]] \
   && ok "Plain HTTP redirects to HTTPS ($code)" \
   || bad "Plain HTTP returned ${code:-no response}, expected a redirect"
 
-# -------------------------------------------------------- 7. TLS headers
+# -------------------------------------------------------- 8. TLS headers
 headers=$(curl -sSI --max-time 20 "https://${DOMAIN}/login" 2>/dev/null)
 for header in "strict-transport-security" "x-content-type-options" "x-frame-options"; do
   grep -qi "^${header}:" <<<"$headers" \
