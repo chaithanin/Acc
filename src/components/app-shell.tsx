@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { Role, User } from '@/lib/types';
+import { FALLBACK_ICON, NAV_ICONS } from './nav-icons';
 import { cx } from './ui/primitives';
 
 /**
@@ -73,46 +74,75 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   // Navigating on a phone should dismiss the drawer.
   useEffect(() => setMobileOpen(false), [pathname]);
+
+  // Read after mount rather than during render: the server has no way to know
+  // this preference, and rendering the wrong width first would show the
+  // sidebar snapping on every page load.
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('gtg-nav-collapsed') === '1');
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((value) => {
+      localStorage.setItem('gtg-nav-collapsed', value ? '0' : '1');
+      return !value;
+    });
+  };
 
   return (
     <div className="flex min-h-screen">
       <aside
         className={cx(
-          'no-print fixed inset-y-0 left-0 z-40 w-60 shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar',
-          'transition-transform lg:static lg:translate-x-0',
+          'no-print fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar',
+          'transition-[transform,width] duration-200 lg:static lg:translate-x-0',
+          collapsed ? 'w-[4.5rem]' : 'w-60',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex items-center gap-2.5 border-b border-sidebar-border px-4 py-4">
+        <div
+          className={cx(
+            'flex items-center gap-2.5 border-b border-sidebar-border py-4',
+            collapsed ? 'justify-center px-2' : 'px-4',
+          )}
+        >
           <span
             aria-hidden
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sidebar-active text-sm font-bold text-white"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sidebar-active text-sm font-bold text-white"
           >
-            G
+            {company.companyCode.slice(0, 1)}
           </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold leading-tight text-sidebar-ink">
-              {company.displayName}
-            </p>
-            <p className="mt-0.5 truncate text-[11px] text-sidebar-ink-muted">
-              {company.companyCode} · Financial Management
-            </p>
-          </div>
+          {collapsed ? null : (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold leading-tight text-sidebar-ink">
+                {company.displayName}
+              </p>
+              <p className="mt-0.5 truncate text-[11px] text-sidebar-ink-muted">
+                {company.companyCode} · Financial Management
+              </p>
+            </div>
+          )}
         </div>
 
-        <nav className="px-2 py-3">
+        <nav className="flex-1 px-2 py-3">
           {NAV_GROUPS.map((group) => {
             const items = group.items.filter((item) => item.roles.includes(user.role));
             if (items.length === 0) return null;
 
             return (
               <div key={group.title} className="mb-4">
-                <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-ink-muted">
-                  {group.title}
-                </p>
+                {collapsed ? (
+                  // A rule instead of a word: the grouping still reads, and a
+                  // truncated label would read as a mistake.
+                  <div className="mx-2 mb-2 border-t border-sidebar-border" />
+                ) : (
+                  <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-ink-muted">
+                    {group.title}
+                  </p>
+                )}
                 {items.map((item) => {
                   const active =
                     item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
@@ -121,16 +151,24 @@ export function AppShell({
                       key={item.href}
                       href={item.href}
                       aria-current={active ? 'page' : undefined}
+                      // The label is the accessible name whether or not it is
+                      // drawn, so a collapsed rail is still navigable by
+                      // screen reader, and it doubles as the hover tooltip.
+                      title={collapsed ? item.label : undefined}
                       className={cx(
-                        // The active item carries a left rule as well as a
-                        // tint, so position marks it even at a glance.
-                        'block rounded-md border-l-2 px-2 py-1.5 text-sm transition-colors',
+                        'group relative mb-0.5 flex items-center gap-3 rounded-lg text-sm transition-colors',
+                        collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
                         active
-                          ? 'border-sidebar-active bg-sidebar-hover font-medium text-sidebar-ink'
-                          : 'border-transparent text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink',
+                          ? 'bg-sidebar-active font-medium text-white'
+                          : 'text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink',
                       )}
                     >
-                      {item.label}
+                      <span className="shrink-0">{NAV_ICONS[item.href] ?? FALLBACK_ICON}</span>
+                      {collapsed ? (
+                        <span className="sr-only">{item.label}</span>
+                      ) : (
+                        <span className="truncate">{item.label}</span>
+                      )}
                     </Link>
                   );
                 })}
@@ -144,13 +182,64 @@ export function AppShell({
           rather than a menu item among the pages, because it changes which
           data every other link shows.
         */}
-        <div className="border-t border-sidebar-border px-2 py-3">
-          <Link
-            href="/companies"
-            className="block rounded-md px-2 py-1.5 text-sm text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+        <div className="mt-auto border-t border-sidebar-border p-2">
+          {collapsed ? (
+            <Link
+              href="/companies"
+              title="Switch company"
+              className="flex justify-center rounded-lg py-2.5 text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+            >
+              <svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.7}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M4 7h13" />
+                <path d="M14 4l3 3-3 3" />
+                <path d="M20 17H7" />
+                <path d="M10 14l-3 3 3 3" />
+              </svg>
+              <span className="sr-only">Switch company</span>
+            </Link>
+          ) : (
+            <div className="rounded-xl bg-sidebar-hover p-3">
+              <p className="truncate text-xs font-medium text-sidebar-ink">
+                {company.displayName}
+              </p>
+              <p className="mt-0.5 text-[11px] text-sidebar-ink-muted">
+                {company.projectCount}{' '}
+                {company.projectCount === 1 ? 'project' : 'projects'}
+              </p>
+              <Link
+                href="/companies"
+                className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-sidebar-active px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
+              >
+                Switch company
+              </Link>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className={cx(
+              'mt-2 hidden w-full items-center gap-2 rounded-lg py-2 text-xs text-sidebar-ink-muted',
+              'transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink lg:flex',
+              collapsed ? 'justify-center' : 'px-3',
+            )}
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           >
-            ⇄ Switch Company
-          </Link>
+            <span aria-hidden className="text-base leading-none">
+              {collapsed ? '»' : '«'}
+            </span>
+            {collapsed ? null : <span>Collapse</span>}
+          </button>
         </div>
       </aside>
 
@@ -194,37 +283,132 @@ function TopBar({
         The company sits in the top bar on every page. Someone reading a figure
         should never have to work out whose figure it is.
       */}
+      {/*
+        The company is named on every page. Someone reading a figure should
+        never have to work out whose figure it is.
+      */}
       <Link
         href="/companies"
-        className="min-w-0 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+        className="min-w-0 rounded-lg px-2 py-1 transition-colors hover:bg-surface-hover"
         title="Switch company"
       >
-        <p className="truncate text-xs font-semibold leading-tight text-ink">
-          {company.displayName}
-        </p>
-        <p className="text-[11px] leading-tight text-ink-muted">Switch company ▾</p>
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-semibold text-ink">{company.displayName}</span>
+          <span aria-hidden className="text-[10px] text-ink-muted">
+            ▾
+          </span>
+        </span>
+        <span className="block text-[11px] leading-tight text-ink-muted">
+          {company.companyCode}
+        </span>
       </Link>
 
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-2">
         <ThemeToggle />
-        <Link
-          href="/account"
-          className="rounded-md px-2 py-1 text-right transition-colors hover:bg-surface-hover"
-          title="Your account and password"
-        >
-          <p className="text-xs font-medium leading-tight text-ink">{user.name}</p>
-          <p className="text-[11px] capitalize leading-tight text-ink-muted">{user.role}</p>
-        </Link>
-        <form action="/api/auth/logout" method="post">
-          <button
-            type="submit"
-            className="rounded-md border border-border-strong px-2.5 py-1 text-xs text-ink-secondary hover:bg-surface-hover"
-          >
-            Sign out
-          </button>
-        </form>
+        <UserMenu user={user} />
       </div>
     </header>
+  );
+}
+
+/**
+ * The account menu.
+ *
+ * Sign out moved in here from the top bar, where it sat as a permanently
+ * visible button next to everything else — one stray click from ending
+ * someone's session mid-task.
+ */
+function UserMenu({ user }: { user: User }) {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Any navigation closes it, including a click on one of its own entries.
+  useEffect(() => setOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Escape and a click elsewhere both close it, which is what a menu is
+    // expected to do and what a bare dropdown does not do on its own.
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const onClick = () => setOpen(false);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', onClick);
+    };
+  }, [open]);
+
+  const initials = user.name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] ?? '')
+    .join('')
+    .toUpperCase();
+
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-hover"
+      >
+        <span
+          aria-hidden
+          className="grid h-8 w-8 place-items-center rounded-full bg-accent text-xs font-semibold text-white"
+        >
+          {initials || '?'}
+        </span>
+        <span className="hidden text-left sm:block">
+          <span className="block text-xs font-medium leading-tight text-ink">{user.name}</span>
+          <span className="block text-[11px] capitalize leading-tight text-ink-muted">
+            {user.role}
+          </span>
+        </span>
+        <span aria-hidden className="text-[10px] text-ink-muted">
+          ▾
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-30 mt-1.5 w-56 overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-lg"
+        >
+          <div className="border-b border-border px-3 py-2.5">
+            <p className="truncate text-sm font-medium text-ink">{user.name}</p>
+            <p className="truncate text-xs text-ink-muted">{user.email}</p>
+          </div>
+
+          <Link
+            href="/account"
+            role="menuitem"
+            className="block px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            Profile settings
+          </Link>
+          <Link
+            href="/companies"
+            role="menuitem"
+            className="block px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            Switch company
+          </Link>
+
+          <form action="/api/auth/logout" method="post" className="border-t border-border">
+            <button
+              type="submit"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-critical transition-colors hover:bg-critical/10"
+            >
+              Log out
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
