@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { clearActiveCompany, currentUser, setActiveCompany } from '@/lib/auth';
 import { companiesForUser } from '@/lib/db/repositories/companies';
+import { CompanyLogo } from './company-logo';
 
 /**
  * Company selection — the first screen after signing in.
@@ -74,14 +75,7 @@ export default async function SelectCompanyPage({
               >
                 <input type="hidden" name="companyId" value={company.id} />
 
-                <div className="flex h-12 w-12 items-center justify-center rounded-md bg-surface-sunken text-lg font-semibold text-ink-secondary">
-                  {company.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={company.logo} alt="" className="h-full w-full rounded-md object-cover" />
-                  ) : (
-                    company.companyCode.slice(0, 2)
-                  )}
-                </div>
+                <CompanyLogo logo={company.logo} code={company.companyCode} name={company.displayName} />
 
                 <h2 className="mt-4 font-semibold text-ink">{company.displayName}</h2>
                 <p className="mt-0.5 text-sm text-ink-secondary">{company.legalName}</p>

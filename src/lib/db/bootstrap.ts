@@ -2,7 +2,8 @@ import { DEFAULT_PROJECTS } from '@/config/projects.default';
 import { DEFAULT_TEMPLATES } from '@/config/templates';
 import { normalizeKey } from '@/lib/detect/normalize-text';
 import { backfillCompanies, getDb } from './index';
-import { grantCompany, listAllCompanies } from './repositories/companies';
+import { logoFor } from '@/config/company-logos';
+import { grantCompany, listAllCompanies, updateCompany } from './repositories/companies';
 import { createProject, listProjects } from './repositories/projects';
 import { createTemplate, listTemplates } from './repositories/templates';
 import { countUsers, createUser } from './repositories/users';
@@ -46,6 +47,7 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
   // that actually creates them; on an upgrade it has already happened and this
   // returns immediately.
   backfillCompanies();
+  applyCompanyLogos();
 
   const projects = listProjects(true);
   const projectByAliasKey = new Map<string, string>();
@@ -101,6 +103,20 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
   }
 
   return result;
+}
+
+/**
+ * Gives each company its logo, where a rule covers it.
+ *
+ * Only fills a logo that is unset, so a logo chosen by an administrator later
+ * is never overwritten by a rule on the next boot.
+ */
+function applyCompanyLogos(): void {
+  for (const company of listAllCompanies()) {
+    if (company.logo) continue;
+    const logo = logoFor(company);
+    if (logo) updateCompany(company.id, { logo });
+  }
 }
 
 /**
