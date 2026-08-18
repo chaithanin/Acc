@@ -16,7 +16,18 @@ export interface ExternalLink {
 export const EXTERNAL_LINKS: ExternalLink[] = [
   {
     label: 'IT BOX',
-    href: 'https://portal.chaithanin.com',
-    description: 'Chaithanin IT portal — opens in a new tab',
+    /*
+     * The service's own address. Linked at the root rather than at the sign-in
+     * URL it redirects to: that URL carries a callbackUrl of its own, and
+     * pinning a link to someone else's login route means it breaks the day
+     * they change it. Sent to the front door, IT BOX decides where to put
+     * whoever arrives — including straight through, if they are already
+     * signed in.
+     *
+     * If portal.chaithanin.com is pointed at this service, change it here and
+     * nowhere else.
+     */
+    href: 'https://itbox-ppjbzqdu3q-as.a.run.app',
+    description: 'IT BOX — opens in a new tab',
   },
 ];
