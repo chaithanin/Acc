@@ -1,0 +1,147 @@
+/*
+ * Company cards.
+ *
+ * The face carries the company's mark; the details slide up over it on hover.
+ * Adapted from a Uiverse card by gharsh11032000 — the geometry is theirs, the
+ * behaviour below is not.
+ *
+ * Three things the original does not have to worry about and this does:
+ *
+ *   1. The whole card is the button. A card that reveals its action only on
+ *      hover has no action at all on a phone, and this is the screen standing
+ *      between someone and their own financial data.
+ *   2. Focus reveals the same panel as hover, so the card is usable from a
+ *      keyboard rather than only from a mouse.
+ *   3. Colours come from the theme, so the card is not a light rectangle
+ *      stranded in a dark page.
+ */
+
+.card {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  perspective: 1000px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+    box-shadow 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+    border-color 0.2s ease;
+}
+
+.card:hover,
+.card:focus-visible {
+  transform: scale(1.03);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 0.12);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* The mark, centred on the face of the card. */
+.face {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  padding: 1.25rem;
+  transition: opacity 0.4s ease, scale 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.card:hover .face,
+.card:focus-within .face {
+  scale: 0.85;
+  opacity: 0;
+}
+
+.content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 1.25rem;
+  background-color: var(--color-surface);
+  transform: rotateX(-90deg);
+  transform-origin: bottom;
+  transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.card:hover .content,
+.card:focus-within .content {
+  transform: rotateX(0deg);
+}
+
+.title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.description {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--color-ink-secondary);
+}
+
+.meta {
+  margin-top: auto;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--color-ink-muted);
+}
+
+.cue {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+/*
+ * Touch screens have no hover, so the panel that would stay hidden is shown
+ * from the start and the flip is dropped. The card still works the same way;
+ * it simply does not perform.
+ */
+@media (hover: none) {
+  .face {
+    display: none;
+  }
+
+  .content {
+    position: static;
+    height: 100%;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card:hover,
+  .card:focus-visible,
+  .face,
+  .content {
+    transition: none;
+    transform: none;
+    scale: none;
+  }
+
+  .face {
+    display: none;
+  }
+
+  .content {
+    position: static;
+    height: 100%;
+  }
+}

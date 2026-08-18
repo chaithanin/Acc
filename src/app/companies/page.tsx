@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { clearActiveCompany, currentUser, setActiveCompany } from '@/lib/auth';
 import { companiesForUser } from '@/lib/db/repositories/companies';
 import { CompanyLogo } from './company-logo';
+import styles from './companies.module.css';
 
 /**
  * Company selection — the first screen after signing in.
@@ -66,29 +67,33 @@ export default async function SelectCompanyPage({
             </p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {companies.map((company) => (
-              <form
-                key={company.id}
-                action={chooseCompany}
-                className="flex flex-col rounded-[var(--radius-card)] border border-border bg-surface p-5 transition-colors hover:border-border-strong"
-              >
+              <form key={company.id} action={chooseCompany}>
                 <input type="hidden" name="companyId" value={company.id} />
 
-                <CompanyLogo logo={company.logo} code={company.companyCode} name={company.displayName} />
+                {/*
+                  The card itself submits. Anything smaller would put the only
+                  way in behind a hover, which a phone cannot perform.
+                */}
+                <button type="submit" className={styles.card}>
+                  <span className={styles.face}>
+                    <CompanyLogo
+                      logo={company.logo}
+                      code={company.companyCode}
+                      name={company.displayName}
+                    />
+                  </span>
 
-                <h2 className="mt-4 font-semibold text-ink">{company.displayName}</h2>
-                <p className="mt-0.5 text-sm text-ink-secondary">{company.legalName}</p>
-                <p className="mt-2 text-xs text-ink-muted">
-                  {company.projectCount} {company.projectCount === 1 ? 'project' : 'projects'} ·{' '}
-                  {company.companyCode}
-                </p>
-
-                <button
-                  type="submit"
-                  className="mt-4 w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-                >
-                  Open Dashboard
+                  <span className={styles.content}>
+                    <span className={styles.title}>{company.displayName}</span>
+                    <span className={styles.description}>{company.legalName}</span>
+                    <span className={styles.cue}>Open Dashboard →</span>
+                    <span className={styles.meta}>
+                      {company.projectCount}{' '}
+                      {company.projectCount === 1 ? 'project' : 'projects'} · {company.companyCode}
+                    </span>
+                  </span>
                 </button>
               </form>
             ))}

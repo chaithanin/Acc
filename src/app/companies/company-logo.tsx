@@ -27,21 +27,21 @@ export function CompanyLogo({
 
   if (!logo || failed) {
     return (
-      <div className="grid h-14 w-24 place-items-center rounded-md bg-surface-sunken text-base font-semibold tracking-wide text-ink-secondary">
+      <span className="grid h-14 w-24 place-items-center rounded-md bg-surface-sunken text-base font-semibold tracking-wide text-ink-secondary">
         {code.slice(0, 3)}
-      </div>
+      </span>
     );
   }
 
   return (
-    <div className="grid h-14 w-24 place-items-center overflow-hidden rounded-md bg-white">
+    <span className="grid h-16 w-32 place-items-center overflow-hidden rounded-md bg-white">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={logo}
         alt={name}
-        className="max-h-12 max-w-[5.5rem] object-contain"
+        className="max-h-14 max-w-[7rem] object-contain"
         onError={() => setFailed(true)}
       />
-    </div>
+    </span>
   );
 }
