@@ -48,6 +48,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { href: '/settings/budget', label: 'Budget', roles: ['admin', 'finance'] },
       { href: '/settings/projects', label: 'Projects & Aliases', roles: ['admin', 'finance'] },
       { href: '/settings/templates', label: 'Template Mapping', roles: ['admin', 'finance'] },
+      { href: '/settings/companies', label: 'Companies', roles: ['admin'] },
       { href: '/settings/users', label: 'Users & Roles', roles: ['admin'] },
     ],
   },
