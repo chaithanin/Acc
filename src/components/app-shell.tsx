@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { Role, User } from '@/lib/types';
-import { EXTERNAL_LINKS } from '@/config/external-links';
 import { FALLBACK_ICON, NAV_ICONS } from './nav-icons';
 import { cx } from './ui/primitives';
 
@@ -183,75 +182,7 @@ export function AppShell({
           rather than a menu item among the pages, because it changes which
           data every other link shows.
         */}
-        {EXTERNAL_LINKS.length > 0 ? (
-          <div className="mt-auto px-2 pb-2">
-            {collapsed ? (
-              <div className="mx-2 mb-2 border-t border-sidebar-border" />
-            ) : (
-              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-ink-muted">
-                Links
-              </p>
-            )}
-
-            {EXTERNAL_LINKS.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                // Opens in its own tab: this one leaves the dashboard, and
-                // someone half-way through an import should not lose it by
-                // following a link. noreferrer goes with it so the opened page
-                // cannot reach back through window.opener.
-                target="_blank"
-                rel="noopener noreferrer"
-                title={link.description}
-                className={cx(
-                  'mb-0.5 flex items-center gap-3 rounded-lg text-sm transition-colors',
-                  'text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink',
-                  collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
-                )}
-              >
-                <span className="shrink-0">
-                  <svg
-                    width={18}
-                    height={18}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.7}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M3 9h18" />
-                    <path d="M8 14h8" />
-                  </svg>
-                </span>
-
-                {collapsed ? (
-                  <span className="sr-only">{link.label} (opens in a new tab)</span>
-                ) : (
-                  <>
-                    <span className="truncate">{link.label}</span>
-                    {/* Marks the boundary of this system, rather than letting
-                        a link out look like one of its own pages. */}
-                    <span aria-hidden className="ml-auto text-[11px] opacity-70">
-                      ↗
-                    </span>
-                    <span className="sr-only">(opens in a new tab)</span>
-                  </>
-                )}
-              </a>
-            ))}
-          </div>
-        ) : null}
-
-        <div
-          className={cx(
-            'border-t border-sidebar-border p-2',
-            EXTERNAL_LINKS.length > 0 ? '' : 'mt-auto',
-          )}
-        >
+        <div className="mt-auto border-t border-sidebar-border p-2">
           {collapsed ? (
             <Link
               href="/companies"
