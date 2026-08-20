@@ -3,6 +3,12 @@ import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, can, currentUser } from '@/lib/auth';
 import {
+  companyIdsForUser,
+  grantCompany,
+  listAllCompanies,
+  revokeCompany,
+} from '@/lib/db/repositories/companies';
+import {
   createUser,
   findUserById,
   isExpired,
@@ -29,6 +35,8 @@ export default async function UserSettingsPage({
 
   const { error, notice } = await searchParams;
   const users = listUsers();
+  const companies = listAllCompanies(false);
+  const accessByUser = new Map(users.map((u) => [u.id, companyIdsForUser(u.id)]));
 
   async function guard() {
     'use server';
@@ -52,13 +60,30 @@ export default async function UserSettingsPage({
       redirect(`/settings/users?error=${encodeURIComponent(`Passwords must be at least ${MIN_PASSWORD} characters.`)}`);
     }
 
+    const grantedIds = formData.getAll('companies').map(String).filter(Boolean);
+
+    // An account with no company sees an empty chooser and can do nothing at
+    // all, which looks like a broken system rather than a missing grant. It is
+    // refused here instead of being created and then puzzled over.
+    if (grantedIds.length === 0) {
+      redirect(
+        `/settings/users?error=${encodeURIComponent('Choose at least one company. An account with none can see nothing.')}`,
+      );
+    }
+
+    let created;
     try {
-      createUser({ email, name, password, role, expiresAt });
+      created = createUser({ email, name, password, role, expiresAt });
     } catch (err) {
       redirect(`/settings/users?error=${encodeURIComponent((err as Error).message)}`);
     }
+
+    for (const companyId of grantedIds) grantCompany(created.id, companyId);
+
     revalidatePath('/settings/users');
-    redirect(`/settings/users?notice=${encodeURIComponent(`Created ${email}.`)}`);
+    redirect(
+      `/settings/users?notice=${encodeURIComponent(`Created ${email} with access to ${grantedIds.length} ${grantedIds.length === 1 ? 'company' : 'companies'}.`)}`,
+    );
   }
 
   async function updateUserAction(formData: FormData) {
@@ -85,14 +110,28 @@ export default async function UserSettingsPage({
       }
     }
 
-    updateUser(id, {
-      name: String(formData.get('name') ?? '').trim() || undefined,
-      role,
-      active,
-      expiresAt,
-    });
+    try {
+      updateUser(id, {
+        name: String(formData.get('name') ?? '').trim() || undefined,
+        email: String(formData.get('email') ?? '').trim() || undefined,
+        role,
+        active,
+        expiresAt,
+      });
+    } catch (err) {
+      redirect(`/settings/users?error=${encodeURIComponent((err as Error).message)}`);
+    }
+
+    // Company access is replaced with what the form says, rather than added
+    // to: a checkbox that is now clear has to mean the grant is gone.
+    const wanted = new Set(formData.getAll('companies').map(String).filter(Boolean));
+    const held = new Set(companyIdsForUser(id));
+
+    for (const companyId of wanted) if (!held.has(companyId)) grantCompany(id, companyId);
+    for (const companyId of held) if (!wanted.has(companyId)) revokeCompany(id, companyId);
 
     revalidatePath('/settings/users');
+    revalidatePath('/companies');
     redirect(`/settings/users?notice=${encodeURIComponent(`Updated ${target.email}.`)}`);
   }
 
@@ -150,6 +189,8 @@ export default async function UserSettingsPage({
               expired: isExpired(row),
             }}
             isSelf={row.id === user.id}
+            companies={companies.map((c) => ({ id: c.id, name: c.displayName, code: c.companyCode }))}
+            grantedCompanyIds={accessByUser.get(row.id) ?? []}
             roles={ROLES}
             roleLabels={ROLE_LABELS}
             minPassword={MIN_PASSWORD}
@@ -213,6 +254,25 @@ export default async function UserSettingsPage({
                 />
               </label>
             </div>
+            <div className="border-t border-border pt-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+                Companies this user may open
+              </p>
+              <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                {companies.map((company) => (
+                  <label key={company.id} className="flex items-center gap-2 text-sm text-ink">
+                    <input type="checkbox" name="companies" value={company.id} />
+                    <span className="truncate" title={company.displayName}>
+                      {company.displayName}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-ink-muted">
+                At least one is required. An account with none signs in to an empty screen.
+              </p>
+            </div>
+
             <button
               type="submit"
               className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"

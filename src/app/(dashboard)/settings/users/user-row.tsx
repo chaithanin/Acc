@@ -17,6 +17,8 @@ import type { Role } from '@/lib/types';
 export function UserRow({
   user,
   isSelf,
+  companies,
+  grantedCompanyIds,
   roles,
   roleLabels,
   minPassword,
@@ -33,6 +35,8 @@ export function UserRow({
     expired: boolean;
   };
   isSelf: boolean;
+  companies: { id: string; name: string; code: string }[];
+  grantedCompanyIds: string[];
   roles: Role[];
   roleLabels: Record<Role, string>;
   minPassword: number;
@@ -55,6 +59,23 @@ export function UserRow({
 
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="neutral">{roleLabels[user.role]}</Badge>
+
+          {/*
+            Access is worth showing without opening the row: an account with no
+            company can sign in and see nothing, which reads as a broken system
+            until someone notices the grant is missing.
+          */}
+          {grantedCompanyIds.length === 0 ? (
+            <Badge tone="critical" icon={<span aria-hidden>▲</span>}>
+              No company
+            </Badge>
+          ) : (
+            <Badge tone="neutral">
+              {grantedCompanyIds.length === companies.length
+                ? 'All companies'
+                : `${grantedCompanyIds.length} of ${companies.length} companies`}
+            </Badge>
+          )}
 
           {user.expired ? (
             <Badge tone="critical" icon={<span aria-hidden>▲</span>}>
@@ -96,6 +117,15 @@ export function UserRow({
               />
             </Field>
 
+            <Field label="Email (used to sign in)">
+              <input
+                name="email"
+                type="email"
+                defaultValue={user.email}
+                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              />
+            </Field>
+
             <Field label="Role">
               <select
                 name="role"
@@ -125,6 +155,32 @@ export function UserRow({
                 Account is active
               </label>
             </Field>
+          </div>
+
+          <div className="mt-4 border-t border-border pt-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+              Companies this user can open
+            </p>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {companies.map((company) => (
+                <label key={company.id} className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    name="companies"
+                    value={company.id}
+                    defaultChecked={grantedCompanyIds.includes(company.id)}
+                  />
+                  <span className="truncate" title={company.name}>
+                    {company.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-ink-muted">
+              Only what is ticked here appears on their company screen. Clearing one takes effect
+              at once — if they are working in that company, their next page sends them back to
+              the chooser.
+            </p>
           </div>
 
           <p className="mt-2 text-xs text-ink-muted">

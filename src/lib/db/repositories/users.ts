@@ -156,17 +156,37 @@ export function setUserExpiry(id: string, expiresAt: string | null): void {
 /** Updates the editable profile fields in one go. */
 export function updateUser(
   id: string,
-  input: { name?: string; role?: Role; expiresAt?: string | null; active?: boolean },
+  input: {
+    name?: string;
+    email?: string;
+    role?: Role;
+    expiresAt?: string | null;
+    active?: boolean;
+  },
 ): User | null {
   const existing = findUserById(id);
   if (!existing) return null;
 
+  // The email is the sign-in name, so a change to it changes how someone gets
+  // in. Normalised the same way it is at sign-in, or a stray capital would
+  // lock the account out of itself.
+  const email = input.email?.trim().toLowerCase() || existing.email;
+
+  if (email !== existing.email) {
+    const taken = findUserByEmail(email);
+    if (taken && taken.id !== id) {
+      throw new Error(`${email} is already used by another account.`);
+    }
+  }
+
   getDb()
     .prepare(
-      `UPDATE users SET name = ?, role = ?, expires_at = ?, active = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE users SET name = ?, email = ?, role = ?, expires_at = ?, active = ?, updated_at = ?
+        WHERE id = ?`,
     )
     .run(
       input.name?.trim() || existing.name,
+      email,
       input.role ?? existing.role,
       input.expiresAt === undefined ? existing.expiresAt : input.expiresAt || null,
       toDbBool(input.active ?? existing.active),
