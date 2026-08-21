@@ -21,6 +21,28 @@ export interface SeedResult {
   createdAdmin: { email: string; password: string } | null;
 }
 
+/**
+ * Is this a deployment serving real data?
+ *
+ * Read from the environment each time rather than captured at module load, so
+ * a test can set it around a single call.
+ */
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+/**
+ * The administrator secret, or null when it was not really supplied.
+ *
+ * An empty string and a string of spaces are both "not supplied". Treating
+ * them as a password is how a deployment ends up with an administrator whose
+ * password is nothing at all — the compose file defaults this variable to an
+ * empty string, so it arrives set on every deploy that forgot it.
+ */
+function adminSecret(override?: string): string | null {
+  const raw = override ?? process.env.GTG_ADMIN_PASSWORD ?? '';
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 export function bootstrapDatabase(options: { adminPassword?: string } = {}): SeedResult {
   // Touch the connection so the schema is applied before anything reads it.
   getDb();
@@ -77,8 +99,21 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
   }
 
   if (countUsers() === 0) {
-    const email = process.env.GTG_ADMIN_EMAIL ?? 'admin@globaltopgroup.local';
-    const supplied = options.adminPassword ?? process.env.GTG_ADMIN_PASSWORD;
+    const email = (process.env.GTG_ADMIN_EMAIL ?? 'admin@globaltopgroup.local').trim();
+    const supplied = adminSecret(options.adminPassword);
+
+    // In production the secret must be provided. Generating one instead would
+    // mean the security of a system holding six companies' financial records
+    // depended on someone reading a log line, and a blank one would mean it
+    // depended on nothing at all. Failing to start is recoverable; an
+    // administrator account with no password is not.
+    if (!supplied && isProduction()) {
+      throw new Error(
+        'GTG_ADMIN_PASSWORD is not set. The first administrator cannot be created without it. ' +
+          'Set it in the deployment environment and start again.',
+      );
+    }
+
     const password = supplied ?? generatePassword();
     const admin = createUser({ email, name: 'Administrator', password, role: 'admin' });
     result.createdAdmin = { email, password };
@@ -88,16 +123,15 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
     // would sign in to an empty screen with no way to grant itself anything.
     for (const company of listAllCompanies()) grantCompany(admin.id, company.id);
 
-    // Also written to the server log. The sign-in page shows this once, but
-    // whoever triggers that first render may be a health check rather than a
-    // person — in which case the only copy of the password would be discarded.
-    // Nothing is logged when the password was supplied, since it is already known.
-    if (!supplied) {
+    // Printed only when this is not production and the password was generated
+    // here, so a real credential never reaches a log file. Nothing is printed
+    // when the password was supplied: it is already known to whoever set it.
+    if (!supplied && !isProduction()) {
       console.warn(
-        `\n[gtg] Created the first administrator account.\n` +
+        `\n[gtg] Created the first administrator account (development only).\n` +
           `[gtg]   email:    ${email}\n` +
           `[gtg]   password: ${password}\n` +
-          `[gtg] Shown once. Sign in and change it, or set GTG_ADMIN_PASSWORD to choose your own.\n`,
+          `[gtg] Set GTG_ADMIN_PASSWORD to choose your own.\n`,
       );
     }
   }

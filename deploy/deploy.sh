@@ -328,6 +328,17 @@ gcloud compute ssh "$VM" --zone="$ZONE" --tunnel-through-iap --quiet --command "
   set -e
   sudo install -D -m 0644 ~/gtg-deploy/docker-compose.yml /opt/gtg/docker-compose.yml
   sudo install -D -m 0644 ~/gtg-deploy/Caddyfile /mnt/data/caddy/Caddyfile
+
+  # The compose file requires this to exist. Created here as well as in the
+  # VM's boot script, because a VM built before that change has an older
+  # run.sh and would otherwise fail on the next deploy. Never overwritten: a
+  # deploy must not wipe a secret someone set.
+  if [ ! -f /opt/gtg/secrets.env ]; then
+    sudo install -m 0600 /dev/null /opt/gtg/secrets.env
+    echo '# GTG_ADMIN_EMAIL / GTG_ADMIN_PASSWORD — read only while no user exists.' \
+      | sudo tee -a /opt/gtg/secrets.env >/dev/null
+  fi
+
   sudo GTG_IMAGE='${IMAGE}' GTG_DOMAIN='${DOMAIN}' /opt/gtg/run.sh
 "
 

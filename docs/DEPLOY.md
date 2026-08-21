@@ -140,23 +140,34 @@ reason the container caps the parser at a 320 MB heap
 
 ## First sign-in
 
-The most reliable option is to choose the password yourself, by setting
-`GTG_ADMIN_EMAIL` and `GTG_ADMIN_PASSWORD` before the first deploy. Nothing is
-generated and nothing can be missed.
-
-Otherwise the first start generates one and shows it in two places: on the
-sign-in page, and in the container log.
+The first administrator's password is supplied, never generated. Put it on the
+VM before the first deploy of a fresh database:
 
 ```bash
-gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
-  --command 'sudo docker logs gtg-app-1 2>&1 | grep "\[gtg\]"'
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a --tunnel-through-iap \
+  --command "sudo tee /opt/gtg/secrets.env >/dev/null <<'ENV'
+GTG_ADMIN_EMAIL=you@yourcompany.com
+GTG_ADMIN_PASSWORD=<a long random password>
+ENV
+sudo chmod 600 /opt/gtg/secrets.env"
 ```
 
-It is shown once either way. Change it after signing in.
+Then deploy. Sign in with that password and change it.
 
-Note that whatever hits `/login` first is what consumes it — including a health
-check or a smoke test, not necessarily a person. That is exactly why it also
-goes to the log.
+**The app refuses to start without it**, when no user exists yet. That is
+deliberate. The alternative was generating a password and showing it on the
+public sign-in page, which meant the first request to reach a new deployment
+consumed the only copy — and that request is as likely to be a health check as
+a person. Failing to start is recoverable; an administrator account nobody can
+sign into, or one created with a blank password, is not.
+
+A blank or whitespace value counts as not set. The compose file used to default
+this variable to an empty string, so it arrived looking supplied on every
+deploy that had forgotten it, and the first administrator was created with a
+password of nothing at all.
+
+The secret is read only while no user exists. Once an administrator is there it
+is ignored, and a deploy never rewrites the file.
 
 ### Managing users from the command line
 

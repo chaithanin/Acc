@@ -1,5 +1,6 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { Role, User } from '@/lib/types';
+import { MIN_PASSWORD } from '@/config/password-policy';
 import { fromDbBool, getDb, newId, nowIso, toDbBool } from '../index';
 
 /**
@@ -99,6 +100,23 @@ export function listUsers(): User[] {
     .map(toUser);
 }
 
+/**
+ * The password rule, enforced where passwords are stored rather than only in
+ * the forms that collect them.
+ *
+ * A form is one caller. The seed path, the command-line tool and any future
+ * route are others, and each of them could otherwise write a password the
+ * policy would have refused — including an empty one.
+ */
+function assertUsablePassword(password: string): void {
+  if (password.trim() === '') {
+    throw new Error('A password is required.');
+  }
+  if (password.length < MIN_PASSWORD) {
+    throw new Error(`Passwords must be at least ${MIN_PASSWORD} characters.`);
+  }
+}
+
 export function createUser(input: {
   email: string;
   name: string;
@@ -106,6 +124,8 @@ export function createUser(input: {
   role: Role;
   expiresAt?: string | null;
 }): User {
+  assertUsablePassword(input.password);
+
   const id = newId();
   const now = nowIso();
   getDb()
@@ -134,6 +154,8 @@ export function createUser(input: {
  * defeat the change entirely.
  */
 export function setUserPassword(id: string, password: string): void {
+  assertUsablePassword(password);
+
   const db = getDb();
   db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
     .run(hashPassword(password), nowIso(), id);

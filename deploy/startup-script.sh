@@ -92,6 +92,21 @@ GTG_IMAGE=${GTG_IMAGE}
 GTG_DOMAIN=${GTG_DOMAIN}
 ENV
 
+# The secret file is created empty if absent and never overwritten, so a deploy
+# cannot wipe a password someone set. Compose requires it to exist; an empty
+# one is a deployment with no administrator secret, which the app then refuses
+# to start with — the failure is loud rather than silently creating an account
+# with a blank password.
+if [[ ! -f /opt/gtg/secrets.env ]]; then
+  cat > /opt/gtg/secrets.env <<'SECRETS'
+# Set before the first deploy of a fresh database:
+#   GTG_ADMIN_EMAIL=admin@example.com
+#   GTG_ADMIN_PASSWORD=<a long random password>
+# Only read when no user exists yet. Once an administrator exists it is unused.
+SECRETS
+  chmod 600 /opt/gtg/secrets.env
+fi
+
 docker compose --project-name gtg up -d --remove-orphans
 
 # Untagged layers from previous releases would otherwise fill a 20 GB disk.

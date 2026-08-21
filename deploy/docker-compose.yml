@@ -17,8 +17,16 @@ services:
       # tighter deadline than the default.
       GTG_PARSE_MAX_HEAP_MB: '320'
       GTG_PARSE_TIMEOUT_MS: '90000'
-      GTG_ADMIN_EMAIL: ${GTG_ADMIN_EMAIL:-}
-      GTG_ADMIN_PASSWORD: ${GTG_ADMIN_PASSWORD:-}
+    # The administrator secret comes from a file the deploy never rewrites,
+    # rather than from an interpolated variable that defaulted to an empty
+    # string — an empty value used to arrive looking supplied, and the first
+    # administrator was created with it. Unset now means unset, and the app
+    # refuses to start rather than create that account.
+    #
+    # Keeping it out of docker-compose.yml also keeps it out of the repository
+    # and out of `docker inspect` on the image.
+    env_file:
+      - /opt/gtg/secrets.env
     volumes:
       # The persistent disk. Everything else in the container is disposable.
       - /mnt/data:/data

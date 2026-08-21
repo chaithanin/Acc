@@ -1,19 +1,19 @@
 import { redirect } from 'next/navigation';
 import { currentUser, purgeExpiredSessions, signIn } from '@/lib/auth';
-import { bootstrapDatabase } from '@/lib/db/bootstrap';
 
 /**
  * Sign-in. Financial data is never served without a session (requirement 30).
  *
- * A first run also seeds the database here, so a fresh deployment has projects,
- * templates and an admin account without a separate command.
+ * Seeding happens at server startup, not here. Rendering a public page must
+ * not be what creates the first administrator, and this page must never show
+ * a credential — the two go together, since the reason to display one was that
+ * this render was the only place it existed.
  */
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string; changed?: string }>;
 }) {
-  const seed = bootstrapDatabase();
   purgeExpiredSessions();
 
   if (await currentUser()) redirect('/');
@@ -94,19 +94,6 @@ export default async function LoginPage({
           </button>
         </form>
 
-        {seed.createdAdmin ? (
-          <div className="mt-4 rounded-[var(--radius-card)] border border-warning/40 bg-warning/10 p-4 text-xs text-ink">
-            <p className="font-semibold">An administrator account was just created.</p>
-            <p className="mt-1.5">
-              Email <span className="font-mono">{seed.createdAdmin.email}</span>
-              <br />
-              Password <span className="font-mono">{seed.createdAdmin.password}</span>
-            </p>
-            <p className="mt-1.5 text-ink-secondary">
-              This is shown once. Sign in and change it straight away.
-            </p>
-          </div>
-        ) : null}
       </div>
     </div>
   );
