@@ -13,6 +13,29 @@ import {
 import { ProjectSettings } from './project-settings';
 
 /**
+ * Resolves a project id posted by a form.
+ *
+ * Every action re-reads the company rather than trusting the one captured when
+ * the page rendered, and answers null for an id outside it. A form is a
+ * request; the id in it is not a permission.
+ *
+ * Defined at module scope, not inside the page. A server action that closes
+ * over a function declared in the render scope cannot be serialised, and the
+ * page fails at request time with "Functions cannot be passed directly to
+ * Client Components" — which nothing in a build or a type-check catches.
+ */
+async function ownProjectId(formData: FormData): Promise<string | null> {
+  const actorCompany = await activeCompany();
+  if (!actorCompany) return null;
+
+  const id = String(formData.get('projectId') ?? '');
+  if (!id) return null;
+
+  const owner = listProjects(true).find((p) => p.id === id);
+  return owner?.companyId === actorCompany.id ? id : null;
+}
+
+/**
  * Projects and aliases (requirement 2).
  *
  * This page is the reason no project name is hard-coded anywhere: when Finance
@@ -38,24 +61,6 @@ export default async function ProjectSettingsPage({
 
   const { error } = await searchParams;
   const projects = listProjects(true).filter((p) => p.companyId === company.id);
-
-  /**
-   * Resolves a project id posted by a form.
-   *
-   * Every action re-reads the company rather than trusting the one captured
-   * when the page rendered, and answers null for an id outside it. A form is a
-   * request; the id in it is not a permission.
-   */
-  async function ownProjectId(formData: FormData): Promise<string | null> {
-    const actorCompany = await activeCompany();
-    if (!actorCompany) return null;
-
-    const id = String(formData.get('projectId') ?? '');
-    if (!id) return null;
-
-    const owner = listProjects(true).find((p) => p.id === id);
-    return owner?.companyId === actorCompany.id ? id : null;
-  }
 
   async function addAliasAction(formData: FormData) {
     'use server';

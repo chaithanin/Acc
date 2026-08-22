@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import ./scripts/register-ts.mjs --test tests/*.test.ts",
     "db:reset": "node --import ./scripts/register-ts.mjs scripts/reset-db.mjs",
-    "seed": "node --import ./scripts/register-ts.mjs scripts/seed.mjs"
+    "seed": "node --import ./scripts/register-ts.mjs scripts/seed.mjs",
+    "test:adversarial": "node --import ./scripts/register-ts.mjs scripts/adversarial-test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
