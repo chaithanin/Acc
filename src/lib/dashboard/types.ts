@@ -1,3 +1,4 @@
+import type { DataScope } from '@/lib/db/scope';
 import type { SnapshotInfo } from '@/lib/db/repositories/snapshots';
 import type { MetricComparison, Project } from '@/lib/types';
 
@@ -28,6 +29,15 @@ export interface DashboardContext {
   company: string;
   companyId: string;
   companyCode: string;
+  /**
+   * What every record read on this page must be filtered by.
+   *
+   * Null only when the company holds no snapshot yet — which is the one case
+   * where there is nothing to read. Pages pass this object straight through
+   * rather than assembling ids themselves, so no page can read a snapshot
+   * without also naming the company it belongs to.
+   */
+  scope: DataScope | null;
   /** Every KPI for the current scope, paired with its previous value. */
   comparisons: MetricComparison[];
   byKey: Map<string, MetricComparison>;

@@ -30,11 +30,11 @@ export default async function OverviewPage({
     'advance_outstanding',
   ]);
 
-  const charts = context.snapshot
+  const charts = context.scope
     ? {
-        projection: getProjection(context.snapshot.id, context.projectId),
-        byProject: getProjectMetrics(context.snapshot.id, context.projects),
-        summary: loadDatasetSummary(context.snapshot.id, context.projectId),
+        projection: getProjection(context.scope),
+        byProject: getProjectMetrics(context.scope, context.projects),
+        summary: loadDatasetSummary(context.scope),
       }
     : null;
 

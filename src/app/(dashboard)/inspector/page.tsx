@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { PageHeader, EmptyState, Card, CardHeader, Badge } from '@/components/ui/primitives';
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { getDb, parseJson } from '@/lib/db';
 import { getImportFiles, getImportIssues, listImports } from '@/lib/db/repositories/imports';
 import { InspectorView } from './inspector-view';
@@ -22,8 +22,15 @@ export default async function InspectorPage({
   if (!user) redirect('/login');
   if (!can(user, 'import:run')) redirect('/');
 
+  const company = await activeCompany();
+  if (!company) redirect('/companies');
+
+  // `importId` arrives from the query string, so it is looked up in this
+  // company's own list rather than fetched directly. An id from elsewhere
+  // simply is not in the list, and the page falls back to the newest import
+  // this company does own.
   const { importId } = await searchParams;
-  const imports = listImports(50);
+  const imports = listImports(company.id, 50);
   const selected = imports.find((i) => i.id === importId) ?? imports[0];
 
   if (!selected) {
@@ -39,39 +46,46 @@ export default async function InspectorPage({
   }
 
   const db = getDb();
-  const files = getImportFiles(selected.id);
+  const files = getImportFiles(company.id, selected.id);
 
   const sheets = db
-    .prepare<[string], {
+    .prepare<[string, string], {
       import_file_id: string; sheet_name: string; sheet_index: number; report_type: string;
       confidence: number; header_row: number | null; column_map_json: string | null;
       detected_headers_json: string | null; scores_json: string | null;
       row_count: number; parsed_count: number;
     }>(
-      `SELECT import_file_id, sheet_name, sheet_index, report_type, confidence, header_row,
-              column_map_json, detected_headers_json, scores_json, row_count, parsed_count
-         FROM sheet_detections WHERE import_id = ? ORDER BY sheet_index`,
+      `SELECT d.import_file_id, d.sheet_name, d.sheet_index, d.report_type, d.confidence, d.header_row,
+              d.column_map_json, d.detected_headers_json, d.scores_json, d.row_count, d.parsed_count
+         FROM sheet_detections d
+         JOIN imports i ON i.id = d.import_id
+        WHERE d.import_id = ? AND i.company_id = ?
+        ORDER BY d.sheet_index`,
     )
-    .all(selected.id);
+    .all(selected.id, company.id);
 
   const metrics = selected.snapshotId
     ? db
-        .prepare<[string], { metric_key: string; label: string; section: string; value: number | null; formula: string | null; project_id: string | null }>(
+        .prepare<[string, string], { metric_key: string; label: string; section: string; value: number | null; formula: string | null; project_id: string | null }>(
           `SELECT metric_key, label, section, value, formula, project_id
-             FROM calculated_metrics WHERE snapshot_id = ? AND project_id IS NULL
-             ORDER BY section, metric_key`,
+             FROM calculated_metrics
+            WHERE snapshot_id = ? AND company_id = ? AND project_id IS NULL
+            ORDER BY section, metric_key`,
         )
-        .all(selected.snapshotId)
+        .all(selected.snapshotId, company.id)
     : [];
 
-  const issues = getImportIssues(selected.id);
+  const issues = getImportIssues(company.id, selected.id);
 
   const rawRows = db
-    .prepare<[string], { import_file_id: string; sheet_name: string; row_number: number; cells_json: string }>(
-      `SELECT import_file_id, sheet_name, row_number, cells_json
-         FROM raw_rows WHERE import_id = ? ORDER BY sheet_name, row_number LIMIT 400`,
+    .prepare<[string, string], { import_file_id: string; sheet_name: string; row_number: number; cells_json: string }>(
+      `SELECT r.import_file_id, r.sheet_name, r.row_number, r.cells_json
+         FROM raw_rows r
+         JOIN imports i ON i.id = r.import_id
+        WHERE r.import_id = ? AND i.company_id = ?
+        ORDER BY r.sheet_name, r.row_number LIMIT 400`,
     )
-    .all(selected.id);
+    .all(selected.id, company.id);
 
   return (
     <>

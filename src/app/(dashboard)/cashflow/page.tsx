@@ -22,9 +22,7 @@ export default async function CashflowPage({
     'total_future_expense',
   ]);
 
-  const projection = context.snapshot
-    ? getProjection(context.snapshot.id, context.projectId)
-    : null;
+  const projection = context.scope ? getProjection(context.scope) : null;
 
   return (
     <DashboardPage

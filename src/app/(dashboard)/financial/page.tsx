@@ -46,13 +46,8 @@ export default async function FinancialDashboardPage({
   const reportDate = context.snapshot?.reportDate ?? '';
   const month = reportDate.slice(0, 7);
 
-  const series = context.snapshot
-    ? getMonthlySeries(
-        context.snapshot.id,
-        context.projectId,
-        reportDate,
-        metrics.get('available_cash')?.current ?? 0,
-      )
+  const series = context.scope
+    ? getMonthlySeries(context.scope, reportDate, metrics.get('available_cash')?.current ?? 0)
     : [];
 
   const budget = context.snapshot ? getBudget(month, context.projectId) : null;

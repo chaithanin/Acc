@@ -23,10 +23,10 @@ export default async function ReceivablePage({
     'transfer_outstanding',
   ]);
 
-  const data = context.snapshot
+  const data = context.scope
     ? {
-        rows: getReceivableRows(context.snapshot.id, context.projectId),
-        summary: loadDatasetSummary(context.snapshot.id, context.projectId),
+        rows: getReceivableRows(context.scope),
+        summary: loadDatasetSummary(context.scope),
       }
     : null;
 

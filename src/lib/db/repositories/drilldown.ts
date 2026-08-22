@@ -1,4 +1,5 @@
 import { getDb } from '../index';
+import { scopeClause, type DataScope } from '../scope';
 
 /**
  * Drill-down queries (requirement 16).
@@ -192,22 +193,27 @@ function sourceFor(metricKey: string): DrilldownSource | null {
   return DRILLDOWN_SOURCES[metricKey] ?? null;
 }
 
+/**
+ * The records behind one KPI.
+ *
+ * This is the endpoint an attacker reaches for: it takes a snapshot id and a
+ * project id straight from the query string and returns rows. The company in
+ * `scope` comes from the session instead, and both it and the snapshot are
+ * matched on the record itself, so another company's snapshot id returns an
+ * empty result rather than that company's records.
+ */
 export function drilldown(
-  snapshotId: string,
+  scope: DataScope,
   metricKey: string,
-  projectId: string | null,
   limit = 500,
 ): { rows: DrilldownRow[]; label: string; supported: boolean; total: number } {
   const source = sourceFor(metricKey);
   if (!source) return { rows: [], label: '', supported: false, total: 0 };
 
-  const predicates = ['t.snapshot_id = ?'];
-  const params: (string | number)[] = [snapshotId];
+  const scoped = scopeClause(scope, 't');
+  const predicates = [scoped.where];
+  const params: (string | number)[] = [...scoped.params];
 
-  if (projectId) {
-    predicates.push('t.project_id = ?');
-    params.push(projectId);
-  }
   if (source.where) {
     predicates.push(source.where);
     params.push(...(source.params ?? []));

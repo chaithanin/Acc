@@ -22,7 +22,7 @@ export default async function BoqPage({
     'total_future_expense',
   ]);
 
-  const rows = context.snapshot ? getBoqRows(context.snapshot.id, context.projectId) : [];
+  const rows = context.scope ? getBoqRows(context.scope) : [];
 
   return (
     <DashboardPage

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getDb } from '@/lib/db';
+import { scopeClause, type DataScope } from '@/lib/db/scope';
 import { getProjection as readProjection } from '@/lib/db/repositories/snapshots';
 import type { CashflowProjection } from '@/lib/calc/cashflow';
 import type { Project } from '@/lib/types';
@@ -11,6 +12,11 @@ import type { Project } from '@/lib/types';
  * These queries roll stored records up for display. They never recompute a
  * KPI — that is the calculation engine's job, and duplicating it here would
  * create a second definition of the same number.
+ *
+ * Every one of them takes a `DataScope` rather than a bare snapshot id. The
+ * snapshot alone is not a boundary: two companies can hold snapshots for the
+ * same report date, and a snapshot id arriving from a query string is not
+ * proof of anything. The company travels with the read instead.
  */
 
 export interface ProjectMetricRow {
@@ -23,15 +29,15 @@ export interface ProjectMetricRow {
 }
 
 /** Per-project figures for the comparison chart on the overview. */
-export function getProjectMetrics(snapshotId: string, projects: Project[]): ProjectMetricRow[] {
+export function getProjectMetrics(scope: DataScope, projects: Project[]): ProjectMetricRow[] {
   const rows = getDb()
-    .prepare<[string], { project_id: string; metric_key: string; value: number | null }>(
+    .prepare<[string, string], { project_id: string; metric_key: string; value: number | null }>(
       `SELECT project_id, metric_key, value
          FROM calculated_metrics
-        WHERE snapshot_id = ? AND project_id IS NOT NULL
+        WHERE snapshot_id = ? AND company_id = ? AND project_id IS NOT NULL
           AND metric_key IN ('total_receivable_outstanding','boq_outstanding','available_cash','advance_outstanding')`,
     )
-    .all(snapshotId);
+    .all(scope.snapshotId, scope.companyId);
 
   const byProject = new Map<string, Record<string, number>>();
   for (const row of rows) {
@@ -52,8 +58,8 @@ export function getProjectMetrics(snapshotId: string, projects: Project[]): Proj
     .sort((a, b) => a.projectName.localeCompare(b.projectName));
 }
 
-export function getProjection(snapshotId: string, projectId: string | null): CashflowProjection {
-  return readProjection(snapshotId, projectId);
+export function getProjection(scope: DataScope): CashflowProjection {
+  return readProjection(scope);
 }
 
 export interface DatasetSummary {
@@ -74,25 +80,26 @@ const CATEGORY_LABELS: Record<string, string> = {
   other_income: 'Other Income',
 };
 
-export function loadDatasetSummary(snapshotId: string, projectId: string | null): DatasetSummary {
+export function loadDatasetSummary(scope: DataScope): DatasetSummary {
   const db = getDb();
-  const scope = projectId ? 'AND project_id = ?' : '';
-  const args = projectId ? [snapshotId, projectId] : [snapshotId];
+  // Every subquery below reads a different table under the same alias `t`, so
+  // one clause serves them all and none can be written without the company.
+  const { where, params: args } = scopeClause(scope, 't');
 
   const monthly = db
-    .prepare<(string | null)[], { month: string | null; income: number; expense: number }>(
+    .prepare<string[], { month: string | null; income: number; expense: number }>(
       `SELECT month,
               SUM(income)  AS income,
               SUM(expense) AS expense
          FROM (
-           SELECT month, contractual_amount AS income, 0 AS expense
-             FROM income_records WHERE snapshot_id = ? ${scope}
+           SELECT t.month, t.contractual_amount AS income, 0 AS expense
+             FROM income_records t WHERE ${where}
            UNION ALL
-           SELECT month, 0 AS income, amount AS expense
-             FROM expense_records WHERE snapshot_id = ? ${projectId ? 'AND project_id = ?' : ''}
+           SELECT t.month, 0 AS income, t.amount AS expense
+             FROM expense_records t WHERE ${where}
            UNION ALL
-           SELECT month, 0 AS income, (boq_to_date - paid_amount) AS expense
-             FROM boq_records WHERE snapshot_id = ? ${projectId ? 'AND project_id = ?' : ''}
+           SELECT t.month, 0 AS income, (t.boq_to_date - t.paid_amount) AS expense
+             FROM boq_records t WHERE ${where}
          )
         WHERE month IS NOT NULL
         GROUP BY month
@@ -101,13 +108,13 @@ export function loadDatasetSummary(snapshotId: string, projectId: string | null)
     .all(...args, ...args, ...args);
 
   const byCategory = db
-    .prepare<(string | null)[], { category: string; contractual: number; received: number }>(
-      `SELECT category,
-              SUM(contractual_amount) AS contractual,
-              SUM(receive_amount)     AS received
-         FROM receivable_records
-        WHERE snapshot_id = ? ${scope}
-        GROUP BY category`,
+    .prepare<string[], { category: string; contractual: number; received: number }>(
+      `SELECT t.category,
+              SUM(t.contractual_amount) AS contractual,
+              SUM(t.receive_amount)     AS received
+         FROM receivable_records t
+        WHERE ${where}
+        GROUP BY t.category`,
     )
     .all(...args);
 
@@ -115,14 +122,14 @@ export function loadDatasetSummary(snapshotId: string, projectId: string | null)
   const contractualTotal = byCategory.reduce((sum, r) => sum + (r.contractual ?? 0), 0);
 
   const counts = db
-    .prepare<(string | null)[], { kind: string; n: number }>(
-      `SELECT 'receivable' AS kind, COUNT(*) AS n FROM receivable_records WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'boq', COUNT(*) FROM boq_records WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'bank', COUNT(*) FROM bank_balances WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'wip', COUNT(*) FROM wip_records WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'gl', COUNT(*) FROM gl_entries WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'income', COUNT(*) FROM income_records WHERE snapshot_id = ? ${scope}
-       UNION ALL SELECT 'expense', COUNT(*) FROM expense_records WHERE snapshot_id = ? ${scope}`,
+    .prepare<string[], { kind: string; n: number }>(
+      `SELECT 'receivable' AS kind, COUNT(*) AS n FROM receivable_records t WHERE ${where}
+       UNION ALL SELECT 'boq', COUNT(*) FROM boq_records t WHERE ${where}
+       UNION ALL SELECT 'bank', COUNT(*) FROM bank_balances t WHERE ${where}
+       UNION ALL SELECT 'wip', COUNT(*) FROM wip_records t WHERE ${where}
+       UNION ALL SELECT 'gl', COUNT(*) FROM gl_entries t WHERE ${where}
+       UNION ALL SELECT 'income', COUNT(*) FROM income_records t WHERE ${where}
+       UNION ALL SELECT 'expense', COUNT(*) FROM expense_records t WHERE ${where}`,
     )
     .all(...args, ...args, ...args, ...args, ...args, ...args, ...args);
 
@@ -167,28 +174,26 @@ const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'S
  * always reads JAN–DEC and a gap in the data is visible as a gap.
  */
 export function getMonthlySeries(
-  snapshotId: string,
-  projectId: string | null,
+  scope: DataScope,
   reportDate: string,
   openingCash: number,
 ): MonthPoint[] {
   const db = getDb();
   const year = reportDate.slice(0, 4);
-  const scope = projectId ? 'AND project_id = ?' : '';
-  const args = projectId ? [snapshotId, projectId] : [snapshotId];
+  const { where, params: args } = scopeClause(scope, 't');
 
   const rows = db
-    .prepare<(string | null)[], { month: string; income: number; expense: number }>(
+    .prepare<string[], { month: string; income: number; expense: number }>(
       `SELECT month, SUM(income) AS income, SUM(expense) AS expense
          FROM (
-           SELECT month, contractual_amount AS income, 0 AS expense
-             FROM income_records  WHERE snapshot_id = ? ${scope}
+           SELECT t.month, t.contractual_amount AS income, 0 AS expense
+             FROM income_records  t WHERE ${where}
            UNION ALL
-           SELECT month, 0, amount
-             FROM expense_records WHERE snapshot_id = ? ${scope}
+           SELECT t.month, 0, t.amount
+             FROM expense_records t WHERE ${where}
            UNION ALL
-           SELECT month, 0, (boq_to_date - paid_amount)
-             FROM boq_records     WHERE snapshot_id = ? ${scope}
+           SELECT t.month, 0, (t.boq_to_date - t.paid_amount)
+             FROM boq_records     t WHERE ${where}
          )
         WHERE month IS NOT NULL
         GROUP BY month`,
@@ -230,19 +235,18 @@ export interface ReceivableTableRow {
   sourceCell: string | null;
 }
 
-export function getReceivableRows(snapshotId: string, projectId: string | null): ReceivableTableRow[] {
+export function getReceivableRows(scope: DataScope): ReceivableTableRow[] {
   const db = getDb();
+  const { where, params: args } = scopeClause(scope, 't');
   const sql = `
-    SELECT p.name AS project_name, r.category, r.customer, r.unit,
-           r.contractual_amount, r.receive_amount,
+    SELECT p.name AS project_name, t.category, t.customer, t.unit,
+           t.contractual_amount, t.receive_amount,
            sr.source_file, sr.source_sheet, sr.source_cell
-      FROM receivable_records r
-      LEFT JOIN projects p ON p.id = r.project_id
-      LEFT JOIN source_references sr ON sr.id = r.source_ref_id
-     WHERE r.snapshot_id = ? ${projectId ? 'AND r.project_id = ?' : ''}
-     ORDER BY r.contractual_amount DESC`;
-
-  const args = projectId ? [snapshotId, projectId] : [snapshotId];
+      FROM receivable_records t
+      LEFT JOIN projects p ON p.id = t.project_id
+      LEFT JOIN source_references sr ON sr.id = t.source_ref_id
+     WHERE ${where}
+     ORDER BY t.contractual_amount DESC`;
 
   return db
     .prepare<string[], any>(sql)
@@ -283,18 +287,17 @@ export interface BoqTableRow {
   sourceCell: string | null;
 }
 
-export function getBoqRows(snapshotId: string, projectId: string | null): BoqTableRow[] {
+export function getBoqRows(scope: DataScope): BoqTableRow[] {
+  const { where, params: args } = scopeClause(scope, 't');
   const sql = `
-    SELECT p.name AS project_name, b.description, b.contractor, b.cost_category, b.month,
-           b.boq_amount, b.boq_to_date, b.paid_amount,
+    SELECT p.name AS project_name, t.description, t.contractor, t.cost_category, t.month,
+           t.boq_amount, t.boq_to_date, t.paid_amount,
            sr.source_file, sr.source_sheet, sr.source_cell
-      FROM boq_records b
-      LEFT JOIN projects p ON p.id = b.project_id
-      LEFT JOIN source_references sr ON sr.id = b.source_ref_id
-     WHERE b.snapshot_id = ? ${projectId ? 'AND b.project_id = ?' : ''}
-     ORDER BY b.boq_amount DESC`;
-
-  const args = projectId ? [snapshotId, projectId] : [snapshotId];
+      FROM boq_records t
+      LEFT JOIN projects p ON p.id = t.project_id
+      LEFT JOIN source_references sr ON sr.id = t.source_ref_id
+     WHERE ${where}
+     ORDER BY t.boq_amount DESC`;
 
   return getDb()
     .prepare<string[], any>(sql)
@@ -332,23 +335,20 @@ export interface LedgerTableRow {
   sourceCell: string | null;
 }
 
-export function getLedgerRows(
-  snapshotId: string,
-  projectId: string | null,
-  limit = 5000,
-): LedgerTableRow[] {
+export function getLedgerRows(scope: DataScope, limit = 5000): LedgerTableRow[] {
+  const { where, params } = scopeClause(scope, 't');
   const sql = `
-    SELECT p.name AS project_name, g.account_code, g.account_name, g.entry_date, g.voucher_no,
-           g.vendor, g.description, g.cost_code, g.debit, g.credit, g.balance,
+    SELECT p.name AS project_name, t.account_code, t.account_name, t.entry_date, t.voucher_no,
+           t.vendor, t.description, t.cost_code, t.debit, t.credit, t.balance,
            sr.source_file, sr.source_sheet, sr.source_cell
-      FROM gl_entries g
-      LEFT JOIN projects p ON p.id = g.project_id
-      LEFT JOIN source_references sr ON sr.id = g.source_ref_id
-     WHERE g.snapshot_id = ? ${projectId ? 'AND g.project_id = ?' : ''}
-     ORDER BY g.entry_date, g.voucher_no
+      FROM gl_entries t
+      LEFT JOIN projects p ON p.id = t.project_id
+      LEFT JOIN source_references sr ON sr.id = t.source_ref_id
+     WHERE ${where}
+     ORDER BY t.entry_date, t.voucher_no
      LIMIT ?`;
 
-  const args = projectId ? [snapshotId, projectId, limit] : [snapshotId, limit];
+  const args: (string | number)[] = [...params, limit];
 
   return getDb()
     .prepare<(string | number)[], any>(sql)
@@ -380,16 +380,15 @@ export interface AccountSummaryRow {
   advance: number;
 }
 
-export function getAccountSummary(snapshotId: string, projectId: string | null): AccountSummaryRow[] {
+export function getAccountSummary(scope: DataScope): AccountSummaryRow[] {
+  const { where, params: args } = scopeClause(scope, 't');
   const sql = `
-    SELECT p.name AS project_name, w.account_code, w.account_name,
-           w.current_period, w.ytd, w.advance_payment
-      FROM wip_records w
-      LEFT JOIN projects p ON p.id = w.project_id
-     WHERE w.snapshot_id = ? ${projectId ? 'AND w.project_id = ?' : ''}
-     ORDER BY w.ytd DESC`;
-
-  const args = projectId ? [snapshotId, projectId] : [snapshotId];
+    SELECT p.name AS project_name, t.account_code, t.account_name,
+           t.current_period, t.ytd, t.advance_payment
+      FROM wip_records t
+      LEFT JOIN projects p ON p.id = t.project_id
+     WHERE ${where}
+     ORDER BY t.ytd DESC`;
 
   return getDb()
     .prepare<string[], any>(sql)

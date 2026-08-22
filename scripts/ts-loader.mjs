@@ -36,6 +36,12 @@ function resolveFile(basePath) {
 }
 
 export function resolve(specifier, context, nextResolve) {
+  // See scripts/server-only-stub.mjs: the real package exists to be replaced
+  // by a bundler, and there is none here.
+  if (specifier === 'server-only') {
+    return asModule(path.join(projectRoot, 'scripts/server-only-stub.mjs'));
+  }
+
   if (specifier.startsWith('@/')) {
     const resolved = resolveFile(path.join(srcRoot, specifier.slice(2)));
     if (resolved) return asModule(resolved);

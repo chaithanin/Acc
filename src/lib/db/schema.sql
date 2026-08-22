@@ -202,10 +202,16 @@ CREATE INDEX IF NOT EXISTS idx_source_refs_file ON source_references(import_file
 CREATE TABLE IF NOT EXISTS financial_snapshots (
   id          TEXT PRIMARY KEY,
   import_id   TEXT NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+  company_id  TEXT REFERENCES companies(id),
   report_date TEXT NOT NULL,
   label       TEXT,
-  -- Exactly one snapshot per report date is the "live" one; replacing an
-  -- import flips this rather than deleting history.
+  -- Exactly one snapshot per COMPANY per report date is the "live" one;
+  -- replacing an import flips this rather than deleting history.
+  --
+  -- The company is part of that rule, not decoration. Scoped by date alone,
+  -- one company importing 20 August retired another company's 20 August, and
+  -- a rollback then promoted whichever snapshot happened to be newest across
+  -- the whole group.
   is_current  INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL
 );

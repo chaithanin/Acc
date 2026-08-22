@@ -21,10 +21,10 @@ export default async function LedgerPage({
 
   const metrics = pickMetrics(context, ['advance_outstanding', 'wip_ytd', 'gl_entry_count']);
 
-  const data = context.snapshot
+  const data = context.scope
     ? {
-        accounts: getAccountSummary(context.snapshot.id, context.projectId),
-        entries: getLedgerRows(context.snapshot.id, context.projectId),
+        accounts: getAccountSummary(context.scope),
+        entries: getLedgerRows(context.scope),
       }
     : null;
 

@@ -23,8 +23,8 @@ export default async function ReconciliationPage({
   const params = await searchParams;
   const context = await loadDashboard(params);
 
-  const validations: ValidationRow[] = context.snapshot
-    ? getAllValidations(context.snapshot.id).map((row) => ({
+  const validations: ValidationRow[] = context.scope
+    ? getAllValidations(context.scope.companyId, context.scope.snapshotId).map((row) => ({
         rule: row.label,
         scope: row.scope,
         project: row.project_name,
@@ -37,7 +37,7 @@ export default async function ReconciliationPage({
     : [];
 
   const issues: IssueRow[] = context.snapshot
-    ? getImportIssues(context.snapshot.importId).map((row) => ({
+    ? getImportIssues(context.scope!.companyId, context.snapshot.importId).map((row) => ({
         severity: row.severity as IssueRow['severity'],
         code: row.code,
         message: row.message,

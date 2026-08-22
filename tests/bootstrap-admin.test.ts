@@ -26,14 +26,21 @@ before(async () => {
   users = await import('@/lib/db/repositories/users');
 });
 
+/**
+ * NODE_ENV is typed read-only, but the code under test reads it at call time
+ * and that is exactly what these cases exercise. Widening the reference is the
+ * narrowest way to set it without loosening the type anywhere else.
+ */
+const env = process.env as Record<string, string | undefined>;
+
 after(() => {
-  process.env.NODE_ENV = originalEnv.NODE_ENV;
+  env.NODE_ENV = originalEnv.NODE_ENV;
   delete process.env.GTG_ADMIN_PASSWORD;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
 function asProduction(password: string | undefined) {
-  process.env.NODE_ENV = 'production';
+  env.NODE_ENV = 'production';
   if (password === undefined) delete process.env.GTG_ADMIN_PASSWORD;
   else process.env.GTG_ADMIN_PASSWORD = password;
 }

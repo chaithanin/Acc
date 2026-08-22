@@ -34,16 +34,19 @@ export async function loadDashboard(filters: DashboardFilters): Promise<Dashboar
   // Scoped before anything is read, so a project outside this company is not
   // available to be selected, summed, or drilled into.
   const projects = listProjects().filter((p) => p.companyId === company.id);
-  const snapshots = listSnapshots();
+  const snapshots = listSnapshots(company.id);
 
+  // A snapshot id in the query string is a request, not a permission. It is
+  // resolved against this company's snapshots, so pointing the URL at another
+  // company's snapshot falls back to this company's current one.
   const snapshot = filters.snapshotId
-    ? getSnapshot(filters.snapshotId) ?? getCurrentSnapshot()
-    : getCurrentSnapshot();
+    ? getSnapshot(company.id, filters.snapshotId) ?? getCurrentSnapshot(company.id)
+    : getCurrentSnapshot(company.id);
 
   const previous = snapshot
     ? filters.compareTo
-      ? getSnapshot(filters.compareTo)
-      : getPreviousSnapshot(snapshot.id)
+      ? getSnapshot(company.id, filters.compareTo)
+      : getPreviousSnapshot(company.id, snapshot.id)
     : null;
 
   // A project filter naming something outside this company — or nothing at
@@ -74,6 +77,7 @@ export async function loadDashboard(filters: DashboardFilters): Promise<Dashboar
   return {
     projects,
     snapshots,
+    scope: snapshot ? { companyId: company.id, snapshotId: snapshot.id, projectId } : null,
     snapshot,
     previous,
     projectId,

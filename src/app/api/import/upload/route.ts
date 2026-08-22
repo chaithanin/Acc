@@ -142,6 +142,7 @@ export async function POST(request: Request) {
     .filter((m): m is NonNullable<typeof m> => m !== null);
 
   const duplicates = findDuplicates(
+    company.id,
     results.map((r) => ({
       fileName: r.fileName,
       hash: r.hash,

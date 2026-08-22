@@ -60,15 +60,20 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
     const errorCount = allIssues.filter((i) => i.severity === 'error').length;
 
     // Retiring the previous snapshot keeps history intact — nothing is deleted.
+    //
+    // "Current" is one per company per report date, not one per report date.
+    // Month-end is month-end for every company, so an unscoped retire would
+    // have each company's import switch off the others' live snapshots — six
+    // dashboards going blank because a seventh was uploaded.
     let replacesImportId: string | null = null;
     if (args.mode === 'replace') {
       const previous = db
-        .prepare<[string], { id: string; import_id: string }>(
+        .prepare<[string, string], { id: string; import_id: string }>(
           `SELECT id, import_id FROM financial_snapshots
-            WHERE report_date = ? AND is_current = 1
+            WHERE report_date = ? AND company_id = ? AND is_current = 1
             ORDER BY created_at DESC LIMIT 1`,
         )
-        .get(args.reportDate);
+        .get(args.reportDate, args.companyId);
 
       if (previous) {
         replacesImportId = previous.import_id;
@@ -76,9 +81,9 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
       }
     } else {
       // A new version for the same date still becomes the live one.
-      db.prepare('UPDATE financial_snapshots SET is_current = 0 WHERE report_date = ?').run(
-        args.reportDate,
-      );
+      db.prepare(
+        'UPDATE financial_snapshots SET is_current = 0 WHERE report_date = ? AND company_id = ?',
+      ).run(args.reportDate, args.companyId);
     }
 
     db.prepare(
@@ -100,9 +105,10 @@ export function persistImport(args: PersistImportArgs): PersistImportResult {
     );
 
     db.prepare(
-      `INSERT INTO financial_snapshots (id, import_id, report_date, label, is_current, created_at)
-       VALUES (?, ?, ?, ?, 1, ?)`,
-    ).run(snapshotId, importId, args.reportDate, args.label, now);
+      `INSERT INTO financial_snapshots
+         (id, import_id, company_id, report_date, label, is_current, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).run(snapshotId, importId, args.companyId, args.reportDate, args.label, now);
 
     // ------------------------------------------------ files, sheets, raw rows
     const fileIdByName = new Map<string, string>();
@@ -561,24 +567,33 @@ export interface DuplicateMatch {
  * Duplicate detection (requirement 29): identical bytes, or the same report
  * date + project + report type already on file.
  */
+/**
+ * Duplicates are looked for within one company only.
+ *
+ * Two companies uploading the same month's template is normal, and a match
+ * across them would both mislead the person uploading and disclose that the
+ * other company has filed — the file name, project and date of an import they
+ * cannot otherwise see.
+ */
 export function findDuplicates(
+  companyId: string,
   files: { fileName: string; hash: string; reportDate: string; projectId: string | null; reportType: string }[],
 ): DuplicateMatch[] {
   const db = getDb();
   const matches: DuplicateMatch[] = [];
 
-  const byHash = db.prepare<[string], {
+  const byHash = db.prepare<[string, string], {
     import_id: string; created_at: string; report_date: string;
     detected_project_label: string | null; report_type: string | null;
   }>(
     `SELECT f.import_id, f.created_at, f.report_date, f.detected_project_label, f.report_type
        FROM import_files f
        JOIN imports i ON i.id = f.import_id
-      WHERE f.file_hash = ? AND i.status = 'completed'
+      WHERE f.file_hash = ? AND i.company_id = ? AND i.status = 'completed'
       ORDER BY f.created_at DESC LIMIT 1`,
   );
 
-  const bySignature = db.prepare<[string, string, string], {
+  const bySignature = db.prepare<[string, string, string, string], {
     import_id: string; created_at: string; report_date: string;
     detected_project_label: string | null; report_type: string | null;
   }>(
@@ -586,14 +601,14 @@ export function findDuplicates(
        FROM import_files f
        JOIN imports i ON i.id = f.import_id
       WHERE f.report_date = ? AND f.report_type = ? AND IFNULL(f.project_id, '') = ?
-        AND i.status = 'completed'
+        AND i.company_id = ? AND i.status = 'completed'
       ORDER BY f.created_at DESC LIMIT 1`,
   );
 
   for (const file of files) {
     const hit =
-      byHash.get(file.hash) ??
-      bySignature.get(file.reportDate, file.reportType, file.projectId ?? '');
+      byHash.get(file.hash, companyId) ??
+      bySignature.get(file.reportDate, file.reportType, file.projectId ?? '', companyId);
     if (!hit) continue;
 
     matches.push({
@@ -629,10 +644,10 @@ export interface ImportSummary {
   projects: string[];
 }
 
-export function listImports(limit = 100): ImportSummary[] {
+export function listImports(companyId: string, limit = 100): ImportSummary[] {
   const db = getDb();
   const rows = db
-    .prepare<[number], {
+    .prepare<[string, number], {
       id: string; report_date: string; label: string | null; status: string;
       user_name: string | null; file_count: number; row_count: number;
       warning_count: number; error_count: number; created_at: string;
@@ -645,10 +660,11 @@ export function listImports(limit = 100): ImportSummary[] {
          FROM imports i
          LEFT JOIN users u ON u.id = i.uploaded_by
          LEFT JOIN financial_snapshots s ON s.import_id = i.id
+        WHERE i.company_id = ?
         ORDER BY i.created_at DESC
         LIMIT ?`,
     )
-    .all(limit);
+    .all(companyId, limit);
 
   const projectStmt = db.prepare<[string], { name: string }>(
     `SELECT DISTINCT COALESCE(p.name, f.detected_project_label, 'Unassigned') AS name
@@ -675,22 +691,24 @@ export function listImports(limit = 100): ImportSummary[] {
   }));
 }
 
-export function getImportIssues(importId: string) {
+export function getImportIssues(companyId: string, importId: string) {
   return getDb()
-    .prepare<[string], {
+    .prepare<[string, string], {
       severity: string; code: string; message: string; source_file: string | null;
       source_sheet: string | null; source_row: number | null; source_cell: string | null;
     }>(
-      `SELECT severity, code, message, source_file, source_sheet, source_row, source_cell
-         FROM import_issues WHERE import_id = ?
-        ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, source_file`,
+      `SELECT n.severity, n.code, n.message, n.source_file, n.source_sheet, n.source_row, n.source_cell
+         FROM import_issues n
+         JOIN imports i ON i.id = n.import_id
+        WHERE n.import_id = ? AND i.company_id = ?
+        ORDER BY CASE n.severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, n.source_file`,
     )
-    .all(importId);
+    .all(importId, companyId);
 }
 
-export function getImportFiles(importId: string) {
+export function getImportFiles(companyId: string, importId: string) {
   return getDb()
-    .prepare<[string], {
+    .prepare<[string, string], {
       id: string; file_name: string; container_file: string | null; file_type: string;
       file_hash: string; file_size: number; report_type: string | null; report_date: string | null;
       sheet_count: number; row_count: number; status: string; error_message: string | null;
@@ -700,11 +718,12 @@ export function getImportFiles(importId: string) {
               f.report_type, f.report_date, f.sheet_count, f.row_count, f.status,
               f.error_message, COALESCE(p.name, f.detected_project_label) AS project_name
          FROM import_files f
+         JOIN imports i ON i.id = f.import_id
          LEFT JOIN projects p ON p.id = f.project_id
-        WHERE f.import_id = ?
+        WHERE f.import_id = ? AND i.company_id = ?
         ORDER BY f.file_name`,
     )
-    .all(importId);
+    .all(importId, companyId);
 }
 
 /**
@@ -714,15 +733,17 @@ export function getImportFiles(importId: string) {
  * honest; its records cascade away, and the most recent surviving snapshot for
  * that report date becomes live again.
  */
-export function rollbackImport(importId: string): boolean {
+export function rollbackImport(companyId: string, importId: string): boolean {
   const db = getDb();
 
   return transaction(() => {
+    // Company first: an import id from another company must read as "not
+    // found" here, exactly as it would if it did not exist.
     const row = db
-      .prepare<[string], { report_date: string; status: string }>(
-        'SELECT report_date, status FROM imports WHERE id = ?',
+      .prepare<[string, string], { report_date: string; status: string }>(
+        'SELECT report_date, status FROM imports WHERE id = ? AND company_id = ?',
       )
-      .get(importId);
+      .get(importId, companyId);
 
     if (!row || row.status === 'rolled_back') return false;
 
@@ -730,18 +751,20 @@ export function rollbackImport(importId: string): boolean {
     db.prepare('DELETE FROM financial_snapshots WHERE import_id = ?').run(importId);
     db.prepare("UPDATE imports SET status = 'rolled_back' WHERE id = ?").run(importId);
 
+    // The snapshot promoted back to live is this company's, and only this
+    // company's flags are touched.
     const survivor = db
-      .prepare<[string], { id: string }>(
+      .prepare<[string, string], { id: string }>(
         `SELECT id FROM financial_snapshots
-          WHERE report_date = ?
+          WHERE report_date = ? AND company_id = ?
           ORDER BY created_at DESC LIMIT 1`,
       )
-      .get(row.report_date);
+      .get(row.report_date, companyId);
 
     if (survivor) {
-      db.prepare('UPDATE financial_snapshots SET is_current = 0 WHERE report_date = ?').run(
-        row.report_date,
-      );
+      db.prepare(
+        'UPDATE financial_snapshots SET is_current = 0 WHERE report_date = ? AND company_id = ?',
+      ).run(row.report_date, companyId);
       db.prepare('UPDATE financial_snapshots SET is_current = 1 WHERE id = ?').run(survivor.id);
     }
 
@@ -749,8 +772,8 @@ export function rollbackImport(importId: string): boolean {
   });
 }
 
-export function getImportSummary(importId: string): ImportSummary | null {
-  return listImports(500).find((i) => i.id === importId) ?? null;
+export function getImportSummary(companyId: string, importId: string): ImportSummary | null {
+  return listImports(companyId, 500).find((i) => i.id === importId) ?? null;
 }
 
 export { parseJson };

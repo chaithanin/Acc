@@ -38,11 +38,11 @@ export default async function ProjectsPage({
   ]);
   const cash = pickMetrics(context, ['forecast_cash', 'lowest_forecast_cash', 'required_funding']);
 
-  const data = context.snapshot
+  const data = context.scope
     ? {
-        projection: getProjection(context.snapshot.id, context.projectId),
-        byProject: getProjectMetrics(context.snapshot.id, context.projects),
-        summary: loadDatasetSummary(context.snapshot.id, context.projectId),
+        projection: getProjection(context.scope),
+        byProject: getProjectMetrics(context.scope, context.projects),
+        summary: loadDatasetSummary(context.scope),
       }
     : null;
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { getImportSummary, rollbackImport } from '@/lib/db/repositories/imports';
 import { recalculateSnapshot } from '@/lib/db/repositories/snapshots';
 
@@ -22,18 +22,26 @@ export async function POST(
     return NextResponse.json({ error: 'Your role cannot change imports.' }, { status: 403 });
   }
 
+  // Rollback and recalculate both rewrite what a dashboard shows. Neither may
+  // reach an import belonging to a company other than the active one, so the
+  // company is resolved before the id in the URL is used for anything.
+  const company = await activeCompany();
+  if (!company) {
+    return NextResponse.json({ error: 'Choose a company first.' }, { status: 403 });
+  }
+
   const { id } = await params;
   const { action, snapshotId } = (await request.json()) as {
     action?: 'rollback' | 'recalculate';
     snapshotId?: string;
   };
 
-  const summary = getImportSummary(id);
+  const summary = getImportSummary(company.id, id);
   if (!summary) return NextResponse.json({ error: 'Import not found.' }, { status: 404 });
 
   try {
     if (action === 'rollback') {
-      const done = rollbackImport(id);
+      const done = rollbackImport(company.id, id);
       if (!done) {
         return NextResponse.json(
           { error: 'This import has already been rolled back.' },
@@ -44,14 +52,17 @@ export async function POST(
     }
 
     if (action === 'recalculate') {
+      // A snapshotId in the body is only honoured when it is the one this
+      // import actually produced. Anything else — including a valid snapshot
+      // id from another company — recalculates nothing.
       const target = snapshotId ?? summary.snapshotId;
-      if (!target) {
+      if (!target || (snapshotId && snapshotId !== summary.snapshotId)) {
         return NextResponse.json(
-          { error: 'This import has no snapshot to recalculate.' },
+          { error: 'This import has no such snapshot to recalculate.' },
           { status: 409 },
         );
       }
-      const result = recalculateSnapshot(target);
+      const result = recalculateSnapshot(company.id, target);
       return NextResponse.json({ ok: true, action: 'recalculate', ...result });
     }
 

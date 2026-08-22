@@ -1,5 +1,5 @@
 import { PageHeader } from '@/components/ui/primitives';
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { listImports } from '@/lib/db/repositories/imports';
 import { redirect } from 'next/navigation';
 import { HistoryTable } from './history-table';
@@ -9,7 +9,13 @@ export default async function ImportHistoryPage() {
   const user = await currentUser();
   if (!user) redirect('/login');
 
-  const imports = listImports();
+  // History is per company. Without this the page would list every company's
+  // uploads — file names, project labels and upload times included — to anyone
+  // who can reach it.
+  const company = await activeCompany();
+  if (!company) redirect('/companies');
+
+  const imports = listImports(company.id);
 
   return (
     <>

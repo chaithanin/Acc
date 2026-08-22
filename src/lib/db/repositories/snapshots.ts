@@ -10,6 +10,7 @@ import {
   type SourceRef,
   type ValidationResult,
 } from '@/lib/types';
+import { scopeClause, type DataScope } from '../scope';
 import { fromDbBool, getDb, newId, nowIso, parseJson, transaction } from '../index';
 
 /**
@@ -29,19 +30,31 @@ export interface SnapshotInfo {
   createdAt: string;
 }
 
-export function listSnapshots(): SnapshotInfo[] {
+/**
+ * Every snapshot one company may see.
+ *
+ * The company is required and is matched on the snapshot's own column. Two
+ * companies routinely hold a snapshot for the same report date — month-end is
+ * month-end for all of them — so the report date is not a key and the snapshot
+ * id, arriving from a query string, is not a permission.
+ *
+ * A snapshot imported before companies existed carries none, and is therefore
+ * listed for nobody until the backfill or a re-import gives it one. Showing it
+ * to everyone would be the leak; showing it to no one is a visible gap.
+ */
+export function listSnapshots(companyId: string): SnapshotInfo[] {
   return getDb()
-    .prepare<[], {
+    .prepare<[string], {
       id: string; import_id: string; report_date: string; label: string | null;
       is_current: number; created_at: string;
     }>(
       `SELECT s.id, s.import_id, s.report_date, s.label, s.is_current, s.created_at
          FROM financial_snapshots s
          JOIN imports i ON i.id = s.import_id
-        WHERE i.status = 'completed'
+        WHERE i.status = 'completed' AND s.company_id = ?
         ORDER BY s.report_date DESC, s.created_at DESC`,
     )
-    .all()
+    .all(companyId)
     .map((row) => ({
       id: row.id,
       importId: row.import_id,
@@ -52,24 +65,31 @@ export function listSnapshots(): SnapshotInfo[] {
     }));
 }
 
-/** The live snapshot: newest report date whose snapshot is flagged current. */
-export function getCurrentSnapshot(): SnapshotInfo | null {
-  return listSnapshots().find((s) => s.isCurrent) ?? null;
+/** The live snapshot for one company: newest current one by report date. */
+export function getCurrentSnapshot(companyId: string): SnapshotInfo | null {
+  return listSnapshots(companyId).find((s) => s.isCurrent) ?? null;
 }
 
-export function getSnapshot(snapshotId: string): SnapshotInfo | null {
-  return listSnapshots().find((s) => s.id === snapshotId) ?? null;
+/**
+ * One snapshot, or null when it is not this company's.
+ *
+ * This is the gate. Snapshot ids reach the server from query strings and
+ * request bodies, and everything downstream reads by snapshot id; resolving
+ * one here is what makes those reads safe.
+ */
+export function getSnapshot(companyId: string, snapshotId: string): SnapshotInfo | null {
+  return listSnapshots(companyId).find((s) => s.id === snapshotId) ?? null;
 }
 
 /**
  * The snapshot immediately preceding `snapshotId` by report date — the default
  * comparison baseline (requirement 11).
  */
-export function getPreviousSnapshot(snapshotId: string): SnapshotInfo | null {
-  const all = listSnapshots().filter((s) => s.isCurrent);
+export function getPreviousSnapshot(companyId: string, snapshotId: string): SnapshotInfo | null {
+  const all = listSnapshots(companyId).filter((s) => s.isCurrent);
   const index = all.findIndex((s) => s.id === snapshotId);
   if (index === -1) {
-    const target = getSnapshot(snapshotId);
+    const target = getSnapshot(companyId, snapshotId);
     if (!target) return null;
     return all.find((s) => s.reportDate < target.reportDate) ?? null;
   }
@@ -158,19 +178,28 @@ export function getMetric(
 
 // -------------------------------------------------------------- validations
 
-export function getValidations(snapshotId: string, projectId: string | null): ValidationResult[] {
+/**
+ * Validation results have no company column of their own — they belong to a
+ * snapshot and inherit its company. The join says so explicitly rather than
+ * relying on the caller having resolved the snapshot correctly.
+ */
+export function getValidations(scope: DataScope): ValidationResult[] {
   const db = getDb();
-  const rows = projectId
+  const rows = scope.projectId
     ? db
-        .prepare<[string, string], ValidationRow>(
-          'SELECT * FROM validation_results WHERE snapshot_id = ? AND project_id = ?',
+        .prepare<[string, string, string], ValidationRow>(
+          `SELECT v.* FROM validation_results v
+             JOIN financial_snapshots s ON s.id = v.snapshot_id
+            WHERE v.snapshot_id = ? AND s.company_id = ? AND v.project_id = ?`,
         )
-        .all(snapshotId, projectId)
+        .all(scope.snapshotId, scope.companyId, scope.projectId)
     : db
-        .prepare<[string], ValidationRow>(
-          'SELECT * FROM validation_results WHERE snapshot_id = ? AND project_id IS NULL',
+        .prepare<[string, string], ValidationRow>(
+          `SELECT v.* FROM validation_results v
+             JOIN financial_snapshots s ON s.id = v.snapshot_id
+            WHERE v.snapshot_id = ? AND s.company_id = ? AND v.project_id IS NULL`,
         )
-        .all(snapshotId);
+        .all(scope.snapshotId, scope.companyId);
 
   return rows.map((row) => ({
     ruleKey: row.rule_key,
@@ -201,17 +230,18 @@ interface ValidationRow {
 }
 
 /** Every validation across all scopes, for the reconciliation page. */
-export function getAllValidations(snapshotId: string) {
+export function getAllValidations(companyId: string, snapshotId: string) {
   return getDb()
-    .prepare<[string], ValidationRow & { project_name: string | null; source_ref_id: string | null }>(
+    .prepare<[string, string], ValidationRow & { project_name: string | null; source_ref_id: string | null }>(
       `SELECT v.*, p.name AS project_name, v.source_ref_id
          FROM validation_results v
+         JOIN financial_snapshots s ON s.id = v.snapshot_id
          LEFT JOIN projects p ON p.id = v.project_id
-        WHERE v.snapshot_id = ?
+        WHERE v.snapshot_id = ? AND s.company_id = ?
         ORDER BY CASE v.status WHEN 'error' THEN 0 WHEN 'warning' THEN 1 WHEN 'pass' THEN 2 ELSE 3 END,
                  v.scope`,
     )
-    .all(snapshotId);
+    .all(snapshotId, companyId);
 }
 
 // ------------------------------------------------------------ source lookup
@@ -227,7 +257,7 @@ export interface SourceReferenceRow {
   importedAt: string;
 }
 
-export function getSourceReferences(ids: string[]): SourceReferenceRow[] {
+export function getSourceReferences(companyId: string, ids: string[]): SourceReferenceRow[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => '?').join(',');
   return getDb()
@@ -235,8 +265,12 @@ export function getSourceReferences(ids: string[]): SourceReferenceRow[] {
       id: string; source_file: string; source_sheet: string | null; source_row: number | null;
       source_cell: string | null; source_formula: string | null; raw_value: string | null;
       created_at: string;
-    }>(`SELECT * FROM source_references WHERE id IN (${placeholders})`)
-    .all(...ids)
+    }>(
+      `SELECT sr.* FROM source_references sr
+         JOIN imports i ON i.id = sr.import_id
+        WHERE sr.id IN (${placeholders}) AND i.company_id = ?`,
+    )
+    .all(...ids, companyId)
     .map((row) => ({
       id: row.id,
       sourceFile: row.source_file,
@@ -259,26 +293,30 @@ export function getSourceReferences(ids: string[]): SourceReferenceRow[] {
  * import time.
  */
 export function loadDataset(
+  companyId: string,
   snapshotId: string,
 ): { data: NormalizedDataset; refs: SourceRef[]; refIds: string[] } {
   const db = getDb();
   const data = emptyDataset();
+  // Every record read below is filtered on both, so a snapshot id belonging to
+  // another company loads an empty dataset rather than that company's records.
+  const args: [string, string] = [snapshotId, companyId];
 
   const refIds: string[] = [];
   const refs: SourceRef[] = [];
   const refIndexById = new Map<string, number>();
 
   const refRows = db
-    .prepare<[string], {
+    .prepare<[string, string], {
       id: string; source_file: string; source_sheet: string | null;
       source_row: number | null; source_col: number | null; source_cell: string | null;
     }>(
       `SELECT sr.id, sr.source_file, sr.source_sheet, sr.source_row, sr.source_col, sr.source_cell
          FROM source_references sr
          JOIN financial_snapshots s ON s.import_id = sr.import_id
-        WHERE s.id = ?`,
+        WHERE s.id = ? AND s.company_id = ?`,
     )
-    .all(snapshotId);
+    .all(...args);
 
   for (const row of refRows) {
     refIndexById.set(row.id, refs.length);
@@ -296,7 +334,7 @@ export function loadDataset(
   const blankRef: SourceRef = { file: '', sheet: null, row: null, col: null, cell: null };
   const refAt = (index: number) => (index >= 0 ? refs[index] : blankRef);
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM bank_balances WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM bank_balances WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.bank.push({
       kind: 'bank', sourceRef: refAt(index), sourceRefIndex: index,
@@ -306,7 +344,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM receivable_records WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM receivable_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.receivable.push({
       kind: 'receivable', sourceRef: refAt(index), sourceRefIndex: index,
@@ -317,7 +355,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM income_records WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM income_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.income.push({
       kind: 'income', sourceRef: refAt(index), sourceRefIndex: index,
@@ -328,7 +366,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM expense_records WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM expense_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.expense.push({
       kind: 'expense', sourceRef: refAt(index), sourceRefIndex: index,
@@ -339,7 +377,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM boq_records WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM boq_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.boq.push({
       kind: 'boq', sourceRef: refAt(index), sourceRefIndex: index,
@@ -350,7 +388,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM wip_records WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM wip_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.wip.push({
       kind: 'wip', sourceRef: refAt(index), sourceRefIndex: index,
@@ -361,7 +399,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM gl_entries WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM gl_entries WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.gl.push({
       kind: 'gl', sourceRef: refAt(index), sourceRefIndex: index,
@@ -374,7 +412,7 @@ export function loadDataset(
     });
   }
 
-  for (const row of db.prepare<[string], any>('SELECT * FROM cashflow_forecasts WHERE snapshot_id = ?').all(snapshotId)) {
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM cashflow_forecasts WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.cashflow.push({
       kind: 'cashflow', sourceRef: refAt(index), sourceRefIndex: index,
@@ -390,10 +428,10 @@ export function loadDataset(
 }
 
 /** The engine's live projection for a snapshot, recomputed from stored records. */
-export function getProjection(snapshotId: string, projectId: string | null): CashflowProjection {
-  const snapshot = getSnapshot(snapshotId);
-  const { data } = loadDataset(snapshotId);
-  const scoped = filterByProject(data, projectId);
+export function getProjection(scope: DataScope): CashflowProjection {
+  const snapshot = getSnapshot(scope.companyId, scope.snapshotId);
+  const { data } = loadDataset(scope.companyId, scope.snapshotId);
+  const scoped = filterByProject(data, scope.projectId);
   return calculateMetrics(scoped, snapshot?.reportDate ?? nowIso().slice(0, 10)).projection;
 }
 
@@ -401,12 +439,15 @@ export function getProjection(snapshotId: string, projectId: string | null): Cas
  * Recalculates every metric and validation for a snapshot from stored records
  * and rewrites them. Used by "Recalculate" in Import History — no file needed.
  */
-export function recalculateSnapshot(snapshotId: string): { metrics: number; validations: number } {
-  const snapshot = getSnapshot(snapshotId);
+export function recalculateSnapshot(
+  companyId: string,
+  snapshotId: string,
+): { metrics: number; validations: number } {
+  const snapshot = getSnapshot(companyId, snapshotId);
   if (!snapshot) throw new Error('Snapshot not found.');
 
   const db = getDb();
-  const { data, refIds } = loadDataset(snapshotId);
+  const { data, refIds } = loadDataset(companyId, snapshotId);
 
   return transaction(() => {
     db.prepare('DELETE FROM calculated_metrics WHERE snapshot_id = ?').run(snapshotId);
@@ -486,12 +527,12 @@ export function recalculateSnapshot(snapshotId: string): { metrics: number; vali
 }
 
 /** Project ids that actually carry data in a snapshot. */
-export function getSnapshotProjectIds(snapshotId: string): string[] {
+export function getSnapshotProjectIds(companyId: string, snapshotId: string): string[] {
   return getDb()
-    .prepare<[string], { project_id: string }>(
+    .prepare<[string, string], { project_id: string }>(
       `SELECT DISTINCT project_id FROM calculated_metrics
-        WHERE snapshot_id = ? AND project_id IS NOT NULL`,
+        WHERE snapshot_id = ? AND company_id = ? AND project_id IS NOT NULL`,
     )
-    .all(snapshotId)
+    .all(snapshotId, companyId)
     .map((r) => r.project_id);
 }

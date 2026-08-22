@@ -68,6 +68,7 @@ export const COMPANY_SCOPED_TABLES = [
   'gl_entries',
   'cashflow_forecasts',
   'calculated_metrics',
+  'financial_snapshots',
 ] as const;
 
 function applyMigrations(db: Database.Database): void {
@@ -137,6 +138,21 @@ function backfillRecordCompanies(db: Database.Database): void {
     `);
   }
 
+  // A snapshot belongs to whichever company its import does. Done before the
+  // imports backfill below, which is the weaker inference of the two.
+  const snapshotColumns = db
+    .prepare<[], { name: string }>('PRAGMA table_info(financial_snapshots)')
+    .all()
+    .map((c) => c.name);
+
+  if (snapshotColumns.includes('company_id')) {
+    db.exec(`
+      UPDATE financial_snapshots
+         SET company_id = (SELECT i.company_id FROM imports i WHERE i.id = financial_snapshots.import_id)
+       WHERE company_id IS NULL
+    `);
+  }
+
   // An import predating companies has no company of its own; it takes the one
   // its records agree on, and stays null when they do not agree.
   const importColumns = db
@@ -155,6 +171,16 @@ function backfillRecordCompanies(db: Database.Database): void {
          )
        WHERE company_id IS NULL
     `);
+
+    // Imports may have just learned their company from their records, so
+    // snapshots get a second chance at inheriting it.
+    if (snapshotColumns.includes('company_id')) {
+      db.exec(`
+        UPDATE financial_snapshots
+           SET company_id = (SELECT i.company_id FROM imports i WHERE i.id = financial_snapshots.import_id)
+         WHERE company_id IS NULL
+      `);
+    }
   }
 }
 
