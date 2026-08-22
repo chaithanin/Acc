@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { KPI_DEFINITIONS } from '@/config/kpi-definitions';
 import { sentimentOf } from '@/lib/compare';
 import { formatCompactTHB, formatDelta, formatNumber, formatPercent, formatTHB } from '@/lib/format/number';
 import type { MetricComparison } from '@/lib/types';
@@ -137,9 +138,28 @@ export function KpiCard({ metric, snapshotId, projectId, emphasis }: KpiCardProp
 function CalculationDetail({ metric }: { metric: MetricComparison }) {
   const isCount = metric.unit === 'COUNT';
   const fmt = (value: number | null) => (isCount ? formatNumber(value) : formatTHB(value));
+  const definition = KPI_DEFINITIONS[metric.key];
 
   return (
     <div className="space-y-5 text-sm">
+      {/* What the figure means comes before the arithmetic. A formula answers
+          "how was this computed"; the dispute is almost always about what the
+          number was supposed to be counting in the first place. */}
+      {definition ? (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Definition</p>
+          <p className="mt-1 text-ink-secondary">{definition.meaning}</p>
+          <p className="mt-2 text-[13px] text-ink-secondary">
+            <span className="font-medium text-ink">Source of truth:</span> {definition.readsFrom}
+          </p>
+          {definition.excludes ? (
+            <p className="mt-1 text-[13px] text-ink-secondary">
+              <span className="font-medium text-ink">Excludes:</span> {definition.excludes}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Formula</p>
         <p className="mt-1 rounded-md bg-surface-sunken px-3 py-2 font-mono text-[13px] text-ink">

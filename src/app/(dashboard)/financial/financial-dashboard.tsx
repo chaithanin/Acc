@@ -6,6 +6,7 @@ import { CashLineChart, IncomeExpenseComboChart } from '@/components/financial/c
 import { IncomeStatement, type StatementLine } from '@/components/financial/income-statement';
 import { KpiTile, ProgressDial, RatioTile } from '@/components/financial/tiles';
 import { FilterBar } from '@/components/filter-bar';
+import { KPI_DEFINITIONS } from '@/config/kpi-definitions';
 import { DrilldownTable, type DrilldownResponse } from '@/components/drilldown-table';
 import { Modal } from '@/components/ui/controls';
 import { Badge, Card, CardHeader, EmptyState, PageHeader } from '@/components/ui/primitives';
@@ -236,6 +237,14 @@ export function FinancialDashboard({
         {drilldown ? (
           <>
             <div className="mb-4 rounded-lg bg-surface-sunken px-3 py-2 text-sm">
+              {KPI_DEFINITIONS[drilldown.metric.key] ? (
+                <p className="mb-2 text-ink-secondary">
+                  {KPI_DEFINITIONS[drilldown.metric.key].meaning}{' '}
+                  <span className="text-ink-muted">
+                    Read from {KPI_DEFINITIONS[drilldown.metric.key].readsFrom.toLowerCase()}
+                  </span>
+                </p>
+              ) : null}
               <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Formula</p>
               <p className="mt-0.5 font-mono text-[13px] text-ink">{drilldown.metric.formula}</p>
               <p className="tnum mt-2 text-ink-secondary">
