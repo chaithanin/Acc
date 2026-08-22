@@ -142,6 +142,32 @@ files, the sale price is identical on 98 (the other eight were re-priced
 between the two dates) and the **expected selling price is identical on 96 of
 those 98**, to the baht.
 
+## Matching the template
+
+Checked cell by cell against `Interest-Advance received_SUN9 - Copy.xlsx`:
+sheet names, row layout, header wording, cross-sheet formulas, fills, fonts,
+number formats, borders, row heights and column widths.
+
+Three things that had to be got exactly right rather than approximately:
+
+- **Header labels carry no padding.** The template's `Sale Price` looks like
+  ` Sale Price ` when read back, but the spaces come from the accounting
+  number format, not from the text.
+- **`XLOOKUP`, written as Excel stores it** — `_xlfn.XLOOKUP`. The template
+  uses it, so the Excel that opens this file supports it.
+- **A column width of exactly 9 is silently dropped by ExcelJS**, which takes
+  it for its own default and writes no width at all. The template's column A
+  is 8.7, which is what it now gets.
+
+Two deliberate differences:
+
+- **The uplift is capped with `MIN`.** A deposit taken before the plan's first
+  due month sits further from completion than the anchor does, and the
+  straight line runs past the full uplift there — 20.91% against a stated
+  maximum of 20%. The template has no such row and so never met the case.
+- **Two extra sheets**, `Data_Check` and `Raw_AR_<date>`, which the template
+  does not have and the specification asks for.
+
 ## Reading the card
 
 Columns are matched on their header wording, not their position, and the header

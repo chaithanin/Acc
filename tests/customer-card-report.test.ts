@@ -7,7 +7,7 @@ import ExcelJS from 'exceljs';
 import { unzipSync } from 'fflate';
 
 import { generateCustomerCardReport } from '@/lib/reports/customer-card';
-import { buildReport } from '@/lib/reports/customer-card/build';
+import { buildReport, expectedSellingPrice } from '@/lib/reports/customer-card/build';
 import { parseCustomerCard } from '@/lib/reports/customer-card/parse';
 import { daysToCompletion, futureValue, solveEir } from '@/lib/reports/customer-card/interest';
 import { DEFAULT_OPTIONS } from '@/lib/reports/customer-card/types';
@@ -364,6 +364,43 @@ describe('dates the card cannot mean', () => {
     assert.throws(
       () => buildReport(rows, { ...OPTIONS, reportDate: '2055-08-22' }),
       /more than \d+ years/,
+    );
+  });
+});
+
+describe('the selling-price uplift', () => {
+  it('never exceeds the maximum it was given', () => {
+    // A deposit taken before the plan's first due month sits further from
+    // completion than the anchor does, and the straight line runs past the
+    // full uplift there — 20.91% against a stated maximum of 20%.
+    const rows = parseCustomerCard(
+      makeSheet('Card', [
+        HEADER_BAND,
+        HEADER,
+        // Paid in January; the first instalment is not due until April.
+        line({ 'แปลง/ห้อง': '101', 'พื้นที่/อาคาร': 'อาคาร A', 'เลขที่สัญญา': 'S-4', 'ราคาขายสุทธิ': 1_000_000, 'ประเภทงวด': 'จอง', 'วันครบกำหนดชำระเงินตามสัญญา': '15/04/2026', 'จำนวนเงินที่ต้องชำระ': 100_000, 'วันที่ชำระ/ยกเลิก': '15/01/2026', 'เลขที่ใบเสร็จ': 'R1', 'จำนวนเงินที่ชำระแล้ว': 100_000 }),
+        line({ 'ประเภทงวด': 'โอน', 'จำนวนเงินที่ต้องชำระ': 900_000 }),
+      ] as (string | number | null)[][]),
+    ).rows;
+
+    const model = buildReport(rows, OPTIONS);
+
+    assert.equal(model.anchorMonth, '2026-04', 'the anchor is not the first due month');
+    assert.equal(model.months[0], '2026-01', 'the grid should still start at the payment');
+
+    for (const [month, uplift] of model.uplift) {
+      assert.ok(
+        uplift <= OPTIONS.maxUplift + 1e-9,
+        `${month} is uplifted ${(uplift * 100).toFixed(2)}%, above the ${OPTIONS.maxUplift * 100}% maximum`,
+      );
+    }
+
+    // And a contract starting in that earlier month gets the full uplift, not
+    // more than it.
+    const contract = model.contracts[0];
+    assert.equal(
+      Math.round(expectedSellingPrice(contract, model.uplift, model.options)),
+      1_200_000,
     );
   });
 });

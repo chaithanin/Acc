@@ -45,7 +45,12 @@ export function upliftTable(
   const anchor = monthsToCompletion(anchorMonth ?? months[0], completionMonth);
   for (const month of months) {
     const remaining = monthsToCompletion(month, completionMonth);
-    table.set(month, anchor === 0 ? 0 : (remaining / anchor) * maxUplift);
+    // Capped at the full uplift. A deposit taken before the plan's first due
+    // month sits further from completion than the anchor does, and the
+    // straight line runs past 100% of the uplift there — 20.91% against a
+    // stated maximum of 20%.
+    const ratio = anchor === 0 ? 0 : (remaining / anchor) * maxUplift;
+    table.set(month, Math.min(ratio, maxUplift));
   }
 
   return table;

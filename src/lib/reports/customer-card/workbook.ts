@@ -150,7 +150,9 @@ function writeInsPlan(wb: ExcelJS.Workbook, model: ReportModel): PlanRows {
     date.alignment = { horizontal: 'center' };
   });
 
-  const headers = ['Item', 'Date', 'Start period', 'Unit', ' Sale Price ', ' M-Y ', ' Expected selling price '];
+  // No literal padding around the labels: the template's spacing comes from
+  // the accounting number format, not from the text.
+  const headers = ['Item', 'Date', 'Start period', 'Unit', 'Sale Price', 'M-Y', 'Expected selling price'];
   headers.forEach((label, index) => {
     const cell = ws.getCell(5, index + 1);
     cell.value = label;
@@ -207,9 +209,11 @@ function writeInsPlan(wb: ExcelJS.Workbook, model: ReportModel): PlanRows {
 
     // The uplift is looked up rather than multiplied in, so changing the
     // completion date on '%sellingprice' moves every expected price at once.
+    // The template's own lookup, written the way Excel stores it. XLOOKUP
+    // needs Microsoft 365, which is what produced the template.
     const expected = ws.getCell(r, 7);
     expected.value = {
-      formula: `E${r}*(1+IFERROR(VLOOKUP(F${r},'%sellingprice'!$B:$D,3,FALSE),0))`,
+      formula: `E${r}*(1+_xlfn.XLOOKUP(F${r},'%sellingprice'!B:B,'%sellingprice'!D:D))`,
     };
     styleData(expected, MONEY);
     expected.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.derived } };
@@ -276,7 +280,7 @@ function writeInsPlan(wb: ExcelJS.Workbook, model: ReportModel): PlanRows {
   ws.getCell(daysRow, onKeyCol + 1).value = 0;
 
   const fvHeaderRow = daysRow + 1;
-  const fvHeaders = ['Item', 'Date', 'Unit', 'Expected selling price', null, ' Effective Interest rate ', ' EIR per day '];
+  const fvHeaders = ['Item', 'Date', 'Unit', 'Expected selling price', null, 'Effective Interest rate', 'EIR per day'];
   fvHeaders.forEach((label, index) => {
     const cell = ws.getCell(fvHeaderRow, index + 1);
     cell.value = label === null ? { formula: 'E5' } : label;
@@ -284,7 +288,7 @@ function writeInsPlan(wb: ExcelJS.Workbook, model: ReportModel): PlanRows {
   });
   months.forEach((month, index) => {
     const cell = ws.getCell(fvHeaderRow, monthCol(index) + 1);
-    cell.value = ` ${monthLabel(month)} Installment `;
+    cell.value = `${monthLabel(month)} Installment`;
     styleHeader(cell, COLOR.headerPlan);
   });
   for (const [c, label] of [
@@ -355,7 +359,7 @@ function writeInsPlan(wb: ExcelJS.Workbook, model: ReportModel): PlanRows {
     cell.numFmt = MONEY;
   }
 
-  setWidths(ws, checkCol);
+  setWidths(ws, checkCol, 'InsPlan', 7);
 
   return { byKey, fvByKey, totalRow, daysRow, goalSeekRow, lastMonthCol, onKeyCol };
 }
@@ -436,6 +440,8 @@ function writeInsPaid(wb: ExcelJS.Workbook, model: ReportModel): void {
       cell.value = { formula };
       styleData(cell, fmt);
       if (c <= 4) cell.alignment = { horizontal: 'center' };
+      // The unit column is picked out in blue, as it is in the template.
+      if (c === 3) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.unit } };
     }
 
     const count = ws.getCell(r, 7);
@@ -479,7 +485,7 @@ function writeInsPaid(wb: ExcelJS.Workbook, model: ReportModel): void {
     cell.numFmt = MONEY;
   }
 
-  setWidths(ws, totalCol);
+  setWidths(ws, totalCol, 'InsPaid', 7);
 }
 
 // -------------------------------------------------------- %sellingprice
@@ -509,8 +515,11 @@ function writeSellingPrice(wb: ExcelJS.Workbook, model: ReportModel): void {
     ws.getCell(r, 3).value = monthsToCompletion(month, completionMonth);
     ws.getCell(r, 3).font = { ...FONT };
 
+    // MIN, so the sheet caps the uplift exactly as the model does: a month
+    // further from completion than the anchor would otherwise run past the
+    // stated maximum.
     const uplift = ws.getCell(r, 4);
-    uplift.value = { formula: `C${r}/$C$${anchorRow}*$D$${anchorRow}` };
+    uplift.value = { formula: `MIN(C${r}/$C$${anchorRow}*$D$${anchorRow},$D$${anchorRow})` };
     uplift.numFmt = PERCENT;
     uplift.font = { ...FONT };
   });
@@ -577,8 +586,8 @@ function writeInterestRecognition(
   });
 
   const headers = [
-    'Item', 'Date', 'Unit', ' selling price ', ' FV per installment plan ',
-    ' Interest expense per plan ', ' Effective Interest rate ', ' EIR per day ',
+    'Item', 'Date', 'Unit', 'selling price', 'FV per installment plan',
+    'Interest expense per plan', 'Effective Interest rate', 'EIR per day',
   ];
   headers.forEach((label, index) => {
     const cell = ws.getCell(4, index + 1);
@@ -629,6 +638,7 @@ function writeInterestRecognition(
       const cell = ws.getCell(r, c);
       cell.value = { formula };
       styleData(cell, fmt);
+      if (c === 3) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.unit } };
     }
 
     months.forEach((_, mIndex) => {
@@ -705,7 +715,7 @@ function writeInterestRecognition(
     cell.numFmt = MONEY;
   }
 
-  setWidths(ws, assetCol);
+  setWidths(ws, assetCol, 'recognition', 8);
 }
 
 // ------------------------------------------------------------ Data_Check
@@ -869,14 +879,30 @@ function writeRawData(wb: ExcelJS.Workbook, model: ReportModel): void {
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 }
 
-/** Column widths matching the template: identity columns wide, months even. */
-function setWidths(ws: ExcelJS.Worksheet, lastCol: number): void {
-  const identity = [9, 13.5, 13, 12, 14, 11, 15, 15];
+/**
+ * Column widths, read off the template sheet by sheet.
+ *
+ * Never exactly 9: ExcelJS treats that as its default and writes no width at
+ * all, so the column silently falls back instead of being set.
+ */
+const WIDTHS: Record<string, number[]> = {
+  InsPlan: [8.7, 13.3, 12.7, 12, 13.9, 10.7, 14.6],
+  InsPaid: [8.7, 13.6, 12.7, 16.7, 15.3, 17.1, 13],
+  recognition: [8.7, 10.9, 12.7, 12.7, 12.7, 11.3, 11.1, 11.1],
+};
+
+function setWidths(
+  ws: ExcelJS.Worksheet,
+  lastCol: number,
+  layout: keyof typeof WIDTHS,
+  freezeAt: number,
+): void {
+  const identity = WIDTHS[layout];
   identity.forEach((width, index) => {
     ws.getColumn(index + 1).width = width;
   });
   for (let c = identity.length; c <= lastCol; c += 1) {
-    ws.getColumn(c + 1).width = 15;
+    ws.getColumn(c + 1).width = 13.9;
   }
-  ws.views = [{ state: 'frozen', xSplit: 7, ySplit: 5 }];
+  ws.views = [{ state: 'frozen', xSplit: freezeAt, ySplit: layout === 'recognition' ? 4 : 5 }];
 }

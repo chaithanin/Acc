@@ -21,6 +21,8 @@ export const COLOR = {
   /** The expected-selling-price column, which is derived rather than entered. */
   derived: 'FFDDFFFF',
   headerText: 'FFFFFFFF',
+  /** The unit column, picked out on the sheets that only reference it. */
+  unit: 'FF0070C0',
 } as const;
 
 /**
