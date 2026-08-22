@@ -486,6 +486,53 @@ CREATE TABLE IF NOT EXISTS template_company_state (
   UNIQUE (template_id, company_id)
 );
 
+-- Customer Card reports that have been produced, so Finance can find one
+-- again without re-running it against a card they may no longer have.
+--
+-- The workbook itself stays on disk: it runs to megabytes and putting it in a
+-- column would make every listing query drag it along. The row records where
+-- it is, what it was made from, and what it said.
+CREATE TABLE IF NOT EXISTS customer_card_reports (
+  id                TEXT PRIMARY KEY,
+  /* Not nullable. A report belongs to the company it was run for, and one
+     without a company would be visible to all of them. */
+  company_id        TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_label     TEXT NOT NULL,
+  report_date       TEXT NOT NULL,
+  completion_date   TEXT NOT NULL,
+  max_uplift        NUMERIC NOT NULL,
+  /* What it was made from, so a figure can be traced back to a file. */
+  source_file_name  TEXT NOT NULL,
+  source_hash       TEXT NOT NULL,
+  source_rows       INTEGER NOT NULL,
+  sheet_name        TEXT,
+  header_row        INTEGER,
+  /* Path under the data directory. Never inside the repository or an image. */
+  stored_path       TEXT NOT NULL,
+  file_size         INTEGER NOT NULL,
+  contracts         INTEGER NOT NULL,
+  units             INTEGER NOT NULL,
+  total_sale_price  NUMERIC NOT NULL,
+  total_expected    NUMERIC NOT NULL,
+  total_plan        NUMERIC NOT NULL,
+  total_paid        NUMERIC NOT NULL,
+  total_outstanding NUMERIC NOT NULL,
+  total_interest    NUMERIC NOT NULL,
+  ok_count          INTEGER NOT NULL,
+  check_count       INTEGER NOT NULL,
+  error_count       INTEGER NOT NULL,
+  /* The per-unit reconciliation and the issues, as produced. Kept so the
+     detail view reads what the run said rather than re-deriving it from a
+     source file that may since have changed. */
+  checks_json       TEXT NOT NULL,
+  issues_json       TEXT NOT NULL,
+  confirm_json      TEXT NOT NULL,
+  created_by        TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_card_reports_company
+  ON customer_card_reports(company_id, created_at DESC);
+
 -- Staged parse results awaiting user confirmation (requirement 14).
 CREATE TABLE IF NOT EXISTS import_previews (
   id           TEXT PRIMARY KEY,

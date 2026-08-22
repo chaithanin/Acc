@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { Button, TextInput } from '@/components/ui/controls';
 import { Badge, Card, CardHeader, cx } from '@/components/ui/primitives';
@@ -22,6 +24,7 @@ interface Issue {
 }
 
 interface Summary {
+  reportId: string;
   sourceRows: number;
   contracts: number;
   units: number;
@@ -49,6 +52,7 @@ export function CustomerCardReport({
   defaultCompletionDate: string;
   defaultUplift: number;
 }) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [projectLabel, setProjectLabel] = useState(defaultProjectLabel);
@@ -85,6 +89,10 @@ export function CustomerCardReport({
 
       const header = response.headers.get('x-report-summary');
       if (header) setSummary(JSON.parse(decodeURIComponent(header)) as Summary);
+
+      // The list below is rendered on the server, so it only shows this run
+      // once the page has been told to re-read it.
+      router.refresh();
 
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -211,12 +219,18 @@ function SummaryView({ summary }: { summary: Summary }) {
       <Card>
         <CardHeader
           title="The workbook has downloaded"
-          subtitle={`Read from "${summary.sheetName}", header on row ${summary.headerRow}`}
+          subtitle={`Read from "${summary.sheetName}", header on row ${summary.headerRow} — kept, and downloadable again at any time`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge tone="good">{summary.ok} OK</Badge>
               {summary.check > 0 ? <Badge tone="warning">{summary.check} CHECK</Badge> : null}
               {summary.error > 0 ? <Badge tone="critical">{summary.error} ERROR</Badge> : null}
+              <Link
+                href={`/reports/customer-card/${summary.reportId}`}
+                className="rounded-md border border-border-strong px-2.5 py-1 text-xs text-ink-secondary hover:bg-surface-hover"
+              >
+                Open the reconciliation
+              </Link>
             </div>
           }
         />

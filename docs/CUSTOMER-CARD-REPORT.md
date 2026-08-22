@@ -91,12 +91,30 @@ When a unit's solved rate comes out above 25% the report says so
 uplift is being carried by a small part of the plan, which is what happens when
 the completion date does not match the schedule the card contains.
 
-## Nothing is stored
+## What is kept, and what is not
 
-The report reads a file and returns a file. The uploaded card is deleted before
-the response is sent — it is a list of buyers and what they still owe — and
-nothing reaches the financial tables. Putting it through the import pipeline
-would make it a source of dashboard figures, which it is not.
+**Kept.** Every run is recorded: the workbook itself, the totals, the per-unit
+reconciliation, the issues, the assumptions used, and the SHA-256 of the card
+it was made from. `/reports/customer-card` lists them newest first with the
+figures on the row, so "what was outstanding at the end of August" is answered
+without opening anything. Each row opens a detail page — the reconciliation
+filtered to what did not reconcile, the data-quality findings, what the run was
+made from — and downloads the original workbook, byte for byte.
+
+**Not kept.** The uploaded customer card is deleted before the response is
+sent. It is a list of buyers and what they still owe, and once it has been read
+there is no reason to hold it; the hash is enough to prove which file a report
+came from. Nothing reaches the financial tables either — putting this through
+the import pipeline would make it a source of dashboard figures, which it is
+not.
+
+**Where.** Rows in `customer_card_reports`, workbooks under
+`<data dir>/reports/<id>.xlsx` — on the persistent volume, never in the
+repository or an image. A report belongs to exactly one company: every read,
+download and delete takes the company from the session, and another company's
+id answers 404 rather than "forbidden", which would confirm the report exists.
+A workbook runs to a few megabytes, so anyone who can roll back an import can
+also delete a report and its file.
 
 ## What the real export does that a tidy one would not
 

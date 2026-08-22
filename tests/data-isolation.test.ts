@@ -388,3 +388,85 @@ describe('an import id from another company', () => {
     );
   });
 });
+
+describe('a stored Customer Card report', () => {
+  let reports: typeof import('@/lib/db/repositories/customer-card-reports');
+  let marinaReport: string;
+  let hamoniaReport: string;
+
+  const save = async (party: Party, label: string, amount: number) => {
+    const saved = reports.saveReport({
+      companyId: party.companyId,
+      projectLabel: label,
+      reportDate: REPORT_DATE,
+      completionDate: '2028-09-30',
+      maxUplift: 0.2,
+      sourceFileName: `${label}.xlsx`,
+      sourceHash: `hash-${label}`,
+      sourceRows: 10,
+      sheetName: 'Sheet1',
+      headerRow: 6,
+      workbook: Buffer.from(`workbook for ${label}`),
+      contracts: 1,
+      units: 1,
+      totalSalePrice: amount,
+      totalExpected: amount * 1.2,
+      totalPlan: amount,
+      totalPaid: amount / 2,
+      totalOutstanding: amount / 2,
+      totalInterest: amount * 0.2,
+      okCount: 1,
+      checkCount: 0,
+      errorCount: 0,
+      checks: [],
+      issues: [],
+      needsConfirmation: [],
+      userId: null,
+    });
+    return saved.id;
+  };
+
+  before(async () => {
+    reports = await import('@/lib/db/repositories/customer-card-reports');
+    marinaReport = await save(marina, 'ADVTEST_A', 1_000_000);
+    hamoniaReport = await save(hamonia, 'ADVTEST_B', 7_777_777);
+  });
+
+  it('is listed only for the company that ran it', () => {
+    assert.deepEqual(
+      reports.listReports(marina.companyId).map((r) => r.id),
+      [marinaReport],
+    );
+    assert.deepEqual(
+      reports.listReports(hamonia.companyId).map((r) => r.id),
+      [hamoniaReport],
+    );
+  });
+
+  it('is not found by another company, by id', () => {
+    assert.equal(reports.getReport(marina.companyId, hamoniaReport), null);
+    assert.equal(reports.getReportDetail(marina.companyId, hamoniaReport), null);
+
+    // And its own company does find it, so the checks above are about
+    // isolation rather than about an empty table.
+    assert.ok(reports.getReport(hamonia.companyId, hamoniaReport));
+  });
+
+  it('does not hand its workbook to another company', () => {
+    assert.equal(reports.readReportFile(marina.companyId, hamoniaReport), null);
+
+    const own = reports.readReportFile(hamonia.companyId, hamoniaReport);
+    assert.ok(own);
+    assert.match(own.toString(), /ADVTEST_B/);
+  });
+
+  it('cannot be deleted by another company', () => {
+    assert.equal(reports.deleteReport(marina.companyId, hamoniaReport), false);
+    assert.ok(reports.getReport(hamonia.companyId, hamoniaReport), 'it was deleted anyway');
+
+    // Its owner can.
+    assert.equal(reports.deleteReport(hamonia.companyId, hamoniaReport), true);
+    assert.equal(reports.getReport(hamonia.companyId, hamoniaReport), null);
+    assert.equal(reports.readReportFile(hamonia.companyId, hamoniaReport), null);
+  });
+});

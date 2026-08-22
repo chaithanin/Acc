@@ -78,6 +78,7 @@ async function seed() {
   const projects = await import('../src/lib/db/repositories/projects.ts');
   const users = await import('../src/lib/db/repositories/users.ts');
   const imports = await import('../src/lib/db/repositories/imports.ts');
+  const reports = await import('../src/lib/db/repositories/customer-card-reports.ts');
   const { bootstrapDatabase } = await import('../src/lib/db/bootstrap.ts');
 
   bootstrapDatabase();
@@ -112,12 +113,44 @@ async function seed() {
       )
       .run(sessionId, user.id, new Date(Date.now() + 86400_000).toISOString(), db.nowIso(), company.id);
 
+    // A stored Customer Card report, which is this company's list of buyers
+    // and what they still owe.
+    const report = reports.saveReport({
+      companyId: company.id,
+      projectLabel: code,
+      reportDate: REPORT_DATE,
+      completionDate: '2028-09-30',
+      maxUplift: 0.2,
+      sourceFileName: `${code}.xlsx`,
+      sourceHash: `hash-${code}`,
+      sourceRows: 2,
+      sheetName: 'Sheet1',
+      headerRow: 6,
+      workbook: Buffer.from(`workbook holding ${code} figures`),
+      contracts: 1,
+      units: 1,
+      totalSalePrice: amount,
+      totalExpected: amount * 1.2,
+      totalPlan: amount,
+      totalPaid: amount,
+      totalOutstanding: 0,
+      totalInterest: amount * 0.2,
+      okCount: 1,
+      checkCount: 0,
+      errorCount: 0,
+      checks: [],
+      issues: [],
+      needsConfirmation: [],
+      userId: user.id,
+    });
+
     return {
       code,
       companyId: company.id,
       projectId: project.id,
       importId: result.importId,
       snapshotId: result.snapshotId,
+      reportId: report.id,
       sessionId,
       amount,
     };
@@ -332,8 +365,51 @@ async function run({ marina, hamonia }) {
     const r = await post('/api/reports/customer-card', marina, {});
     check(
       'POST /api/reports/customer-card without a file is refused',
-      r.status === 400 || r.status === 500,
+      r.status === 400,
       `status ${r.status}: ${r.text.slice(0, 120)}`,
+    );
+  }
+
+  // --- /api/reports/customer-card/[id] ------------------------------------
+  {
+    const r = await get(`/api/reports/customer-card/${hamonia.reportId}`, marina);
+    check(
+      "GET /api/reports/customer-card/{ADVTEST_B's report} is refused",
+      r.status === 404 && !r.text.includes('ADVTEST_B'),
+      `status ${r.status}: ${r.text.slice(0, 120)}`,
+    );
+  }
+
+  {
+    const r = await get(`/api/reports/customer-card/${marina.reportId}`, marina);
+    check(
+      'CONTROL: ADVTEST_A can still download its own report',
+      r.status === 200 && r.text.includes('ADVTEST_A'),
+      `status ${r.status}`,
+    );
+  }
+
+  {
+    const response = await fetch(`${BASE}/api/reports/customer-card/${hamonia.reportId}`, {
+      method: 'DELETE',
+      headers: asUser(marina),
+    });
+    const stillThere = await get(`/api/reports/customer-card/${hamonia.reportId}`, hamonia);
+    check(
+      "DELETE /api/reports/customer-card/{ADVTEST_B's report} is refused",
+      response.status === 404 && stillThere.status === 200,
+      `delete ${response.status}, still readable by its owner: ${stillThere.status === 200}`,
+    );
+  }
+
+  {
+    // The detail page takes its id from the URL, so it gets the same treatment
+    // as the API: another company's report is not found, not forbidden.
+    const r = await get(`/reports/customer-card/${hamonia.reportId}`, marina);
+    check(
+      "GET /reports/customer-card/{ADVTEST_B's report} is not found",
+      r.status === 404 && leaks(r.text).length === 0,
+      `status ${r.status}, leaked: ${leaks(r.text).join(', ') || 'nothing'}`,
     );
   }
 
@@ -360,6 +436,7 @@ async function run({ marina, hamonia }) {
     [`/inspector?importId=${hamonia.importId}`, 'Data Inspector'],
     ['/import/history', 'Import History'],
     ['/reports/customer-card', 'Customer Card Report'],
+    [`/reports/customer-card/${marina.reportId}`, 'Reconciliation by unit'],
     // Deliberately a phrase from deep inside the page, not its heading. A
     // server component streams its header before the component that fails, so
     // a title proves only that rendering started.

@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
 import { UPLOAD_DIR } from '@/lib/db';
+import { saveReport } from '@/lib/db/repositories/customer-card-reports';
 import { DEFAULT_OPTIONS, generateCustomerCardReport } from '@/lib/reports/customer-card';
 
 export const runtime = 'nodejs';
@@ -17,14 +18,18 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 /**
  * Customer card in, Interest / Advance-received workbook out.
  *
- * Deliberately stateless: nothing is written to the financial tables. This
- * report reads a file Finance already has and hands back a file — putting it
- * through the import pipeline would make it a source of dashboard figures,
- * which it is not, and would give it a second way into company-scoped data
- * that would then have to be defended.
+ * The workbook and what it said are recorded, so a report can be found again
+ * without re-running it against a card Finance may no longer have, and so a
+ * figure someone queried months later can still be traced to the file it came
+ * from.
  *
- * The uploaded file is deleted before the response is sent. It is somebody's
- * customer list.
+ * Nothing reaches the financial tables. Putting this through the import
+ * pipeline would make it a source of dashboard figures, which it is not.
+ *
+ * The uploaded card itself is deleted before the response is sent — it is
+ * somebody's list of buyers and what they still owe, and once it has been read
+ * there is no reason to keep it. What is kept is the report made from it, and
+ * the hash of the card, which is enough to prove which file it was.
  */
 export async function POST(request: Request) {
   const user = await currentUser();
@@ -38,7 +43,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Choose a company first.' }, { status: 403 });
   }
 
-  const form = await request.formData();
+  // A request that is not a form throws inside formData(), which Next turns
+  // into a 500 and a stack trace in the log. It is a bad request, and should
+  // read as one.
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return NextResponse.json(
+      { error: 'Send the customer card as a multipart form.' },
+      { status: 400 },
+    );
+  }
+
   const file = form.get('file');
 
   if (!(file instanceof File)) {
@@ -84,13 +101,13 @@ export async function POST(request: Request) {
   // file name cannot escape the directory.
   const workDir = path.join(UPLOAD_DIR, `report-${randomUUID()}`);
   await fs.mkdir(workDir, { recursive: true });
-  const stored = path.join(workDir, `card${extension}`);
+  const cardPath = path.join(workDir, `card${extension}`);
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(stored, bytes);
+    await fs.writeFile(cardPath, bytes);
 
-    const result = await generateCustomerCardReport(stored, file.name, {
+    const result = await generateCustomerCardReport(cardPath, file.name, {
       projectLabel,
       reportDate,
       completionDate: completionDate || DEFAULT_OPTIONS.completionDate,
@@ -98,12 +115,45 @@ export async function POST(request: Request) {
       tolerance: DEFAULT_OPTIONS.tolerance,
     });
 
-    const summary = {
-      ...result.model.summary,
+    const model = result.model;
+    const sourceHash = createHash('sha256').update(bytes).digest('hex');
+
+    const stored = saveReport({
+      companyId: company.id,
+      projectLabel,
+      reportDate,
+      completionDate: completionDate || DEFAULT_OPTIONS.completionDate,
+      maxUplift,
+      sourceFileName: file.name,
+      sourceHash,
+      sourceRows: model.summary.sourceRows,
       sheetName: result.sheetName,
       headerRow: result.headerRow,
-      sourceHash: createHash('sha256').update(bytes).digest('hex').slice(0, 16),
-      issues: result.model.issues.slice(0, 200),
+      workbook: result.workbook,
+      contracts: model.summary.contracts,
+      units: model.summary.units,
+      totalSalePrice: model.summary.totalSalePrice,
+      totalExpected: model.summary.totalExpectedSellingPrice,
+      totalPlan: model.summary.totalPlan,
+      totalPaid: model.summary.totalPaid,
+      totalOutstanding: model.summary.totalOutstanding,
+      totalInterest: model.summary.totalInterestExpense,
+      okCount: model.summary.ok,
+      checkCount: model.summary.check,
+      errorCount: model.summary.error,
+      checks: model.checks,
+      issues: model.issues,
+      needsConfirmation: model.summary.needsConfirmation,
+      userId: user.id,
+    });
+
+    const summary = {
+      ...model.summary,
+      reportId: stored.id,
+      sheetName: result.sheetName,
+      headerRow: result.headerRow,
+      sourceHash: sourceHash.slice(0, 16),
+      issues: model.issues.slice(0, 200),
     };
 
     const name = `Interest-Advance received_${projectLabel}_${reportDate.replaceAll('-', '.')}.xlsx`;
