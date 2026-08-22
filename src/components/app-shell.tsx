@@ -39,6 +39,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/import', label: 'Data Import', roles: ['admin', 'finance'] },
       { href: '/import/history', label: 'Import History', roles: ['admin', 'finance', 'management'] },
+      { href: '/reports/customer-card', label: 'Customer Card Report', roles: ['admin', 'finance'] },
       { href: '/reconciliation', label: 'Reconciliation', roles: ['admin', 'finance', 'management'] },
       { href: '/inspector', label: 'Data Inspector', roles: ['admin', 'finance'] },
     ],

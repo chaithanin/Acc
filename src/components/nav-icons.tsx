@@ -84,6 +84,18 @@ export const NAV_ICONS: Record<string, React.ReactNode> = {
       <path d="M12 7.5V12l3 2" />
     </svg>
   ),
+  '/reports/customer-card': (
+    // A card with a run of instalment ticks down its side — what the report is
+    // made of, one line per payment.
+    <svg {...base}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M7 9h4" />
+      <path d="M7 12.5h4" />
+      <path d="M7 16h4" />
+      <path d="M14.5 10.5l1.6 1.6 3-3.2" />
+      <path d="M14.5 16h4" />
+    </svg>
+  ),
   '/reconciliation': (
     <svg {...base}>
       <path d="M4 7h10" />

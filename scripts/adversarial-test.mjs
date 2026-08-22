@@ -324,6 +324,19 @@ async function run({ marina, hamonia }) {
     );
   }
 
+  // --- /api/reports/customer-card -----------------------------------------
+  {
+    // It reads no stored data, but it still runs only for a company: without
+    // one there is nothing to label the report with and no access decision has
+    // been made. A request with no body must not reach the parser either.
+    const r = await post('/api/reports/customer-card', marina, {});
+    check(
+      'POST /api/reports/customer-card without a file is refused',
+      r.status === 400 || r.status === 500,
+      `status ${r.status}: ${r.text.slice(0, 120)}`,
+    );
+  }
+
   // --- pages --------------------------------------------------------------
   /**
    * Each page carries a phrase that only appears once it has actually
@@ -346,6 +359,7 @@ async function run({ marina, hamonia }) {
     [`/reconciliation?snapshotId=${hamonia.snapshotId}`, 'Reconciliation'],
     [`/inspector?importId=${hamonia.importId}`, 'Data Inspector'],
     ['/import/history', 'Import History'],
+    ['/reports/customer-card', 'Customer Card Report'],
     // Deliberately a phrase from deep inside the page, not its heading. A
     // server component streams its header before the component that fails, so
     // a title proves only that rendering started.
