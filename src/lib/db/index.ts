@@ -82,6 +82,7 @@ function applyMigrations(db: Database.Database): void {
     // it for everybody.
     { table: 'budgets', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
     { table: 'template_mappings', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
+    { table: 'import_previews', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
     {
       table: 'auth_sessions',
       column: 'active_company_id',

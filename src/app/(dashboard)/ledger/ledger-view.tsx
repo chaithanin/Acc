@@ -9,9 +9,14 @@ import { formatDate } from '@/lib/format/number';
 export function LedgerView({
   accounts,
   entries,
+  totalEntries,
+  truncated,
 }: {
   accounts: AccountSummaryRow[];
   entries: LedgerTableRow[];
+  /** Postings in this period, which may exceed the rows loaded. */
+  totalEntries: number;
+  truncated: boolean;
 }) {
   const accountColumns: Column<AccountSummaryRow>[] = [
     { key: 'project', header: 'Company', value: (r) => r.projectName ?? 'Unassigned' },
@@ -104,7 +109,11 @@ export function LedgerView({
       <Card className="mt-4">
         <CardHeader
           title="Ledger postings"
-          subtitle={`${entries.length.toLocaleString()} transactions. Enable the source columns to trace any line back to its cell.`}
+          subtitle={
+            truncated
+              ? `${totalEntries.toLocaleString()} transactions in this period; the ${entries.length.toLocaleString()} most recent are listed. Enable the source columns to trace any line back to its cell.`
+              : `${totalEntries.toLocaleString()} transactions. Enable the source columns to trace any line back to its cell.`
+          }
         />
         <DataTable
           rows={entries}

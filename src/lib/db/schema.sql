@@ -490,6 +490,10 @@ CREATE TABLE IF NOT EXISTS template_company_state (
 CREATE TABLE IF NOT EXISTS import_previews (
   id           TEXT PRIMARY KEY,
   user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
+  /* The company the files were parsed FOR. Confirming under a different one is
+     refused: the preview on screen names a company, and the rows must land
+     where that screen said they would. */
+  company_id   TEXT REFERENCES companies(id) ON DELETE CASCADE,
   payload_json TEXT NOT NULL,
   created_at   TEXT NOT NULL,
   expires_at   TEXT NOT NULL

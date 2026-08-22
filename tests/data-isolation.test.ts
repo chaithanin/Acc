@@ -59,10 +59,18 @@ function dataset(projectId: string, file: string, amount: number): NormalizedDat
   const base = { projectId, projectLabel: null, sourceRef: ref(file, 'B2') };
   return {
     bank: [{ kind: 'bank', ...base, bankName: 'Test Bank', accountNo: '1', currentAmount: amount, pendingExpense: 0 }],
-    receivable: [{
-      kind: 'receivable', ...base, category: 'contract', customer: 'Buyer', unit: 'A-1',
-      contractualAmount: amount, receiveAmount: 0, accrueAmount: amount, dueDate: null,
-    }],
+    // Two, so a limited drill-down genuinely has something left over.
+    receivable: [
+      {
+        kind: 'receivable', ...base, category: 'contract', customer: 'Buyer', unit: 'A-1',
+        contractualAmount: amount, receiveAmount: 0, accrueAmount: amount, dueDate: null,
+      },
+      {
+        kind: 'receivable', ...base, sourceRef: ref(file, 'B3'),
+        category: 'contract', customer: 'Second Buyer', unit: 'A-2',
+        contractualAmount: amount / 2, receiveAmount: 0, accrueAmount: amount / 2, dueDate: null,
+      },
+    ],
     income: [{
       kind: 'income', ...base, category: 'contract', description: 'Sale', month: '2026-08',
       contractualAmount: amount, receivedAmount: 0, accruedAmount: amount, isForecast: false,
@@ -116,7 +124,7 @@ function parsedFile(projectId: string, fileName: string, amount: number): Parsed
     sheetCount: 1,
     sheets: [],
     data: dataset(projectId, fileName, amount),
-    rowCount: 8,
+    rowCount: 9,
     issues: [{
       severity: 'warning',
       code: 'test_issue',
@@ -266,7 +274,8 @@ describe('a snapshot id from another company', () => {
 
     assert.deepEqual(queries.getReceivableRows(scope), []);
     assert.deepEqual(queries.getBoqRows(scope), []);
-    assert.deepEqual(queries.getLedgerRows(scope), []);
+    assert.deepEqual(queries.getLedgerRows(scope).rows, []);
+    assert.equal(queries.getLedgerRows(scope).totalCount, 0);
     assert.deepEqual(queries.getAccountSummary(scope), []);
     assert.deepEqual(queries.getProjectMetrics(scope, []), []);
 
@@ -288,6 +297,29 @@ describe('a snapshot id from another company', () => {
   });
 });
 
+describe('a drill-down that does not fit', () => {
+  it('reports the total of every record, not of the rows it shows', () => {
+    // The rows are the largest few; the total is all of them. Footing the
+    // returned rows made a KPI of ฿1.2bn open a drill-down footed at ฿400m,
+    // with nothing on screen to say why.
+    const scope = { companyId: marina.companyId, snapshotId: marina.snapshotId, projectId: null };
+
+    const full = drilldownRepo.drilldown(scope, 'total_receivable_outstanding');
+    const limited = drilldownRepo.drilldown(scope, 'total_receivable_outstanding', 1);
+
+    assert.equal(limited.rows.length, 1);
+    assert.equal(limited.total, full.total);
+    assert.equal(limited.recordCount, full.recordCount);
+    assert.equal(full.recordCount, 2);
+    assert.equal(limited.truncated, true);
+    assert.equal(full.truncated, false);
+
+    // The full total is both records', which is the KPI's own figure.
+    assert.equal(full.total, 1_500_000);
+    assert.notEqual(limited.rows[0].amount, limited.total);
+  });
+});
+
 describe('a project id from another company', () => {
   it('does not widen a read of the caller’s own snapshot', () => {
     const scope = {
@@ -297,7 +329,8 @@ describe('a project id from another company', () => {
     };
 
     assert.deepEqual(queries.getReceivableRows(scope), []);
-    assert.deepEqual(queries.getLedgerRows(scope), []);
+    assert.deepEqual(queries.getLedgerRows(scope).rows, []);
+    assert.equal(queries.getLedgerRows(scope).totalCount, 0);
     assert.deepEqual(drilldownRepo.drilldown(scope, 'bank_current_amount').rows, []);
   });
 });

@@ -9,7 +9,10 @@ export interface DrilldownResponse {
   supported: boolean;
   label: string;
   rows: DrilldownRow[];
+  /** The total of every contributing record, not only the rows listed. */
   total: number;
+  recordCount?: number;
+  truncated?: boolean;
   error?: string;
 }
 
@@ -42,6 +45,8 @@ export function DrilldownTable({ data }: { data: DrilldownResponse }) {
       />
     );
   }
+
+  const recordCount = data.recordCount ?? data.rows.length;
 
   const columns: Column<DrilldownRow>[] = [
     { key: 'project', header: 'Project', value: (r) => r.projectName ?? 'Unassigned' },
@@ -84,9 +89,19 @@ export function DrilldownTable({ data }: { data: DrilldownResponse }) {
   return (
     <div>
       <p className="mb-3 text-sm text-ink-secondary">
-        {data.label} — {data.rows.length} record{data.rows.length === 1 ? '' : 's'} totalling{' '}
+        {data.label} — {recordCount} record{recordCount === 1 ? '' : 's'} totalling{' '}
         <span className="tnum font-medium text-ink">{formatTHB(data.total)}</span>
       </p>
+
+      {/* The total above is every record's; the table is the largest few. Said
+          plainly, because a table that foots to less than its own heading is
+          read as a wrong number rather than as a shortened list. */}
+      {data.truncated ? (
+        <p className="mb-3 rounded-md border border-border bg-surface-sunken px-3 py-2 text-xs text-ink-secondary">
+          Showing the {data.rows.length} largest of {recordCount} records. The total above covers all
+          of them; export to see every row.
+        </p>
+      ) : null}
       <DataTable
         rows={data.rows}
         columns={columns}

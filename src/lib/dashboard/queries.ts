@@ -335,8 +335,27 @@ export interface LedgerTableRow {
   sourceCell: string | null;
 }
 
-export function getLedgerRows(scope: DataScope, limit = 5000): LedgerTableRow[] {
+export interface LedgerPage {
+  rows: LedgerTableRow[];
+  /** Postings in this scope, before the limit. */
+  totalCount: number;
+  truncated: boolean;
+}
+
+/**
+ * Ledger postings, largest page first.
+ *
+ * A general ledger routinely runs past the limit, and a table headed "5,000
+ * transactions" when the period holds 40,000 is a wrong statement rather than
+ * a short list — so the true count is read separately and reported.
+ */
+export function getLedgerRows(scope: DataScope, limit = 5000): LedgerPage {
   const { where, params } = scopeClause(scope, 't');
+
+  const totalCount =
+    getDb()
+      .prepare<string[], { n: number }>(`SELECT COUNT(*) AS n FROM gl_entries t WHERE ${where}`)
+      .get(...params)?.n ?? 0;
   const sql = `
     SELECT p.name AS project_name, t.account_code, t.account_name, t.entry_date, t.voucher_no,
            t.vendor, t.description, t.cost_code, t.debit, t.credit, t.balance,
@@ -350,7 +369,7 @@ export function getLedgerRows(scope: DataScope, limit = 5000): LedgerTableRow[] 
 
   const args: (string | number)[] = [...params, limit];
 
-  return getDb()
+  const rows: LedgerTableRow[] = getDb()
     .prepare<(string | number)[], any>(sql)
     .all(...args)
     .map((row) => ({
@@ -369,6 +388,8 @@ export function getLedgerRows(scope: DataScope, limit = 5000): LedgerTableRow[] 
       sourceSheet: row.source_sheet,
       sourceCell: row.source_cell,
     }));
+
+  return { rows, totalCount, truncated: totalCount > rows.length };
 }
 
 export interface AccountSummaryRow {

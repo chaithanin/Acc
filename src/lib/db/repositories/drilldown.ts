@@ -202,13 +202,33 @@ function sourceFor(metricKey: string): DrilldownSource | null {
  * matched on the record itself, so another company's snapshot id returns an
  * empty result rather than that company's records.
  */
+export interface DrilldownResult {
+  rows: DrilldownRow[];
+  label: string;
+  supported: boolean;
+  /**
+   * The total of EVERY contributing record, not of the rows returned.
+   *
+   * Summing the returned rows was wrong the moment the limit bit: a KPI of
+   * ฿1.2bn opened a drill-down footed at ฿400m and nothing said why. A figure
+   * that disagrees with the KPI it explains is worse than no figure.
+   */
+  total: number;
+  /** How many records contribute, before the limit. */
+  recordCount: number;
+  /** True when `rows` is a subset — the caller must say so on screen. */
+  truncated: boolean;
+}
+
 export function drilldown(
   scope: DataScope,
   metricKey: string,
   limit = 500,
-): { rows: DrilldownRow[]; label: string; supported: boolean; total: number } {
+): DrilldownResult {
   const source = sourceFor(metricKey);
-  if (!source) return { rows: [], label: '', supported: false, total: 0 };
+  if (!source) {
+    return { rows: [], label: '', supported: false, total: 0, recordCount: 0, truncated: false };
+  }
 
   const scoped = scopeClause(scope, 't');
   const predicates = [scoped.where];
@@ -218,6 +238,18 @@ export function drilldown(
     predicates.push(source.where);
     params.push(...(source.params ?? []));
   }
+
+  const where = `${predicates.join(' AND ')}
+       AND ${source.amount} IS NOT NULL
+       AND ${source.amount} <> 0`;
+
+  // The true footing, computed over every contributing record. Read before the
+  // rows so the limit below cannot change it.
+  const totals = getDb()
+    .prepare<(string | number)[], { n: number; total: number | null }>(
+      `SELECT COUNT(*) AS n, SUM(${source.amount}) AS total FROM ${source.table} t WHERE ${where}`,
+    )
+    .get(...params) ?? { n: 0, total: 0 };
 
   // Table and expressions come from the constant map above, never from input.
   const sql = `
@@ -230,9 +262,7 @@ export function drilldown(
       FROM ${source.table} t
       LEFT JOIN projects p           ON p.id = t.project_id
       LEFT JOIN source_references sr ON sr.id = t.source_ref_id
-     WHERE ${predicates.join(' AND ')}
-       AND ${source.amount} IS NOT NULL
-       AND ${source.amount} <> 0
+     WHERE ${where}
      ORDER BY ABS(${source.amount}) DESC
      LIMIT ?`;
 
@@ -249,7 +279,9 @@ export function drilldown(
   return {
     label: source.label,
     supported: true,
-    total: rows.reduce((sum, r) => sum + r.amount, 0),
+    total: totals.total ?? 0,
+    recordCount: totals.n,
+    truncated: totals.n > rows.length,
     rows: rows.map((row) => ({
       projectName: row.project_name,
       category: row.category,

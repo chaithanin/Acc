@@ -45,7 +45,14 @@ export default async function LedgerPage({
         ))}
       </KpiGrid>
 
-      {data ? <LedgerView accounts={data.accounts} entries={data.entries} /> : null}
+      {data ? (
+        <LedgerView
+          accounts={data.accounts}
+          entries={data.entries.rows}
+          totalEntries={data.entries.totalCount}
+          truncated={data.entries.truncated}
+        />
+      ) : null}
     </DashboardPage>
   );
 }

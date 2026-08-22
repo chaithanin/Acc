@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
-import { getDb, parseJson } from '@/lib/db';
-import { persistImport } from '@/lib/db/repositories/imports';
+import { getDb, nowIso, parseJson } from '@/lib/db';
+import { findDuplicates, persistImport } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
 import { listTemplatesForCompany } from '@/lib/db/repositories/templates';
 import { ProjectResolver } from '@/lib/detect/project-resolver';
@@ -14,6 +14,7 @@ export const maxDuration = 300;
 interface PreviewPayload {
   previewId: string;
   uploadRoot: string;
+  companyId?: string;
   reportDate: string;
   files: {
     filePath: string;
@@ -56,6 +57,11 @@ export async function POST(request: Request) {
     label?: string;
     mode?: 'new' | 'replace';
     overrides?: FileOverride[];
+    /**
+     * Set by the preview screen once the person importing has seen the
+     * duplicate warning and chosen to go ahead anyway.
+     */
+    acknowledgeDuplicates?: boolean;
   };
 
   if (!body.previewId) {
@@ -64,8 +70,8 @@ export async function POST(request: Request) {
 
   const db = getDb();
   const row = db
-    .prepare<[string, string], { payload_json: string; expires_at: string }>(
-      'SELECT payload_json, expires_at FROM import_previews WHERE id = ? AND user_id = ?',
+    .prepare<[string, string], { payload_json: string; expires_at: string; company_id: string | null }>(
+      'SELECT payload_json, expires_at, company_id FROM import_previews WHERE id = ? AND user_id = ?',
     )
     .get(body.previewId, user.id);
 
@@ -76,9 +82,34 @@ export async function POST(request: Request) {
     );
   }
 
+  // The expiry was stored but never read, so a preview stayed usable until
+  // somebody happened to run the cleanup — a stale set of files could be
+  // confirmed days later against data that had moved on since.
+  if (row.expires_at <= nowIso()) {
+    db.prepare('DELETE FROM import_previews WHERE id = ?').run(body.previewId);
+    return NextResponse.json(
+      { error: 'That preview has expired. Upload the files again.' },
+      { status: 410 },
+    );
+  }
+
   const payload = parseJson<PreviewPayload | null>(row.payload_json, null);
   if (!payload) {
     return NextResponse.json({ error: 'The staged preview could not be read.' }, { status: 500 });
+  }
+
+  // The files were parsed against one company's projects and the preview
+  // screen named that company. Switching company in another tab and confirming
+  // would file them somewhere the person importing never saw.
+  const previewCompany = row.company_id ?? payload.companyId ?? null;
+  if (previewCompany && previewCompany !== company.id) {
+    return NextResponse.json(
+      {
+        error:
+          'This preview was prepared for a different company. Switch back to it, or upload the files again under the company you want them in.',
+      },
+      { status: 409 },
+    );
   }
 
   const uploads: UploadedFile[] = payload.files.map((f) => ({
@@ -120,6 +151,34 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: 'None of the files could be read, so nothing was imported.' },
       { status: 400 },
+    );
+  }
+
+  // Duplicates are re-checked here, not only in the preview: minutes can pass
+  // between the two, and the same workbook may have been imported in that
+  // gap — by this person in another tab or by a colleague.
+  const duplicates = findDuplicates(
+    company.id,
+    parsed.map((r) => ({
+      fileName: r.fileName,
+      hash: r.hash,
+      reportDate: r.reportDate,
+      projectId: r.project.projectId,
+      reportType: r.reportType,
+    })),
+  );
+
+  if (duplicates.length > 0 && !body.acknowledgeDuplicates) {
+    return NextResponse.json(
+      {
+        error:
+          duplicates.length === 1
+            ? `"${duplicates[0].fileName}" has already been imported. Confirm again to import it anyway.`
+            : `${duplicates.length} of these files have already been imported. Confirm again to import them anyway.`,
+        duplicates,
+        needsAcknowledgement: true,
+      },
+      { status: 409 },
     );
   }
 

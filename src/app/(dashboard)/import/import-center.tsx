@@ -24,6 +24,13 @@ export function ImportCenter() {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reportDate, setReportDate] = useState('');
+  /**
+   * Armed only after the server has refused an import as a duplicate.
+   *
+   * Reset whenever a new preview is loaded, so an acknowledgement earned for
+   * one upload never carries over to the next.
+   */
+  const [duplicatesAcknowledged, setDuplicatesAcknowledged] = useState(false);
 
   const upload = useCallback(
     async (files: FileList | File[]) => {
@@ -32,6 +39,7 @@ export function ImportCenter() {
 
       setError(null);
       setPreview(null);
+      setDuplicatesAcknowledged(false);
       setStage('uploading');
 
       const form = new FormData();
@@ -86,11 +94,19 @@ export function ImportCenter() {
           label: payload.label,
           mode: payload.mode,
           overrides: payload.overrides,
+          // Only ever true on a second press, after the server has said which
+          // files it already holds. Sending it by default would turn the check
+          // into a message nobody reads.
+          acknowledgeDuplicates: duplicatesAcknowledged,
         }),
       });
 
       const data = await response.json();
       if (!response.ok) {
+        // The server found the files already imported. Saying so and arming
+        // the next press is the whole mechanism: nothing is imported twice by
+        // accident, and importing twice on purpose is still one more click.
+        if (data.needsAcknowledgement) setDuplicatesAcknowledged(true);
         setError(data.error ?? 'The import failed.');
         setStage(null);
         return;
@@ -98,6 +114,7 @@ export function ImportCenter() {
 
       setStage('completed');
       setPreview(null);
+      setDuplicatesAcknowledged(false);
       router.push('/');
       router.refresh();
     } catch (err) {

@@ -7,12 +7,28 @@ import { isExcelFile } from './read';
  * ZIP expansion into a temporary directory.
  *
  * The archive itself is never modified, and extraction is bounded so a zip
- * bomb cannot fill the disk. Extracted files are cleaned up by the caller.
+ * bomb cannot fill the disk or the heap. Extracted files are cleaned up by the
+ * caller.
+ *
+ * The bounds are applied in the FILTER, which runs before an entry is
+ * inflated. Checking sizes after `unzip` returned was checking them after the
+ * damage: a 40 KB archive holding a 4 GB run of zeros was fully decompressed
+ * into memory first, and the process died before reaching the limit that was
+ * supposed to stop it.
  */
 
-/** Refuse archives that would expand beyond this. */
+/** Refuse archives that would expand beyond this in total. */
 const MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024; // 1 GB
+/** No single workbook in an archive may exceed this. */
+const MAX_ENTRY_UNCOMPRESSED = 200 * 1024 * 1024;
 const MAX_ENTRIES = 500;
+/**
+ * Highest tolerated expansion factor for one entry.
+ *
+ * A real workbook is XML and compresses perhaps 20:1. A thousandfold is not a
+ * spreadsheet; it is a run of one repeated byte.
+ */
+const MAX_RATIO = 500;
 
 export interface ExtractedFile {
   /** Path on disk of the extracted copy. */
@@ -32,45 +48,95 @@ export async function extractExcelFromZip(
 ): Promise<{ files: ExtractedFile[]; skipped: string[] }> {
   const buffer = await fs.readFile(zipPath);
 
+  const skipped: string[] = [];
+  let entriesSeen = 0;
+  let plannedBytes = 0;
+  let rejection: string | null = null;
+
+  /**
+   * Decides, from the central directory alone, whether an entry is inflated.
+   *
+   * Returning false costs nothing — the entry is never decompressed. The first
+   * refusal is remembered and rethrown afterwards, because throwing from
+   * inside fflate's callback would surface as an unrelated parse error.
+   */
+  // fflate's names read backwards: `size` is the COMPRESSED size and
+  // `originalSize` the uncompressed one. Aliased here so the checks below say
+  // what they mean.
+  const filter = (file: { name: string; size: number; originalSize: number }): boolean => {
+    const compressed = file.size;
+    const uncompressed = file.originalSize;
+
+    if (rejection) return false;
+
+    const entryName = file.name;
+    if (entryName.endsWith('/')) return false;
+
+    const baseName = path.basename(entryName);
+    // Mac archive cruft and hidden files are noise, not reports.
+    if (baseName.startsWith('.') || entryName.includes('__MACOSX/')) return false;
+
+    entriesSeen += 1;
+    if (entriesSeen > MAX_ENTRIES) {
+      rejection = `The archive contains more than ${MAX_ENTRIES} entries.`;
+      return false;
+    }
+
+    if (!isExcelFile(baseName)) {
+      skipped.push(entryName);
+      return false;
+    }
+
+    // Both sizes come from the archive's own directory and can lie, so they
+    // are a cheap first gate; the bytes that actually arrive are checked again
+    // below.
+    if (uncompressed > MAX_ENTRY_UNCOMPRESSED) {
+      rejection = `"${baseName}" expands to ${Math.round(uncompressed / 1024 / 1024)} MB, above the ${
+        MAX_ENTRY_UNCOMPRESSED / 1024 / 1024
+      } MB limit for one file.`;
+      return false;
+    }
+
+    if (compressed > 0 && uncompressed / compressed > MAX_RATIO) {
+      rejection = `"${baseName}" claims to expand ${Math.round(
+        uncompressed / compressed,
+      )}-fold, which is not a spreadsheet.`;
+      return false;
+    }
+
+    plannedBytes += uncompressed;
+    if (plannedBytes > MAX_TOTAL_UNCOMPRESSED) {
+      rejection = 'The archive expands beyond the 1 GB extraction limit.';
+      return false;
+    }
+
+    return true;
+  };
+
   const entries = await new Promise<Unzipped>((resolve, reject) => {
-    unzip(new Uint8Array(buffer), (err, data) => {
+    unzip(new Uint8Array(buffer), { filter }, (err, data) => {
       if (err) reject(new ZipExtractionError(`The archive could not be opened: ${err.message}`));
       else resolve(data);
     });
   });
 
-  const names = Object.keys(entries);
-  if (names.length > MAX_ENTRIES) {
-    throw new ZipExtractionError(
-      `The archive contains ${names.length} entries, above the ${MAX_ENTRIES} limit.`,
-    );
-  }
+  if (rejection) throw new ZipExtractionError(rejection);
 
   await fs.mkdir(destDir, { recursive: true });
 
   const files: ExtractedFile[] = [];
-  const skipped: string[] = [];
   let totalBytes = 0;
 
-  for (const entryName of names) {
+  for (const entryName of Object.keys(entries)) {
     const data = entries[entryName];
-
-    // Directory entries carry no data.
-    if (entryName.endsWith('/') || data.length === 0) continue;
+    if (data.length === 0) continue;
 
     const baseName = path.basename(entryName);
 
-    // Mac archive cruft and hidden files are noise, not reports.
-    if (baseName.startsWith('.') || entryName.includes('__MACOSX/')) continue;
-
-    if (!isExcelFile(baseName)) {
-      skipped.push(entryName);
-      continue;
-    }
-
+    // The declared sizes were only a claim; this is what actually arrived.
     totalBytes += data.length;
-    if (totalBytes > MAX_TOTAL_UNCOMPRESSED) {
-      throw new ZipExtractionError('The archive expands beyond the 1 GB extraction limit.');
+    if (data.length > MAX_ENTRY_UNCOMPRESSED || totalBytes > MAX_TOTAL_UNCOMPRESSED) {
+      throw new ZipExtractionError('The archive expands beyond the extraction limits.');
     }
 
     // Flatten to a safe name — an entry name from an untrusted archive must

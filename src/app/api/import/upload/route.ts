@@ -175,11 +175,13 @@ export async function POST(request: Request) {
 
   getDb()
     .prepare(
-      'INSERT INTO import_previews (id, user_id, payload_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
+      `INSERT INTO import_previews (id, user_id, company_id, payload_json, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       previewId,
       user.id,
+      company.id,
       JSON.stringify(payload),
       nowIso(),
       new Date(Date.now() + PREVIEW_TTL_MS).toISOString(),

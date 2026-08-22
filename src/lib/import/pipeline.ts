@@ -154,10 +154,36 @@ export async function expandUploads(
   const tempDirs: string[] = [];
   const issues: ImportIssue[] = [];
 
+  /**
+   * File names must be unique across one import.
+   *
+   * They are the key that ties a record's source reference back to the file
+   * row it came from, and two archives — or two folders inside one archive —
+   * routinely hold a "Report.xlsx" each. Colliding names attributed one file's
+   * cells to the other file's row, so a second occurrence is qualified by
+   * where it came from and stays distinguishable on screen too.
+   */
+  const taken = new Set<string>();
+  const uniqueName = (name: string, within?: string) => {
+    if (!taken.has(name)) {
+      taken.add(name);
+      return name;
+    }
+    const qualified = within ? `${within} › ${name}` : name;
+    let candidate = qualified;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${qualified} (${n})`;
+      n += 1;
+    }
+    taken.add(candidate);
+    return candidate;
+  };
+
   for (const upload of uploads) {
     if (!isZipFile(upload.fileName)) {
       if (isExcelFile(upload.fileName)) {
-        files.push(upload);
+        files.push({ ...upload, fileName: uniqueName(upload.fileName) });
       } else {
         issues.push({
           severity: 'error',
@@ -199,7 +225,8 @@ export async function expandUploads(
         const buffer = await fs.readFile(entry.filePath);
         files.push({
           filePath: entry.filePath,
-          fileName: entry.fileName,
+          // Qualified by the archive path when the plain name is already used.
+          fileName: uniqueName(entry.fileName, path.dirname(entry.entryName).replace(/^\.$/, '')),
           size: entry.size,
           hash: hashBuffer(buffer),
           containerFile: upload.fileName,
