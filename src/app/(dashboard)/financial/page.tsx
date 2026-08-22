@@ -50,7 +50,9 @@ export default async function FinancialDashboardPage({
     ? getMonthlySeries(context.scope, reportDate, metrics.get('available_cash')?.current ?? 0)
     : [];
 
-  const budget = context.snapshot ? getBudget(month, context.projectId) : null;
+  const budget = context.scope
+    ? getBudget(context.scope.companyId, month, context.scope.projectId)
+    : null;
 
   const incomeBudget = utilisation(
     budget?.incomeBudget ?? null,

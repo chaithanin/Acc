@@ -2,9 +2,9 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { REPORT_TYPE_LABELS } from '@/config/detection-rules';
 import { Badge, Card, CardHeader, PageHeader } from '@/components/ui/primitives';
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { listProjects } from '@/lib/db/repositories/projects';
-import { listTemplates, updateTemplate } from '@/lib/db/repositories/templates';
+import { listTemplatesForCompany, setTemplateActiveForCompany } from '@/lib/db/repositories/templates';
 
 /**
  * Template mapping (requirement 26).
@@ -17,7 +17,10 @@ export default async function TemplateSettingsPage() {
   if (!user) redirect('/login');
   if (!can(user, 'mapping:edit')) redirect('/');
 
-  const templates = listTemplates();
+  const company = await activeCompany();
+  if (!company) redirect('/companies');
+
+  const templates = listTemplatesForCompany(company.id);
   const projects = listProjects(true);
 
   async function toggleAction(formData: FormData) {
@@ -25,9 +28,16 @@ export default async function TemplateSettingsPage() {
     const actor = await currentUser();
     if (!actor || !can(actor, 'mapping:edit')) redirect('/');
 
-    updateTemplate(String(formData.get('id') ?? ''), {
-      active: formData.get('active') === '1',
-    });
+    const actorCompany = await activeCompany();
+    if (!actorCompany) redirect('/companies');
+
+    // Disabling a shared default records this company's choice rather than
+    // editing the default, so the other companies keep theirs.
+    setTemplateActiveForCompany(
+      actorCompany.id,
+      String(formData.get('id') ?? ''),
+      formData.get('active') === '1',
+    );
     revalidatePath('/settings/templates');
   }
 
@@ -35,7 +45,7 @@ export default async function TemplateSettingsPage() {
     <>
       <PageHeader
         title="Template Mapping"
-        description="Known workbook layouts. When one matches, its column hints fill in anything header detection could not resolve."
+        description="Known workbook layouts. When one matches, its column hints fill in anything header detection could not resolve. Enabling or disabling a shared default applies to this company only."
       />
 
       <Card className="mb-4">
@@ -75,6 +85,7 @@ export default async function TemplateSettingsPage() {
                   <div className="flex items-center gap-2">
                     <Badge tone="neutral">{REPORT_TYPE_LABELS[template.reportType]}</Badge>
                     {project ? <Badge tone="info">{project.name}</Badge> : null}
+                    {template.companyId ? null : <Badge tone="neutral">Shared default</Badge>}
                     {template.active ? (
                       <Badge tone="good" icon={<span aria-hidden>●</span>}>
                         Active

@@ -7,7 +7,7 @@ import { activeCompany, can, currentUser } from '@/lib/auth';
 import { UPLOAD_DIR, getDb, nowIso } from '@/lib/db';
 import { findDuplicates } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
-import { listTemplates } from '@/lib/db/repositories/templates';
+import { listTemplatesForCompany } from '@/lib/db/repositories/templates';
 import { ProjectResolver } from '@/lib/detect/project-resolver';
 import { expandUploads, processFiles, type UploadedFile } from '@/lib/import/pipeline';
 import { REPORT_TYPE_LABELS } from '@/config/detection-rules';
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
   // than as what it is: the wrong company.
   const groupResolver = new ProjectResolver(allProjects);
 
-  const templates = listTemplates();
+  const templates = listTemplatesForCompany(company.id);
 
   const expanded = await expandUploads(uploads, uploadRoot);
   const defaultReportDate = reportDateOverride || new Date().toISOString().slice(0, 10);

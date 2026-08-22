@@ -29,6 +29,12 @@ export interface TemplateMapping {
   cellMap: Partial<Record<CanonicalField, string>>;
   priority: number;
   active: boolean;
+  /**
+   * The company that owns this template, or null for a shipped default that
+   * every company shares. Set by the repository; the matcher itself never
+   * reads it, because it is only ever handed one company's templates.
+   */
+  companyId?: string | null;
 }
 
 export function matchTemplate(

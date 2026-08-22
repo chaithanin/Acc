@@ -455,6 +455,9 @@ CREATE TABLE IF NOT EXISTS template_mappings (
   id                TEXT PRIMARY KEY,
   name              TEXT NOT NULL UNIQUE,
   report_type       TEXT NOT NULL,
+  /* NULL means a shipped default, shared by every company. A company's own
+     template carries its id and is invisible to the others. */
+  company_id        TEXT REFERENCES companies(id) ON DELETE CASCADE,
   project_id        TEXT REFERENCES projects(id) ON DELETE SET NULL,
   description       TEXT,
   /* { fileNamePatterns, sheetNamePatterns, requiredHeaders } */
@@ -467,6 +470,20 @@ CREATE TABLE IF NOT EXISTS template_mappings (
   active            INTEGER NOT NULL DEFAULT 1,
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL
+);
+
+-- One company enabling or disabling a SHARED template, without touching it.
+--
+-- The shipped defaults belong to no company, so a company that disabled one
+-- would disable it for all six. This records the choice per company instead;
+-- a company's own templates are switched on the template row itself.
+CREATE TABLE IF NOT EXISTS template_company_state (
+  id          TEXT PRIMARY KEY,
+  template_id TEXT NOT NULL REFERENCES template_mappings(id) ON DELETE CASCADE,
+  company_id  TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  active      INTEGER NOT NULL,
+  updated_at  TEXT NOT NULL,
+  UNIQUE (template_id, company_id)
 );
 
 -- Staged parse results awaiting user confirmation (requirement 14).
@@ -484,8 +501,10 @@ CREATE INDEX IF NOT EXISTS idx_previews_expiry ON import_previews(expires_at);
 -- dials say so rather than inventing a denominator.
 CREATE TABLE IF NOT EXISTS budgets (
   id             TEXT PRIMARY KEY,
-  /* YYYY-MM. NULL project_id means the group-wide budget. */
+  /* YYYY-MM. A NULL project_id means every project OF THIS COMPANY — the
+     company is never null on a budget entered through the application. */
   month          TEXT NOT NULL,
+  company_id     TEXT REFERENCES companies(id) ON DELETE CASCADE,
   project_id     TEXT REFERENCES projects(id) ON DELETE CASCADE,
   income_budget  NUMERIC,
   expense_budget NUMERIC,
@@ -493,8 +512,8 @@ CREATE TABLE IF NOT EXISTS budgets (
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_period
-  ON budgets(month, IFNULL(project_id, ''));
+/* The unique index on (company, month, project) is created in applyMigrations:
+   it names company_id, which an upgraded database only gains there. */
 
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,

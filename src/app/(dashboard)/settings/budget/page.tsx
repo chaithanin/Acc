@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
-import { can, currentUser } from '@/lib/auth';
+import { activeCompany, can, currentUser } from '@/lib/auth';
 import { getBudget, setBudget } from '@/lib/db/repositories/budgets';
 import { listProjects } from '@/lib/db/repositories/projects';
 import { formatMonth } from '@/lib/format/number';
@@ -22,14 +22,18 @@ export default async function BudgetSettingsPage({
   if (!user) redirect('/login');
   if (!can(user, 'mapping:edit')) redirect('/');
 
+  // The budget belongs to the company in session, and only its projects can
+  // be chosen for one.
+  const company = await activeCompany();
+  if (!company) redirect('/companies');
+
   const { month: monthParam, projectId: projectParam } = await searchParams;
   const month = /^\d{4}-\d{2}$/.test(monthParam ?? '')
     ? monthParam!
     : new Date().toISOString().slice(0, 7);
-  const projectId = projectParam || null;
-
-  const projects = listProjects();
-  const existing = getBudget(month, projectId);
+  const projects = listProjects().filter((p) => p.companyId === company.id);
+  const projectId = projectParam && projects.some((p) => p.id === projectParam) ? projectParam : null;
+  const existing = getBudget(company.id, month, projectId);
 
   async function saveAction(formData: FormData) {
     'use server';
@@ -39,7 +43,17 @@ export default async function BudgetSettingsPage({
     const targetMonth = String(formData.get('month') ?? '');
     if (!/^\d{4}-\d{2}$/.test(targetMonth)) return;
 
-    const target = String(formData.get('projectId') ?? '') || null;
+    // Re-resolved inside the action: the form is a request, and a project id
+    // posted here must still be one of this company's.
+    const actorCompany = await activeCompany();
+    if (!actorCompany) redirect('/companies');
+
+    const posted = String(formData.get('projectId') ?? '') || null;
+    const target =
+      posted && listProjects(true).some((p) => p.id === posted && p.companyId === actorCompany.id)
+        ? posted
+        : null;
+
     const parse = (name: string) => {
       const raw = String(formData.get(name) ?? '').replace(/[,\s฿]/g, '');
       if (raw === '') return null;
@@ -48,6 +62,7 @@ export default async function BudgetSettingsPage({
     };
 
     setBudget({
+      companyId: actorCompany.id,
       month: targetMonth,
       projectId: target,
       incomeBudget: parse('incomeBudget'),

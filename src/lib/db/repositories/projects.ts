@@ -52,9 +52,17 @@ export function getProject(id: string): Project | null {
   return listProjects(true).find((p) => p.id === id) ?? null;
 }
 
+/**
+ * `companyId` is optional only because the seed runs before companies exist —
+ * `backfillCompanies` creates them from the projects it has just written and
+ * links them straight back. Anything serving a request supplies it: a project
+ * with no company appears on no dashboard, because every scoped query filters
+ * on exactly that column.
+ */
 export function createProject(input: {
   code: string;
   name: string;
+  companyId?: string | null;
   company?: string | null;
   sortOrder?: number;
   aliases?: string[];
@@ -65,9 +73,13 @@ export function createProject(input: {
 
   transaction(() => {
     db.prepare(
-      `INSERT INTO projects (id, code, name, company, sort_order, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-    ).run(id, input.code, input.name, input.company ?? null, input.sortOrder ?? 100, now, now);
+      `INSERT INTO projects
+         (id, code, name, company_id, company, sort_order, active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    ).run(
+      id, input.code, input.name, input.companyId ?? null, input.company ?? null,
+      input.sortOrder ?? 100, now, now,
+    );
 
     // The project's own name and code are aliases too, so detection finds them
     // without any special-casing.
@@ -81,7 +93,14 @@ export function createProject(input: {
 
 export function updateProject(
   id: string,
-  input: { name?: string; code?: string; company?: string | null; sortOrder?: number; active?: boolean },
+  input: {
+    name?: string;
+    code?: string;
+    companyId?: string | null;
+    company?: string | null;
+    sortOrder?: number;
+    active?: boolean;
+  },
 ): Project | null {
   const db = getDb();
   const existing = getProject(id);
@@ -89,11 +108,13 @@ export function updateProject(
 
   db.prepare(
     `UPDATE projects
-        SET name = ?, code = ?, company = ?, sort_order = ?, active = ?, updated_at = ?
+        SET name = ?, code = ?, company_id = ?, company = ?, sort_order = ?, active = ?,
+            updated_at = ?
       WHERE id = ?`,
   ).run(
     input.name ?? existing.name,
     input.code ?? existing.code,
+    input.companyId === undefined ? existing.companyId : input.companyId,
     input.company === undefined ? existing.company : input.company,
     input.sortOrder ?? existing.sortOrder,
     toDbBool(input.active ?? existing.active),

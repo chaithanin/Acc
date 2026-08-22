@@ -4,7 +4,7 @@ import { activeCompany, can, currentUser } from '@/lib/auth';
 import { getDb, parseJson } from '@/lib/db';
 import { persistImport } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
-import { listTemplates } from '@/lib/db/repositories/templates';
+import { listTemplatesForCompany } from '@/lib/db/repositories/templates';
 import { ProjectResolver } from '@/lib/detect/project-resolver';
 import { processFiles, type FileOverride, type UploadedFile } from '@/lib/import/pipeline';
 
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   try {
     results = await processFiles(uploads, {
       resolver,
-      templates: listTemplates(),
+      templates: listTemplatesForCompany(company.id),
       defaultReportDate: reportDate,
       overrides: body.overrides ?? [],
     });

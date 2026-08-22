@@ -76,6 +76,12 @@ function applyMigrations(db: Database.Database): void {
     { table: 'users', column: 'expires_at', definition: 'TEXT' },
     { table: 'wip_records', column: 'stated_closing', definition: 'NUMERIC' },
     { table: 'projects', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
+    // Master data is company data too. A budget without a company was the
+    // group's budget, so the second company to enter one overwrote the first;
+    // a template without one belonged to everybody, so disabling it disabled
+    // it for everybody.
+    { table: 'budgets', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
+    { table: 'template_mappings', column: 'company_id', definition: 'TEXT REFERENCES companies(id)' },
     {
       table: 'auth_sessions',
       column: 'active_company_id',
@@ -107,6 +113,14 @@ function applyMigrations(db: Database.Database): void {
   // Indexes on migrated columns belong here rather than in the schema file,
   // which runs before these columns exist on an upgraded database.
   db.exec('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
+
+  // The budget key gained the company. An index of that name may already exist
+  // over (month, project) alone, and CREATE ... IF NOT EXISTS would leave it
+  // there — so it is dropped and rewritten. Dropping an index loses no data.
+  db.exec('DROP INDEX IF EXISTS idx_budget_period');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_period
+             ON budgets(IFNULL(company_id, ''), month, IFNULL(project_id, ''))`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_templates_company ON template_mappings(company_id)');
   for (const table of COMPANY_SCOPED_TABLES) {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_company ON ${table}(company_id)`);
   }
@@ -150,6 +164,24 @@ function backfillRecordCompanies(db: Database.Database): void {
       UPDATE financial_snapshots
          SET company_id = (SELECT i.company_id FROM imports i WHERE i.id = financial_snapshots.import_id)
        WHERE company_id IS NULL
+    `);
+  }
+
+  // A budget or template naming a project belongs to that project's company.
+  // One naming no project cannot be placed — it was the group's — and is left
+  // null: a budget nobody sees is a visible gap, a budget the wrong company
+  // sees is not.
+  for (const table of ['budgets', 'template_mappings']) {
+    const columns = db
+      .prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
+      .all()
+      .map((c) => c.name);
+    if (!columns.includes('company_id')) continue;
+
+    db.exec(`
+      UPDATE ${table}
+         SET company_id = (SELECT p.company_id FROM projects p WHERE p.id = ${table}.project_id)
+       WHERE company_id IS NULL AND project_id IS NOT NULL
     `);
   }
 
