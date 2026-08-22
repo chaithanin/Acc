@@ -517,8 +517,10 @@ function writeSellingPrice(wb: ExcelJS.Workbook, model: ReportModel): void {
 
   // The anchor: the whole uplift, over the whole schedule. Both are inputs, so
   // Finance can change either and every expected price follows.
+  // Anchored on the first month an instalment falls due, which is what the
+  // existing report anchors on — not on the first month of the grid.
   const anchorMonths = ws.getCell(anchorRow, 3);
-  anchorMonths.value = months.length > 0 ? monthsToCompletion(months[0], completionMonth) : 0;
+  anchorMonths.value = monthsToCompletion(model.anchorMonth, completionMonth);
   anchorMonths.font = { ...FONT, bold: true };
 
   const anchorUplift = ws.getCell(anchorRow, 4);
@@ -526,7 +528,7 @@ function writeSellingPrice(wb: ExcelJS.Workbook, model: ReportModel): void {
   anchorUplift.numFmt = '0%';
   anchorUplift.font = { ...FONT, bold: true };
 
-  ws.getCell(anchorRow, 2).value = 'Assumption — confirm with Finance';
+  ws.getCell(anchorRow, 2).value = `Anchor ${model.anchorMonth} — confirm with Finance`;
   ws.getCell(anchorRow, 2).font = { ...FONT, bold: true, italic: true };
 
   ws.getColumn(2).width = 14;
@@ -845,7 +847,7 @@ function writeRawData(wb: ExcelJS.Workbook, model: ReportModel): void {
     const r = 2 + index;
     const values = [
       row.sourceRow, row.sequence, row.customerCode, row.customerName, row.coBuyerName,
-      row.unit, row.houseType, row.houseNo, row.contractNo, row.contractPrice,
+      row.room ?? row.unit, row.houseType, row.houseNo, row.contractNo, row.contractPrice,
       row.adjustment, row.netPrice, row.installmentType, row.dueDate, row.dueAmount,
       row.paidDate, row.receiptNo, row.paidAmount, row.outstanding, row.quota, row.area,
     ];

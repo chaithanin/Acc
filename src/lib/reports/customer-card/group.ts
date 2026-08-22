@@ -2,6 +2,17 @@ import { monthKey } from '@/lib/excel/cells';
 import type { ContractGroup, CustomerCardRow, ReportIssue } from './types';
 
 /**
+ * How far past the report date a due date can be and still mean something.
+ *
+ * The sales system takes 31/12/2088 as "on transfer, date not yet set", and a
+ * mistyped contract year turns up as an instalment due in 2035. Either one
+ * stretches the month grid across half a century of empty columns, and the
+ * second is simply wrong. Ten years covers every real payment plan here — the
+ * longest runs to 2030 — with room to spare.
+ */
+const HORIZON_YEARS = 10;
+
+/**
  * Turning a payment ledger into one row per unit.
  *
  * The customer card carries one line per instalment. The report wants one line
@@ -24,8 +35,9 @@ function groupKey(row: CustomerCardRow): string {
   return `U:${row.unit?.trim() ?? ''}`;
 }
 
-export function groupContracts(rows: CustomerCardRow[]): GroupResult {
+export function groupContracts(rows: CustomerCardRow[], reportDate: string): GroupResult {
   const issues: ReportIssue[] = [];
+  const horizon = `${Number(reportDate.slice(0, 4)) + HORIZON_YEARS}-12-31`;
   const byKey = new Map<string, CustomerCardRow[]>();
 
   for (const row of rows) {
@@ -67,7 +79,7 @@ export function groupContracts(rows: CustomerCardRow[]): GroupResult {
       issues: [],
     };
 
-    buildPlan(group, issues);
+    buildPlan(group, issues, horizon);
     buildPaid(group, issues);
     contracts.push(group);
   }
@@ -122,19 +134,37 @@ function isOnKey(installmentType: string | null): boolean {
 }
 
 /** InsPlan: amounts due, bucketed by วันครบกำหนดชำระ. */
-function buildPlan(group: ContractGroup, issues: ReportIssue[]): void {
+function buildPlan(group: ContractGroup, issues: ReportIssue[], horizon: string): void {
   for (const row of group.rows) {
     if (row.dueAmount === null || row.dueAmount === 0) continue;
+
+    // A due date past the horizon is not a date, it is a placeholder or a
+    // typo. Treated as absent rather than believed, so it cannot drag the
+    // report across fifty years of empty months.
+    let dueDate = row.dueDate;
+    if (dueDate && dueDate > horizon) {
+      const issue: ReportIssue = {
+        severity: 'warning',
+        code: 'DUE_DATE_IMPLAUSIBLE',
+        message: `${describe(row)} is due ${dueDate}, which is past any real payment plan. It is treated as having no due date${isOnKey(row.installmentType) ? ' and counted on On Key' : ', so this amount is not placed in any month'}.`,
+        unit: group.unit,
+        contractNo: group.contractNo,
+        sourceRow: row.sourceRow,
+      };
+      group.issues.push(issue);
+      issues.push(issue);
+      dueDate = null;
+    }
 
     // A handover instalment with no scheduled date goes to the On Key column.
     // It is a real part of the price; leaving it out because it has no month
     // would put every unit's plan roughly half short of its contract.
-    if (!row.dueDate && isOnKey(row.installmentType)) {
+    if (!dueDate && isOnKey(row.installmentType)) {
       group.onKey += row.dueAmount;
       continue;
     }
 
-    if (!row.dueDate) {
+    if (!dueDate) {
       const issue: ReportIssue = {
         severity: 'warning',
         code: 'DUE_WITHOUT_DATE',
@@ -148,7 +178,24 @@ function buildPlan(group: ContractGroup, issues: ReportIssue[]): void {
       continue;
     }
 
-    const key = monthKey(row.dueDate);
+    // Nobody pays eleven years early. A due date long after the payment that
+    // settled it is a mistyped year — C2035080001 for C2025080001, and the due
+    // date follows the contract number. Reported, not moved: guessing the year
+    // would be inventing a date, and the source is the thing to fix.
+    if (row.paidDate && dueDate > addYears(row.paidDate, 2)) {
+      const issue: ReportIssue = {
+        severity: 'warning',
+        code: 'DUE_DATE_AFTER_PAYMENT',
+        message: `${describe(row)} is due ${dueDate} but was paid ${row.paidDate}, more than two years earlier. The due date looks mistyped; it is used as it stands and stretches the report to ${dueDate.slice(0, 7)}.`,
+        unit: group.unit,
+        contractNo: group.contractNo,
+        sourceRow: row.sourceRow,
+      };
+      group.issues.push(issue);
+      issues.push(issue);
+    }
+
+    const key = monthKey(dueDate);
     group.plan.set(key, (group.plan.get(key) ?? 0) + row.dueAmount);
   }
 }
@@ -201,7 +248,12 @@ function buildPaid(group: ContractGroup, issues: ReportIssue[]): void {
     }
 
     if (row.receiptNo) {
-      const signature = `${row.receiptNo}|${row.paidDate}|${row.paidAmount}`;
+      // The instalment is part of the signature. One receipt clearing four
+      // down payments of the same size on the same day is the normal case and
+      // looked identical without it — which flagged a third of the project.
+      // What remains is the same instalment paid twice by one receipt, which
+      // is not something the sales system should ever produce.
+      const signature = `${row.receiptNo}|${row.paidDate}|${row.paidAmount}|${row.installmentType ?? ''}`;
       const count = (seen.get(signature) ?? 0) + 1;
       seen.set(signature, count);
 
@@ -209,7 +261,7 @@ function buildPaid(group: ContractGroup, issues: ReportIssue[]): void {
         const issue: ReportIssue = {
           severity: 'warning',
           code: 'RECEIPT_DUPLICATE_SUSPECTED',
-          message: `Receipt ${row.receiptNo} appears ${count} times on ${group.unit} for ${row.paidAmount.toLocaleString()} on ${row.paidDate}. Both amounts are included — one receipt split across two instalments looks exactly like this — but confirm it is not the same line entered twice.`,
+          message: `Receipt ${row.receiptNo} appears ${count} times on ${group.unit} for ${row.paidAmount.toLocaleString()} on ${row.paidDate}, against the same instalment (${row.installmentType ?? 'unnamed'}). Both amounts are included; confirm this is not the same line entered twice.`,
           unit: group.unit,
           contractNo: group.contractNo,
           sourceRow: row.sourceRow,
@@ -222,6 +274,10 @@ function buildPaid(group: ContractGroup, issues: ReportIssue[]): void {
     const key = monthKey(row.paidDate);
     group.paid.set(key, (group.paid.get(key) ?? 0) + row.paidAmount);
   }
+}
+
+function addYears(isoDate: string, years: number): string {
+  return `${Number(isoDate.slice(0, 4)) + years}${isoDate.slice(4)}`;
 }
 
 function describe(row: CustomerCardRow): string {

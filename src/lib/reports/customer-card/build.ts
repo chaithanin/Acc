@@ -25,11 +25,12 @@ import type {
 const ADVISORY_CODES = new Set(['EIR_IMPLAUSIBLE']);
 
 export function buildReport(rows: CustomerCardRow[], options: ReportOptions): ReportModel {
-  const { contracts, issues } = groupContracts(rows);
+  const { contracts, issues } = groupContracts(rows, options.reportDate);
 
   const months = monthGrid(contracts, options.completionDate);
   const completionMonth = options.completionDate.slice(0, 7);
-  const uplift = upliftTable(months, completionMonth, options.maxUplift);
+  const anchorMonth = firstPlanMonth(contracts) ?? months[0] ?? completionMonth;
+  const uplift = upliftTable(months, completionMonth, options.maxUplift, anchorMonth);
 
   const eir = new Map<string, number>();
 
@@ -72,8 +73,28 @@ export function buildReport(rows: CustomerCardRow[], options: ReportOptions): Re
   const checks = reconcile(contracts, options, issues);
   const summary = summarise(rows, contracts, checks, uplift, options, issues);
 
-  return { options, months, contracts, eir, uplift, checks, issues, summary };
+  return { options, months, contracts, eir, uplift, anchorMonth, checks, issues, summary };
 }
+
+/**
+ * The earliest month any contract has an instalment falling due.
+ *
+ * This anchors the uplift, and it is deliberately not the first month of the
+ * grid. A deposit received before the plan began would otherwise lengthen the
+ * schedule and shave a few per cent off every expected price in the project.
+ */
+export function firstPlanMonth(contracts: ContractGroup[]): string | null {
+  let earliest: string | null = null;
+  for (const contract of contracts) {
+    for (const month of contract.plan.keys()) {
+      if (earliest === null || month < earliest) earliest = month;
+    }
+  }
+  return earliest;
+}
+
+/** A payment plan longer than this is a data error, not a plan. */
+const MAX_MONTHS = 240;
 
 /**
  * The month columns.
@@ -104,9 +125,14 @@ export function monthGrid(contracts: ContractGroup[], completionDate: string): s
     const key = `${year}-${String(month).padStart(2, '0')}`;
     months.push(key);
     if (key === last) break;
-    // A grid this long means the dates are wrong, not that the plan is; stop
-    // rather than build a sheet with ten thousand columns.
-    if (months.length > 600) break;
+    // A grid this long means the dates are wrong, not that the plan is. It
+    // should be unreachable — implausible due dates are dropped before this —
+    // so stopping here silently would hide whatever got through.
+    if (months.length >= MAX_MONTHS) {
+      throw new Error(
+        `The payment dates span more than ${Math.round(MAX_MONTHS / 12)} years (${first} to ${last}). Check the customer card for a placeholder date such as 31/12/2088.`,
+      );
+    }
     month += 1;
     if (month > 12) {
       month = 1;

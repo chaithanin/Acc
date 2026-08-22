@@ -11,11 +11,23 @@ import { buildReport } from '@/lib/reports/customer-card/build';
 import { parseCustomerCard } from '@/lib/reports/customer-card/parse';
 import { daysToCompletion, futureValue, solveEir } from '@/lib/reports/customer-card/interest';
 import { DEFAULT_OPTIONS } from '@/lib/reports/customer-card/types';
-import { GRID, writeFixture } from './customer-card-fixture';
+import { GRID, HEADER, HEADER_BAND, writeFixture } from './customer-card-fixture';
 import { makeSheet } from './helpers';
 
 function cardSheet() {
   return makeSheet('Customer Card', GRID as (string | number | null)[][]);
+}
+
+/** A data row, by column name, in the order the card writes them. */
+const COLUMNS = [
+  'ลำดับ', 'รหัสลูกค้า', 'ชื่อลูกค้า', 'ชื่อผู้ซื้อร่วม', 'แปลง/ห้อง', 'แบบบ้าน/แบบห้อง',
+  'บ้านเลขที่', 'เลขที่สัญญา', 'ราคาขายตามสัญญา', 'เพิ่ม/ลด', 'ราคาขายสุทธิ', 'ประเภทงวด',
+  'วันครบกำหนดชำระเงินตามสัญญา', 'จำนวนเงินที่ต้องชำระ', 'วันที่ชำระ/ยกเลิก', 'เลขที่ใบเสร็จ',
+  'จำนวนเงินที่ชำระแล้ว', 'จำนวนเงินคงเหลือ', 'Quota', 'พื้นที่/อาคาร',
+];
+
+function line(values: Record<string, string | number>): (string | number | null)[] {
+  return COLUMNS.map((h) => values[h] ?? null);
 }
 
 /**
@@ -43,9 +55,30 @@ after(() => {
 describe('reading the customer card', () => {
   const parsed = parseCustomerCard(cardSheet());
 
-  it('finds the header wherever it sits', () => {
-    assert.equal(parsed.headerRow, 3);
-    assert.equal(parsed.issues.length, 0);
+  it('finds a header spread over two rows', () => {
+    // The band ("กำหนดชำระเงิน") is on one row and the columns it names are on
+    // the next. Scoring a single row finds thirteen of the twenty fields and
+    // declares the file unreadable for want of the other seven.
+    assert.equal(parsed.headerRow, 5);
+    assert.equal(parsed.headerDepth, 2);
+    assert.equal(parsed.columns.dueAmount, 13);
+    assert.equal(parsed.columns.paidDate, 14);
+    assert.equal(parsed.columns.installmentType, 11);
+    assert.equal(parsed.columns.outstanding, 17);
+  });
+
+  it('stops at the report\u2019s own total line', () => {
+    // It carries the whole project's figures and no unit of its own, so
+    // without this it lands on the last contract above it.
+    assert.ok(parsed.issues.some((i) => i.code === 'TOTAL_ROW_SKIPPED'));
+    assert.ok(!parsed.rows.some((r) => r.dueAmount === 3_500_000));
+  });
+
+  it('names a unit by its building as well as its room', () => {
+    // 163 room numbers are shared across four buildings, so "101" alone names
+    // four different flats. The existing report writes them as "A101".
+    assert.deepEqual([...new Set(parsed.rows.map((r) => r.unit))], ['A101', 'B101']);
+    assert.equal(parsed.rows[0].room, '101');
   });
 
   it('reads ราคาขายสุทธิ, not ราคาขายตามสัญญา', () => {
@@ -59,7 +92,7 @@ describe('reading the customer card', () => {
     assert.equal(parsed.rows.length, 9);
     assert.ok(parsed.rows.slice(0, 6).every((r) => r.unit === 'A101'));
     assert.ok(parsed.rows.slice(0, 6).every((r) => r.contractNo === 'S9-0001'));
-    assert.ok(parsed.rows.slice(6).every((r) => r.unit === 'A102'));
+    assert.ok(parsed.rows.slice(6).every((r) => r.unit === 'B101'));
   });
 });
 
@@ -263,11 +296,74 @@ describe('the workbook', () => {
 
   it('keeps the source data untouched, as an audit trail', () => {
     assert.equal(plain('Raw_AR_20260822', 'A1'), 'Source row');
-    assert.equal(plain('Raw_AR_20260822', 'F2'), 'A101');
+    // The raw sheet shows the source's own room number, not the composed unit.
+    assert.equal(plain('Raw_AR_20260822', 'F2'), '101');
     assert.equal(plain('Raw_AR_20260822', 'O2'), 20_000);
     // The second unit has no ราคาขายตามสัญญา of its own, and must not inherit
     // the first unit's.
     assert.equal(plain('Raw_AR_20260822', 'J8'), null);
+    assert.equal(plain('Raw_AR_20260822', 'U2'), 'อาคาร A');
     assert.equal(plain('Raw_AR_20260822', 'L8'), 1_500_000);
+  });
+});
+
+describe('dates the card cannot mean', () => {
+  it('treats a placeholder due date as no date at all', () => {
+    // The sales system writes 31/12/2088 for "on transfer, date not set". Read
+    // literally it stretches the report across fifty years of empty columns.
+    const rows = parseCustomerCard(
+      makeSheet('Card', [
+        HEADER_BAND,
+        HEADER,
+        line({ 'แปลง/ห้อง': '101', 'พื้นที่/อาคาร': 'อาคาร A', 'เลขที่สัญญา': 'S-1', 'ราคาขายสุทธิ': 1_000_000, 'ประเภทงวด': 'จอง', 'วันครบกำหนดชำระเงินตามสัญญา': '01/02/2026', 'จำนวนเงินที่ต้องชำระ': 100_000 }),
+        line({ 'ประเภทงวด': 'โอน', 'วันครบกำหนดชำระเงินตามสัญญา': '31/12/2088', 'จำนวนเงินที่ต้องชำระ': 900_000 }),
+      ] as (string | number | null)[][]),
+    ).rows;
+
+    const model = buildReport(rows, OPTIONS);
+    const contract = model.contracts[0];
+
+    assert.ok(model.issues.some((i) => i.code === 'DUE_DATE_IMPLAUSIBLE'));
+    // Being a transfer instalment, it lands on On Key rather than being lost.
+    assert.equal(contract.onKey, 900_000);
+    assert.equal(model.months[model.months.length - 1], '2028-09');
+  });
+
+  it('says when a due date falls long after the payment that settled it', () => {
+    // A mistyped contract year — C2035080001 for C2025080001 — carries the due
+    // date with it. The date is used as it stands and reported; guessing the
+    // year would be inventing one.
+    const rows = parseCustomerCard(
+      makeSheet('Card', [
+        HEADER_BAND,
+        HEADER,
+        line({ 'แปลง/ห้อง': '801', 'พื้นที่/อาคาร': 'อาคาร D', 'เลขที่สัญญา': 'S-2', 'ราคาขายสุทธิ': 1_000_000, 'ประเภทงวด': 'สัญญา งวด 1', 'วันครบกำหนดชำระเงินตามสัญญา': '03/08/2035', 'จำนวนเงินที่ต้องชำระ': 470_000, 'วันที่ชำระ/ยกเลิก': '06/08/2024', 'จำนวนเงินที่ชำระแล้ว': 470_000 }),
+      ] as (string | number | null)[][]),
+    ).rows;
+
+    const model = buildReport(rows, OPTIONS);
+    const issue = model.issues.find((i) => i.code === 'DUE_DATE_AFTER_PAYMENT');
+
+    assert.ok(issue, 'a due date eleven years after its payment went unreported');
+    assert.equal(model.contracts[0].plan.get('2035-08'), 470_000, 'the amount was moved');
+    assert.equal(model.contracts[0].paid.get('2024-08'), 470_000);
+  });
+
+  it('refuses a grid so long it can only be a data error', () => {
+    const rows = parseCustomerCard(
+      makeSheet('Card', [
+        HEADER_BAND,
+        HEADER,
+        line({ 'แปลง/ห้อง': '101', 'พื้นที่/อาคาร': 'อาคาร A', 'เลขที่สัญญา': 'S-3', 'ราคาขายสุทธิ': 1_000_000, 'ประเภทงวด': 'จอง', 'วันครบกำหนดชำระเงินตามสัญญา': '01/02/2026', 'จำนวนเงินที่ต้องชำระ': 100_000 }),
+        line({ 'ประเภทงวด': 'ดาวน์ งวด 1', 'วันครบกำหนดชำระเงินตามสัญญา': '01/02/2060', 'จำนวนเงินที่ต้องชำระ': 900_000 }),
+      ] as (string | number | null)[][]),
+    ).rows;
+
+    // 2060 is inside the ten-year horizon of a 2050 report but not of this one,
+    // so force the grid open by moving the report date out with it.
+    assert.throws(
+      () => buildReport(rows, { ...OPTIONS, reportDate: '2055-08-22' }),
+      /more than \d+ years/,
+    );
   });
 });

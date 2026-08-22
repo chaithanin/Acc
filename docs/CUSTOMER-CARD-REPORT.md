@@ -80,6 +80,12 @@ Both are carried over from the previous report, both are editable on the page,
 and both are listed under **REVIEW REQUIRED** on `Data_Check` until Finance
 confirms them. They are never inferred from the data.
 
+The uplift is anchored on the **first month an instalment falls due**, not on
+the first month anything happened. A deposit received before the plan began
+would otherwise lengthen the schedule and shave a few per cent off every
+expected price in the project. Anchoring on the plan reproduces the existing
+report to the baht — 66 months, April 2023 to September 2028.
+
 When a unit's solved rate comes out above 25% the report says so
 (`EIR_IMPLAUSIBLE`): the arithmetic is right, but a rate that high means the
 uplift is being carried by a small part of the plan, which is what happens when
@@ -91,6 +97,50 @@ The report reads a file and returns a file. The uploaded card is deleted before
 the response is sent — it is a list of buyers and what they still owe — and
 nothing reaches the financial tables. Putting it through the import pipeline
 would make it a source of dashboard figures, which it is not.
+
+## What the real export does that a tidy one would not
+
+Everything below was found by running the report against
+`SUN9_ลูกหนี้คงค้าง 22.08.2026.xlsx` — 11,995 rows, 439 contracts.
+
+- **The header is two rows.** `กำหนดชำระเงิน` and `การชำระเงิน` are bands
+  spanning several columns; the columns they name — `งวด`,
+  `วันครบกำหนดชำระเงินตามสัญญา`, `จำนวนเงินที่ต้องชำระ` — are on the row
+  beneath. Scoring one row finds thirteen of the twenty fields and calls the
+  file unreadable. A window of up to three rows is scored together, deepest
+  row first, since the row beneath the band is always the more specific.
+- **The last line is the project's grand total** — ฿943,659,676.63 due,
+  ฿625,557,219.24 paid — with no unit of its own. Carried down from the row
+  above it would have added nine hundred million baht to one flat. It is
+  recognised by its `รวม` label and everything below it is a footer.
+- **Room numbers repeat across buildings.** 163 room numbers, four buildings,
+  439 contracts. The report names a unit `A103`, from `แปลง/ห้อง` = 103 and
+  `พื้นที่/อาคาร` = อาคาร A — which is how the existing report names them too.
+- **31/12/2088 means "on transfer, date not set".** Read literally it stretches
+  the grid across fifty years of empty columns. Any due date more than ten
+  years past the report date is treated as absent — On Key for a transfer
+  instalment, reported and unplaced for anything else.
+- **A mistyped contract year carries its due date with it**: contract
+  `C2035080001` has an instalment due 03/08/2035 that was paid 06/08/2024.
+  It is used as it stands and reported; guessing the year would be inventing
+  a date.
+- **One receipt clearing four equal down payments on one day is normal.**
+  Keying the duplicate check on receipt + amount + date alone flagged 1,201
+  rows across a third of the project. The instalment is part of the key, so
+  what remains is the same instalment paid twice by one receipt — which the
+  sales system should never produce.
+
+The run reconciles exactly against the card's own grand total:
+
+| | Report | Card's total line |
+|---|---:|---:|
+| Total instalment plan | 943,659,676.63 | 943,659,676.63 |
+| Total actual paid | 625,557,219.24 | 625,557,219.24 |
+
+and against the accountant's existing workbook: of the 106 units in both
+files, the sale price is identical on 98 (the other eight were re-priced
+between the two dates) and the **expected selling price is identical on 96 of
+those 98**, to the baht.
 
 ## Reading the card
 

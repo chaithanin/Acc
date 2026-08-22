@@ -35,7 +35,9 @@ const HEADERS: { field: Field; phrases: string[] }[] = [
   { field: 'paidDate', phrases: ['วันที่ชำระ/ยกเลิก', 'วันที่ชำระ', 'วันที่รับเงิน', 'payment date', 'paid date'] },
   { field: 'receiptNo', phrases: ['เลขที่ใบเสร็จ', 'ใบเสร็จ', 'receipt no', 'receipt'] },
   { field: 'contractNo', phrases: ['เลขที่สัญญา', 'contract no', 'contract number'] },
-  { field: 'installmentType', phrases: ['ประเภทงวด', 'งวดที่', 'installment type', 'period type'] },
+  // The real export labels this column simply "งวด", under a "กำหนดชำระเงิน"
+  // band. Tried after the date and amount fields so it cannot claim theirs.
+  { field: 'installmentType', phrases: ['ประเภทงวด', 'งวดที่', 'งวด', 'installment type', 'period type'] },
   { field: 'unit', phrases: ['แปลง/ห้อง', 'แปลง / ห้อง', 'ห้องเลขที่', 'แปลง', 'ห้อง', 'unit', 'room'] },
   { field: 'houseType', phrases: ['แบบบ้าน/แบบห้อง', 'แบบบ้าน', 'แบบห้อง', 'house type', 'unit type'] },
   { field: 'houseNo', phrases: ['บ้านเลขที่', 'house no'] },
@@ -53,43 +55,80 @@ export interface ParsedCard {
   /** Which column each field was found in, for the audit trail. */
   columns: Partial<Record<Field, number>>;
   headerRow: number;
+  /** How many rows the header spanned. */
+  headerDepth: number;
 }
 
+/** How many consecutive rows a header may be spread over. */
+const HEADER_DEPTH = 3;
+
 /**
- * Finds the header row: the one that matches the most distinct fields.
+ * Finds the header, which is not always one row.
  *
- * Customer-card exports carry two or three title rows above the header, and
- * some carry a second header band further down where the report breaks by
- * building. Scoring every row and taking the best avoids hard-coding "row 5".
+ * The real export writes a banded header: "กำหนดชำระเงิน" and "การชำระเงิน"
+ * sit on one row spanning several columns, and the columns they name —
+ * "งวด", "วันครบกำหนดชำระเงินตามสัญญา", "จำนวนเงินที่ต้องชำระ" — sit on the
+ * next. Scoring a single row finds thirteen of the twenty fields and declares
+ * the file unreadable for want of the other seven.
+ *
+ * So a window of consecutive rows is scored together, and the deepest row in
+ * the window is read first: the band above says which group a column belongs
+ * to, the row beneath says what the column actually is, and the second is
+ * always the more specific of the two.
  */
-function findHeaderRow(sheet: RawSheet): { row: number; columns: Partial<Record<Field, number>> } {
-  let best = { row: -1, columns: {} as Partial<Record<Field, number>>, score: 0 };
+function findHeaderRow(sheet: RawSheet): {
+  row: number;
+  columns: Partial<Record<Field, number>>;
+  depth: number;
+} {
+  let best = {
+    row: -1,
+    columns: {} as Partial<Record<Field, number>>,
+    depth: HEADER_DEPTH + 1,
+    score: 0,
+  };
+
   const limit = Math.min(sheet.rowCount, 40);
 
   for (let r = 0; r < limit; r += 1) {
-    const columns: Partial<Record<Field, number>> = {};
-    const claimed = new Set<number>();
+    for (let depth = 1; depth <= HEADER_DEPTH && r + depth <= sheet.rowCount; depth += 1) {
+      const columns: Partial<Record<Field, number>> = {};
+      const claimed = new Set<number>();
 
-    for (const { field, phrases } of HEADERS) {
-      if (columns[field] !== undefined) continue;
+      // Deepest row first — it holds the specific labels.
+      for (let offset = depth - 1; offset >= 0; offset -= 1) {
+        for (const { field, phrases } of HEADERS) {
+          if (columns[field] !== undefined) continue;
 
-      for (let c = 0; c < sheet.colCount; c += 1) {
-        if (claimed.has(c)) continue;
-        const text = cellText(getCell(sheet, r, c));
-        if (!text) continue;
-        if (!phrases.some((p) => containsPhrase(text, p))) continue;
+          for (let c = 0; c < sheet.colCount; c += 1) {
+            if (claimed.has(c)) continue;
+            const text = cellText(getCell(sheet, r + offset, c));
+            if (!text) continue;
+            if (!phrases.some((p) => containsPhrase(text, p))) continue;
 
-        columns[field] = c;
-        claimed.add(c);
-        break;
+            columns[field] = c;
+            claimed.add(c);
+            break;
+          }
+        }
       }
-    }
 
-    const score = Object.keys(columns).length;
-    if (score > best.score) best = { row: r, columns, score };
+      const score = Object.keys(columns).length;
+
+      // More fields always wins. Between windows that find the same fields,
+      // the shallower one wins and then the later one: a three-row window
+      // starting above the title finds exactly what the two-row header does,
+      // and taking it would treat the header itself as data.
+      const better =
+        score > best.score ||
+        (score === best.score && depth < best.depth) ||
+        (score === best.score && depth === best.depth && r > best.row);
+
+      if (better) best = { row: r, columns, depth, score };
+    }
   }
 
-  return { row: best.row, columns: best.columns };
+  return { row: best.row, columns: best.columns, depth: best.depth };
 }
 
 /** The fields without which the report cannot be built at all. */
@@ -97,7 +136,7 @@ const REQUIRED: Field[] = ['unit', 'dueAmount'];
 
 export function parseCustomerCard(sheet: RawSheet): ParsedCard {
   const issues: ReportIssue[] = [];
-  const { row: headerRow, columns } = findHeaderRow(sheet);
+  const { row: headerRow, columns, depth } = findHeaderRow(sheet);
 
   if (headerRow === -1) {
     return {
@@ -109,6 +148,7 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
       }],
       columns: {},
       headerRow: -1,
+      headerDepth: 0,
     };
   }
 
@@ -150,13 +190,31 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
   let lastCustomer: string | null = null;
   let lastNet: number | null = null;
   let lastContractPrice: number | null = null;
+  let lastRoom: string | null = null;
+  let lastArea: string | null = null;
 
-  for (let r = headerRow + 1; r < sheet.rowCount; r += 1) {
+  for (let r = headerRow + depth; r < sheet.rowCount; r += 1) {
+    // The grand total is the last line of the report and carries the whole
+    // project's figures. The unit and contract are blank on it, so without
+    // this it inherits them from the last contract above and adds nine hundred
+    // million baht to that one unit.
+    if (isTotalRow(sheet, r)) {
+      issues.push({
+        severity: 'info',
+        code: 'TOTAL_ROW_SKIPPED',
+        message: `The report's own total line was found on row ${excelRowNumber(sheet, r)} and left out. Everything below it is a footer.`,
+        sourceRow: excelRowNumber(sheet, r),
+      });
+      break;
+    }
+
     // A new unit ends the previous one's block. Without this the last unit's
     // contract price and customer name carry into the next unit wherever that
     // unit leaves them blank — which puts one buyer's price on another's
     // contract, silently.
-    const ownUnit = text(r, 'unit');
+    const ownRoom = text(r, 'unit');
+    const ownArea = text(r, 'area');
+    const ownUnit = ownRoom ? composeUnit(ownRoom, ownArea ?? lastArea) : null;
     if (ownUnit && ownUnit !== lastUnit) {
       lastContract = null;
       lastCustomer = null;
@@ -165,6 +223,7 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
     }
 
     const unit = ownUnit ?? lastUnit;
+    const room = ownRoom ?? lastRoom;
     const contractNo = text(r, 'contractNo') ?? lastContract;
     const customerName = text(r, 'customerName') ?? lastCustomer;
     const netPrice = number(r, 'netPrice') ?? lastNet;
@@ -182,6 +241,8 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
       dueAmount !== null || paidAmount !== null || dueDate !== null || paidDate !== null;
 
     if (ownUnit) lastUnit = ownUnit;
+    if (ownRoom) lastRoom = ownRoom;
+    if (ownArea) lastArea = ownArea;
     if (text(r, 'contractNo')) lastContract = text(r, 'contractNo');
     if (text(r, 'customerName')) lastCustomer = text(r, 'customerName');
     if (number(r, 'netPrice') !== null) lastNet = number(r, 'netPrice');
@@ -208,6 +269,7 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
       customerName,
       coBuyerName: text(r, 'coBuyerName'),
       unit,
+      room,
       houseType: text(r, 'houseType'),
       houseNo: text(r, 'houseNo'),
       contractNo,
@@ -222,7 +284,7 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
       paidAmount,
       outstanding: number(r, 'outstanding'),
       quota: text(r, 'quota'),
-      area: text(r, 'area'),
+      area: ownArea ?? lastArea,
     });
   }
 
@@ -234,7 +296,54 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
     });
   }
 
-  return { rows, issues, columns, headerRow: excelRowNumber(sheet, headerRow) };
+  return {
+    rows,
+    issues,
+    columns,
+    headerRow: excelRowNumber(sheet, headerRow),
+    headerDepth: depth,
+  };
+}
+
+/** Labels a report puts on its own total line. */
+const TOTAL_LABELS = ['รวม', 'รวมทั้งสิ้น', 'ยอดรวม', 'total', 'grand total'];
+
+/**
+ * The report's own total line, recognised by its label rather than by where it
+ * sits — some exports repeat one per building.
+ *
+ * Only the first few columns are looked at: "รวม" appears inside plenty of
+ * legitimate text further along the row, and matching it there would throw
+ * away real instalments.
+ */
+function isTotalRow(sheet: RawSheet, r: number): boolean {
+  for (let c = 0; c < Math.min(sheet.colCount, 4); c += 1) {
+    const text = cellText(getCell(sheet, r, c)).trim();
+    if (!text) continue;
+    const key = normalizeKey(text);
+    if (TOTAL_LABELS.some((label) => normalizeKey(label) === key)) return true;
+  }
+  return false;
+}
+
+/**
+ * The unit as the report names it: building letter and room number together.
+ *
+ * The card gives them in two columns — "103" and "อาคาร A" — and 163 room
+ * numbers are shared across four buildings, so the room number alone names
+ * four different flats. The existing report writes them as "A103", and so does
+ * this.
+ */
+export function composeUnit(room: string, area: string | null): string {
+  const trimmed = room.trim();
+  if (!area) return trimmed;
+
+  // The last word of "อาคาร A" / "Building B" / "Tower 2" is the building.
+  const token = area.trim().split(/\s+/).pop() ?? '';
+  if (!token || token.length > 3) return trimmed;
+  if (normalizeKey(trimmed).startsWith(normalizeKey(token))) return trimmed;
+
+  return `${token}${trimmed}`;
 }
 
 /** A header band repeated mid-sheet, recognised by its own labels. */

@@ -32,11 +32,17 @@ export function upliftTable(
   months: string[],
   completionMonth: string,
   maxUplift: number,
+  anchorMonth?: string,
 ): Map<string, number> {
   const table = new Map<string, number>();
   if (months.length === 0) return table;
 
-  const anchor = monthsToCompletion(months[0], completionMonth);
+  // The anchor is the first month an instalment falls DUE, not the first month
+  // anything happened. A deposit received before the plan began would
+  // otherwise lengthen the schedule and shave a few per cent off every
+  // expected price in the project. Anchoring on the plan reproduces the
+  // existing report to the baht.
+  const anchor = monthsToCompletion(anchorMonth ?? months[0], completionMonth);
   for (const month of months) {
     const remaining = monthsToCompletion(month, completionMonth);
     table.set(month, anchor === 0 ? 0 : (remaining / anchor) * maxUplift);

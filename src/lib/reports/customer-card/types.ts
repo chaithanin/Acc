@@ -20,8 +20,16 @@ export interface CustomerCardRow {
   customerCode: string | null;
   customerName: string | null;
   coBuyerName: string | null;
-  /** แปลง/ห้อง — the unit. The report's primary key, with the contract. */
+  /**
+   * The unit as the report names it: building and room together, "A103".
+   *
+   * Composed, because the card gives them in two columns and 163 room numbers
+   * are shared across four buildings — the room number alone names four
+   * different flats.
+   */
   unit: string | null;
+  /** แปลง/ห้อง exactly as the card has it, for the audit trail. */
+  room: string | null;
   houseType: string | null;
   houseNo: string | null;
   contractNo: string | null;
@@ -136,6 +144,11 @@ export interface ReportModel {
   eir: Map<string, number>;
   /** month key → uplift fraction applied to a sale price starting that month. */
   uplift: Map<string, number>;
+  /**
+   * The month the uplift is anchored on: the first an instalment falls due.
+   * Written into '%sellingprice' so the sheet's own arithmetic matches.
+   */
+  anchorMonth: string;
   checks: CheckRow[];
   issues: ReportIssue[];
   summary: ReportSummary;

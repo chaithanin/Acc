@@ -7,7 +7,26 @@ import * as XLSX from 'xlsx';
  * never drift into testing different files.
  */
 
+/**
+ * The header exactly as the sales system writes it: two rows, with a band on
+ * the first spanning the columns named on the second.
+ */
+export const HEADER_BAND = [
+  'ลำดับ', 'รหัสลูกค้า', 'ชื่อลูกค้า', 'ชื่อผู้ซื้อร่วม', 'แปลง/ห้อง', 'แบบบ้าน/แบบห้อง',
+  'บ้านเลขที่', 'เลขที่สัญญา', 'ราคาขายตามสัญญา', 'เพิ่ม/ลด', 'ราคาขายสุทธิ',
+  'กำหนดชำระเงิน', null, null, 'การชำระเงิน', null, null, null,
+  'โควตา (Quota)', 'พื้นที่/อาคาร',
+];
+
 export const HEADER = [
+  null, null, null, null, null, null, null, null, null, null, null,
+  'งวด', 'วันครบกำหนดชำระเงินตามสัญญา', 'จำนวนเงินที่ต้องชำระ',
+  'วันที่ชำระ/ยกเลิก', 'เลขที่ใบเสร็จ/ยกเลิก', 'จำนวนเงินที่ชำระแล้ว',
+  'จำนวนเงินคงเหลือที่ต้องชำระ', null, null,
+];
+
+/** Column order, for building data rows by name. */
+const COLUMNS = [
   'ลำดับ', 'รหัสลูกค้า', 'ชื่อลูกค้า', 'ชื่อผู้ซื้อร่วม', 'แปลง/ห้อง', 'แบบบ้าน/แบบห้อง',
   'บ้านเลขที่', 'เลขที่สัญญา', 'ราคาขายตามสัญญา', 'เพิ่ม/ลด', 'ราคาขายสุทธิ', 'ประเภทงวด',
   'วันครบกำหนดชำระเงินตามสัญญา', 'จำนวนเงินที่ต้องชำระ', 'วันที่ชำระ/ยกเลิก', 'เลขที่ใบเสร็จ',
@@ -17,7 +36,7 @@ export const HEADER = [
 type Line = Partial<Record<string, string | number>>;
 
 function line(values: Line): (string | number | null)[] {
-  return HEADER.map((h) => values[h] ?? null);
+  return COLUMNS.map((h) => values[h] ?? null);
 }
 
 /**
@@ -27,7 +46,7 @@ function line(values: Line): (string | number | null)[] {
  */
 export const A101 = [
   line({
-    'ลำดับ': 1, 'รหัสลูกค้า': 'C001', 'ชื่อลูกค้า': 'สมชาย ใจดี', 'แปลง/ห้อง': 'A101',
+    'ลำดับ': 1, 'รหัสลูกค้า': 'C001', 'ชื่อลูกค้า': 'สมชาย ใจดี', 'แปลง/ห้อง': '101', 'พื้นที่/อาคาร': 'อาคาร A',
     'เลขที่สัญญา': 'S9-0001', 'ราคาขายตามสัญญา': 2_050_000, 'เพิ่ม/ลด': -50_000,
     'ราคาขายสุทธิ': 2_000_000, 'ประเภทงวด': 'จอง', 'วันครบกำหนดชำระเงินตามสัญญา': '26/02/2026',
     'จำนวนเงินที่ต้องชำระ': 20_000, 'วันที่ชำระ/ยกเลิก': '26/02/2026', 'เลขที่ใบเสร็จ': 'R001',
@@ -58,7 +77,7 @@ export const A101 = [
 /** Unit A102: barely started, so the checks have to hold on a thin plan too. */
 export const A102 = [
   line({
-    'ลำดับ': 2, 'ชื่อลูกค้า': 'มาลี รักดี', 'แปลง/ห้อง': 'A102', 'เลขที่สัญญา': 'S9-0002',
+    'ลำดับ': 2, 'ชื่อลูกค้า': 'มาลี รักดี', 'แปลง/ห้อง': '101', 'พื้นที่/อาคาร': 'อาคาร B', 'เลขที่สัญญา': 'S9-0002',
     'ราคาขายสุทธิ': 1_500_000, 'ประเภทงวด': 'จอง', 'วันครบกำหนดชำระเงินตามสัญญา': '15/05/2026',
     'จำนวนเงินที่ต้องชำระ': 20_000, 'วันที่ชำระ/ยกเลิก': '15/05/2026', 'เลขที่ใบเสร็จ': 'R008',
     'จำนวนเงินที่ชำระแล้ว': 20_000, 'จำนวนเงินคงเหลือ': 1_480_000,
@@ -70,12 +89,28 @@ export const A102 = [
   line({ 'ประเภทงวด': 'โอน', 'จำนวนเงินที่ต้องชำระ': 1_350_000, 'จำนวนเงินคงเหลือ': 1_480_000 }),
 ];
 
+/**
+ * A grand total line, which the real export puts at the foot of the report.
+ *
+ * It carries the whole project's figures and no unit of its own, so a parser
+ * that carries the unit down from the row above adds it to the last contract.
+ */
+export const TOTAL_LINE = COLUMNS.map((h) =>
+  h === 'ลำดับ' ? 'รวม' : h === 'จำนวนเงินที่ต้องชำระ' ? 3_500_000 : h === 'จำนวนเงินที่ชำระแล้ว' ? 287_500 : null,
+);
+
 export const GRID = [
-  ['รายงานลูกหนี้คงค้าง SUN9 ณ วันที่ 22/08/2026'],
+  ['บริษัท เดอะ ซัน ไลท์ เรสซิเด้นซ์ 9 จำกัด'],
+  ['รายงานการ์ดลูกค้า ตามสัญญา'],
+  ['ประจำวันที่ - ถึง 22/08/2026'],
   [],
+  HEADER_BAND,
   HEADER,
+  ['Harmonia City Garden Pattaya'],
   ...A101,
   ...A102,
+  TOTAL_LINE,
+  ['           ผู้ออกรายงาน ......................'],
 ];
 
 export function writeFixture(filePath: string): string {
