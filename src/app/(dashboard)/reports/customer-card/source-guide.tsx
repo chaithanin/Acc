@@ -39,13 +39,19 @@ export function SourceGuide({ guide }: { guide: SourceReportGuide }) {
               <span className="font-medium text-ink">“{guide.reportName}”</span>
             </p>
             {guide.menuPath ? (
-              <p className="mt-0.5 text-ink-secondary">{guide.menuPath}</p>
+              <p className="mt-0.5 font-mono text-xs text-ink-secondary">{guide.menuPath}</p>
             ) : (
               <p className="mt-0.5 text-ink-muted">
                 The report prints its own name at the top of the export, so this is the name to
                 look for in the menu.
               </p>
             )}
+            {guide.notThis ? (
+              <p className="mt-1.5 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-xs text-ink-secondary">
+                <span className="font-medium text-warning">Not</span>{' '}
+                <span className="font-medium text-ink">{guide.notThis.name}</span> — {guide.notThis.why}
+              </p>
+            ) : null}
           </div>
         </li>
 

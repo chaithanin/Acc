@@ -17,14 +17,16 @@ export interface SourceReportGuide {
   url: string;
   /** The report's own name, exactly as it prints at the top of the export. */
   reportName: string;
-  /**
-   * Where it sits in the menu.
-   *
-   * Null until somebody who uses the system confirms it. A wrong path is
-   * worse than none: it sends people looking in the wrong place and then
-   * doubting the rest of the instructions.
-   */
+  /** Where it sits in the menu, as the menu itself is worded. */
   menuPath: string | null;
+  /**
+   * The report next to it that is not the one.
+   *
+   * Named because it is one line away in the same menu and reads almost the
+   * same. Picking it produces a file that parses and is wrong, which is the
+   * worst kind.
+   */
+  notThis?: { name: string; why: string };
   /** What to set before exporting. */
   settings: { label: string; value: string }[];
   /** Column headings the importer needs to find. */
@@ -37,7 +39,11 @@ export const CUSTOMER_CARD_SOURCE: SourceReportGuide = {
   system: 'Mango Anywhere',
   url: 'https://chaithanin.mangoanywhere.com/production.re/',
   reportName: 'รายงานการ์ดลูกค้า ตามสัญญา',
-  menuPath: null,
+  menuPath: 'รายงานฝ่ายการเงิน → 6. รายงานการ์ดลูกค้า → 6.1 รายงานการ์ดลูกค้า ตามสัญญา',
+  notThis: {
+    name: '6.2 รายงานการ์ดลูกค้า ตามรายชื่อลูกค้า',
+    why: 'the line directly below it in the same menu. It groups the card by customer name; this report needs it by contract, which is what makes one unit one row.',
+  },
   settings: [
     { label: 'บริษัท', value: 'the company the report is for — SUN9 is บริษัท เดอะ ซัน ไลท์ เรสซิเด้นซ์ 9 จำกัด' },
     { label: 'ประจำวันที่ – ถึง', value: 'leave the start empty and set the end to the as-at date, so the card carries every instalment from the beginning' },
