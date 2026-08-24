@@ -12,7 +12,8 @@
     "test": "node --import ./scripts/register-ts.mjs --test tests/*.test.ts",
     "db:reset": "node --import ./scripts/register-ts.mjs scripts/reset-db.mjs",
     "seed": "node --import ./scripts/register-ts.mjs scripts/seed.mjs",
-    "test:adversarial": "node --import ./scripts/register-ts.mjs scripts/adversarial-test.mjs"
+    "test:adversarial": "node --import ./scripts/register-ts.mjs scripts/adversarial-test.mjs",
+    "test:e2e": "node --import ./scripts/register-ts.mjs scripts/e2e-audit.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
