@@ -37,6 +37,11 @@ export function SourceGuide({ guide }: { guide: SourceReportGuide }) {
             <p className="text-ink">
               Open the report{' '}
               <span className="font-medium text-ink">“{guide.reportName}”</span>
+              {guide.reportCode ? (
+                <span className="ml-1.5 rounded border border-border bg-surface-sunken px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
+                  {guide.reportCode}
+                </span>
+              ) : null}
             </p>
             {guide.menuPath ? (
               <p className="mt-0.5 font-mono text-xs text-ink-secondary">{guide.menuPath}</p>

@@ -17,6 +17,13 @@ export interface SourceReportGuide {
   url: string;
   /** The report's own name, exactly as it prints at the top of the export. */
   reportName: string;
+  /**
+   * The system's own code for it.
+   *
+   * The one unambiguous handle: this report appears at two different numbers
+   * in two different menus, and the code is the same in both.
+   */
+  reportCode?: string;
   /** Where it sits in the menu, as the menu itself is worded. */
   menuPath: string | null;
   /**
@@ -39,9 +46,10 @@ export const CUSTOMER_CARD_SOURCE: SourceReportGuide = {
   system: 'Mango Anywhere',
   url: 'https://chaithanin.mangoanywhere.com/production.re/',
   reportName: 'รายงานการ์ดลูกค้า ตามสัญญา',
+  reportCode: 'RE_RPT_070306_1',
   menuPath: 'รายงานฝ่ายการเงิน → 6. รายงานการ์ดลูกค้า → 6.1 รายงานการ์ดลูกค้า ตามสัญญา',
   notThis: {
-    name: '6.2 รายงานการ์ดลูกค้า ตามรายชื่อลูกค้า',
+    name: '6.2 รายงานการ์ดลูกค้า ตามรายชื่อลูกค้า (RE_RPT_070306_2)',
     why: 'the line directly below it in the same menu. It groups the card by customer name; this report needs it by contract, which is what makes one unit one row.',
   },
   settings: [
