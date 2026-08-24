@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import {
   deleteReport,
   getReport,
@@ -66,9 +67,19 @@ export async function DELETE(
   if (!company) return NextResponse.json({ error: 'Choose a company first.' }, { status: 403 });
 
   const { id } = await params;
+  const doomed = getReport(company.id, id);
   if (!deleteReport(company.id, id)) {
     return NextResponse.json({ error: 'Report not found.' }, { status: 404 });
   }
+
+  await audit({
+    action: 'report.delete',
+    entity: 'customer_card_report',
+    entityId: id,
+    summary: `Deleted the Customer Card report for ${doomed?.projectLabel ?? 'a project'} dated ${doomed?.reportDate ?? 'unknown'}`,
+    detail: { sourceFileName: doomed?.sourceFileName ?? null },
+    companyId: company.id,
+  });
 
   return NextResponse.json({ ok: true });
 }

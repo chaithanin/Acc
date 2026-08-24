@@ -1,5 +1,23 @@
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { currentUser, purgeExpiredSessions, signIn } from '@/lib/auth';
+import { attemptSignIn, currentUser, purgeExpiredSessions } from '@/lib/auth';
+import { describeWait } from '@/lib/auth/throttle';
+import { writeAudit } from '@/lib/db/repositories/audit';
+
+/**
+ * The caller's address, as far as it can be known.
+ *
+ * Behind the reverse proxy the socket address is the proxy's, so the
+ * forwarded header is read first and only its first entry is used — the rest
+ * are whatever the caller chose to send. When nothing is knowable the sign-in
+ * rate limit falls back to counting against the address typed alone.
+ */
+async function clientAddress(): Promise<string | null> {
+  const h = await headers();
+  const forwarded = h.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0]!.trim() || null;
+  return h.get('x-real-ip')?.trim() || null;
+}
 
 /**
  * Sign-in. Financial data is never served without a session (requirement 30).
@@ -12,13 +30,13 @@ import { currentUser, purgeExpiredSessions, signIn } from '@/lib/auth';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; changed?: string }>;
+  searchParams: Promise<{ error?: string; changed?: string; wait?: string }>;
 }) {
   purgeExpiredSessions();
 
   if (await currentUser()) redirect('/');
 
-  const { error, changed } = await searchParams;
+  const { error, changed, wait } = await searchParams;
 
   async function authenticate(formData: FormData) {
     'use server';
@@ -26,10 +44,31 @@ export default async function LoginPage({
     const email = String(formData.get('email') ?? '');
     const password = String(formData.get('password') ?? '');
 
-    const user = await signIn(email, password);
+    const result = await attemptSignIn(email, password, await clientAddress());
+
+    if (!result.ok && result.reason === 'throttled') {
+      // Saying how long is not a disclosure — it happens to an address that
+      // exists and one that does not alike — and without it the form looks
+      // broken rather than protective.
+      redirect(`/login?wait=${encodeURIComponent(describeWait(result.retryAfterSeconds))}`);
+    }
     // The message stays vague on purpose: saying which half was wrong tells an
     // attacker which addresses exist.
-    if (!user) redirect('/login?error=1');
+    if (!result.ok) redirect('/login?error=1');
+
+    // Written directly rather than through the request-scoped helper: the
+    // session cookie was set moments ago in this same response and is not yet
+    // readable back, so the actor is taken from what signing in returned.
+    writeAudit({
+      actorId: result.user.id,
+      actorEmail: result.user.email,
+      actorRole: result.user.role,
+      action: 'session.sign_in',
+      entity: 'session',
+      summary: `${result.user.email} signed in`,
+      ip: await clientAddress(),
+    });
+
     redirect('/');
   }
 
@@ -83,6 +122,12 @@ export default async function LoginPage({
           {error ? (
             <p className="mt-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-xs text-critical">
               Those details were not recognised.
+            </p>
+          ) : null}
+
+          {wait ? (
+            <p className="mt-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+              Too many attempts. Try again in {wait}.
             </p>
           ) : null}
 

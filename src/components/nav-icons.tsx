@@ -144,6 +144,13 @@ export const NAV_ICONS: Record<string, React.ReactNode> = {
       <path d="M16 4.5a3.5 3.5 0 010 7M18 20c0-2.2-.9-4.2-2.3-5.6" />
     </svg>
   ),
+  '/settings/audit': (
+    <svg {...base}>
+      <path d="M5 3.5h9l5 5v12H5z" />
+      <path d="M14 3.5v5h5" />
+      <path d="M8.5 13h7M8.5 16.5h4.5" />
+    </svg>
+  ),
 };
 
 export const FALLBACK_ICON = (

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import { getDb, nowIso, parseJson } from '@/lib/db';
 import { findDuplicates, persistImport } from '@/lib/db/repositories/imports';
 import { listProjects } from '@/lib/db/repositories/projects';
@@ -202,6 +203,23 @@ export async function POST(request: Request) {
 
   // The preview is spent; the originals stay on disk as the audit copy.
   db.prepare('DELETE FROM import_previews WHERE id = ?').run(body.previewId);
+
+  // Every figure on every dashboard traces back to one of these.
+  await audit({
+    action: 'import.confirm',
+    entity: 'import',
+    entityId: outcome.importId,
+    summary: `Imported ${results.length} file${results.length === 1 ? '' : 's'} for ${reportDate}`,
+    detail: {
+      reportDate,
+      label: body.label?.trim() || null,
+      mode: body.mode ?? 'new',
+      snapshotId: outcome.snapshotId,
+      files: results.map((r) => r.fileName),
+      failed: results.filter((r) => r.status === 'failed').map((r) => r.fileName),
+    },
+    companyId: company.id,
+  });
 
   return NextResponse.json({
     ...outcome,

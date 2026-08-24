@@ -525,6 +525,7 @@ async function audit() {
     ['/settings/templates', 'How mapping is decided', 'mapping:edit'],
     ['/settings/companies', 'Companies', 'users:manage'],
     ['/settings/users', 'Users', 'users:manage'],
+    ['/settings/audit', 'Activity Log', 'users:manage'],
   ];
 
   const PERMISSIONS = {
@@ -1158,25 +1159,37 @@ async function audit() {
   module_('M12 · Security posture & concurrency');
   {
     // --- how many wrong guesses does the sign-in form accept?
-    const guesser = { email: alpha.people.admin.email, cookies: new Map() };
+    const victim = alpha.people.viewer;
+    const guesser = { email: victim.email, cookies: new Map() };
     let accepted = 0;
-    const startedAt = process.hrtime.bigint();
+    let throttled = null;
     for (let i = 0; i < 20; i += 1) {
       const r = await login(guesser, `wrong-guess-number-${i}`);
-      if (!r.signedIn && String(r.redirect).includes('error')) accepted += 1;
-      else break;
+      if (r.signedIn) { accepted = 20; break; }
+      if (String(r.redirect).includes('wait=')) { throttled = { at: i, redirect: r.redirect }; break; }
+      accepted += 1;
     }
-    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
-    check('repeated wrong passwords are slowed down or locked out',
-      accepted < 20,
-      `20 wrong passwords in a row were all answered normally in ${Math.round(elapsedMs)}ms `
-      + '(about ' + Math.round(elapsedMs / 20) + 'ms each); there is no lockout, no delay and no attempt counter, '
-      + 'so the sign-in form can be guessed at indefinitely',
+    check('repeated wrong passwords are stopped rather than answered forever',
+      throttled !== null,
+      `20 wrong passwords in a row were all answered normally; there is no lockout and no attempt counter`,
       'High');
+    check('the limit bites before a password list gets anywhere',
+      accepted <= 12, `${accepted} wrong passwords were accepted before the limit`, 'High');
+    check('the refusal says how long to wait rather than looking broken',
+      /wait=/.test(String(throttled?.redirect)), `redirect ${throttled?.redirect}`, 'Low');
 
-    const stillWorks = await login({ ...alpha.people.admin, cookies: new Map() });
-    check('a real password still works after those attempts', stillWorks.signedIn,
-      'the account was locked by the guessing, which would be a denial of service', 'Medium');
+    // The right password must not get through while the lockout stands, or the
+    // limit is decoration.
+    const duringLockout = await login({ ...victim, cookies: new Map() });
+    check('the correct password is refused too while the lockout stands',
+      !duringLockout.signedIn,
+      'the lockout let the real password through, so guessing is only slowed for wrong guesses', 'High');
+
+    // ...and it must not be usable to lock a colleague out of everything.
+    const bystander = await login({ ...alpha.people.finance, cookies: new Map() });
+    check('guessing at one account does not lock out another',
+      bystander.signedIn,
+      'a colleague was locked out by someone guessing at a different account', 'High');
 
     // --- what the session cookie carries
     const fresh = { email: alpha.people.admin.email, cookies: new Map() };
@@ -1203,6 +1216,31 @@ async function audit() {
       'no audit table exists; imports and stored reports name their user, but a role change, a company '
       + 'rename, a grant, a password reset and a rollback leave nothing behind that says who did it',
       'High');
+
+    // Everything M5, M5b, M6 and M7 did should be in it by now.
+    const logged = all('SELECT action, summary, actor_email, company_id FROM audit_log');
+    const actions = new Set(logged.map((e) => e.action));
+    for (const expected of [
+      'session.sign_in', 'user.create', 'user.update', 'user.password_change',
+      'company.update', 'project.create', 'project.alias_add', 'project.alias_remove',
+      'project.update', 'template.toggle', 'budget.save', 'import.rollback', 'report.delete',
+    ]) {
+      check(`${expected} is recorded`, actions.has(expected),
+        `nothing in the log says ${expected} happened, though this audit did it`, 'High');
+    }
+
+    check('every entry names a person', logged.every((e) => !!e.actor_email),
+      `${logged.filter((e) => !e.actor_email).length} entries name nobody`, 'High');
+
+    const passwordEntries = logged.filter((e) => e.action.includes('password'));
+    check('no password reaches the log',
+      passwordEntries.length > 0
+        && !logged.some((e) => JSON.stringify(e).includes(PASSWORD)),
+      `${passwordEntries.length} password entries; a password appears in the log`, 'Critical');
+
+    const rollback = logged.find((e) => e.action === 'import.rollback');
+    check('a rollback is recorded against the company it happened in',
+      !!rollback?.company_id, 'the rollback entry names no company', 'High');
 
     // --- two people saving the same budget month at once
     await login(admin);

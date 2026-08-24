@@ -42,6 +42,52 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 
+-- Failed sign-in attempts, kept so the form can stop answering a guesser.
+--
+-- Recorded against the address that was typed and against the caller's own
+-- address, because either one alone is easy to work around: a guesser who
+-- varies the address defeats the first, and one behind a changing address
+-- defeats the second.
+CREATE TABLE IF NOT EXISTS sign_in_attempts (
+  id           TEXT PRIMARY KEY,
+  -- Either 'email:<lowercased address>' or 'client:<ip>'.
+  identifier   TEXT NOT NULL,
+  attempted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sign_in_attempts
+  ON sign_in_attempts(identifier, attempted_at);
+
+-- Who changed what.
+--
+-- The import tables already name the person who ran an import, but a role
+-- change, a grant, a company rename, a password reset and a rollback left
+-- nothing behind at all. Written from the request, where the actor is known,
+-- rather than from the repositories, which are also called by the seed and by
+-- the command-line tools and have no actor to name.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          TEXT PRIMARY KEY,
+  at          TEXT NOT NULL,
+  -- The account is kept by id and by address: the id survives a rename, the
+  -- address survives the account being deleted.
+  actor_id    TEXT,
+  actor_email TEXT NOT NULL,
+  actor_role  TEXT NOT NULL,
+  -- The company the actor was working in, where there was one.
+  company_id  TEXT REFERENCES companies(id),
+  -- What was done, as a stable key: 'user.create', 'import.rollback'.
+  action      TEXT NOT NULL,
+  -- What it was done to.
+  entity      TEXT NOT NULL,
+  entity_id   TEXT,
+  -- A short human sentence, and the changed fields as JSON where they help.
+  summary     TEXT NOT NULL,
+  detail      TEXT,
+  ip          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_company ON audit_log(company_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id, at DESC);
+
 -- ------------------------------------------------------------------ projects
 -- ----------------------------------------------------------------- companies
 -- A company owns projects; a project owns financial data. The two are separate

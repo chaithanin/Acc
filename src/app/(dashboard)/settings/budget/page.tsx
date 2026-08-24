@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import { getBudget, setBudget } from '@/lib/db/repositories/budgets';
 import { listProjects } from '@/lib/db/repositories/projects';
 import { formatMonth } from '@/lib/format/number';
@@ -61,13 +62,33 @@ export default async function BudgetSettingsPage({
       return Number.isFinite(value) ? value : null;
     };
 
+    const before = getBudget(actorCompany.id, targetMonth, target);
+    const incomeBudget = parse('incomeBudget');
+    const expenseBudget = parse('expenseBudget');
+
     setBudget({
       companyId: actorCompany.id,
       month: targetMonth,
       projectId: target,
-      incomeBudget: parse('incomeBudget'),
-      expenseBudget: parse('expenseBudget'),
+      incomeBudget,
+      expenseBudget,
       userId: actor.id,
+    });
+
+    // A budget is what the dashboard measures performance against, so a change
+    // to one changes what every variance on the financial page means.
+    await audit({
+      action: 'budget.save',
+      entity: 'budget',
+      entityId: `${actorCompany.id}:${targetMonth}:${target ?? 'all-projects'}`,
+      summary: `Set the ${targetMonth} budget for ${actorCompany.displayName}`,
+      detail: {
+        month: targetMonth,
+        projectId: target,
+        incomeBudget: { from: before?.incomeBudget ?? null, to: incomeBudget },
+        expenseBudget: { from: before?.expenseBudget ?? null, to: expenseBudget },
+      },
+      companyId: actorCompany.id,
     });
 
     revalidatePath('/settings/budget');

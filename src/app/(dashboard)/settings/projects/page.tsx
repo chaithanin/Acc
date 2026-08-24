@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { PageHeader } from '@/components/ui/primitives';
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import {
   AliasConflictError,
   addAlias,
@@ -47,6 +48,19 @@ async function ownProjectId(formData: FormData): Promise<string | null> {
  * or re-aliasing another company's project would move that company's data —
  * silently, and from a page they never opened.
  */
+/**
+ * The name to write in the log, so a later rename does not rewrite history.
+ *
+ * Module scope on purpose: a helper declared inside the component is captured
+ * by the server actions below it, and a captured function cannot be
+ * serialised — the page then throws at request time with a build that was
+ * perfectly green.
+ */
+function projectName(id: string): string {
+  const found = listProjects(true).find((p) => p.id === id);
+  return found ? `${found.code} — ${found.name}` : id;
+}
+
 export default async function ProjectSettingsPage({
   searchParams,
 }: {
@@ -79,6 +93,14 @@ export default async function ProjectSettingsPage({
       }
       redirect(`/settings/projects?error=${encodeURIComponent((err as Error).message)}`);
     }
+
+    await audit({
+      action: 'project.alias_add',
+      entity: 'project',
+      entityId: projectId,
+      summary: `Added the spelling "${alias}" to ${projectName(projectId)}`,
+      detail: { alias },
+    });
     revalidatePath('/settings/projects');
   }
 
@@ -90,7 +112,16 @@ export default async function ProjectSettingsPage({
     const projectId = await ownProjectId(formData);
     if (!projectId) return;
 
-    removeAlias(projectId, String(formData.get('alias') ?? ''));
+    const alias = String(formData.get('alias') ?? '');
+    removeAlias(projectId, alias);
+
+    await audit({
+      action: 'project.alias_remove',
+      entity: 'project',
+      entityId: projectId,
+      summary: `Removed the spelling "${alias}" from ${projectName(projectId)}`,
+      detail: { alias },
+    });
     revalidatePath('/settings/projects');
   }
 
@@ -111,7 +142,14 @@ export default async function ProjectSettingsPage({
       // Created into the company in session. A project with no company would
       // appear on no dashboard at all, which reads as the import having lost
       // the data.
-      createProject({ code, name, companyId: actorCompany.id, company, sortOrder: 100 });
+      const made = createProject({ code, name, companyId: actorCompany.id, company, sortOrder: 100 });
+      await audit({
+        action: 'project.create',
+        entity: 'project',
+        entityId: made.id,
+        summary: `Created the project ${code} — ${name}`,
+        detail: { code, name, company },
+      });
     } catch (err) {
       redirect(`/settings/projects?error=${encodeURIComponent((err as Error).message)}`);
     }
@@ -126,7 +164,16 @@ export default async function ProjectSettingsPage({
     const projectId = await ownProjectId(formData);
     if (!projectId) return;
 
-    updateProject(projectId, { active: formData.get('active') === '1' });
+    const active = formData.get('active') === '1';
+    updateProject(projectId, { active });
+
+    await audit({
+      action: 'project.update',
+      entity: 'project',
+      entityId: projectId,
+      summary: `${active ? 'Activated' : 'Deactivated'} ${projectName(projectId)}`,
+      detail: { active },
+    });
     revalidatePath('/settings/projects');
   }
 

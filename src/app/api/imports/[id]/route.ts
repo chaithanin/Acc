@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import { getImportSummary, rollbackImport } from '@/lib/db/repositories/imports';
 import { recalculateSnapshot } from '@/lib/db/repositories/snapshots';
 
@@ -48,6 +49,17 @@ export async function POST(
           { status: 409 },
         );
       }
+      // A rollback removes every figure an import produced, so it is the
+      // single most consequential thing anyone can do from a dashboard.
+      await audit({
+        action: 'import.rollback',
+        entity: 'import',
+        entityId: id,
+        summary: `Rolled back the import "${summary.label ?? id}"`,
+        detail: { reportDate: summary.reportDate, snapshotId: summary.snapshotId },
+        companyId: company.id,
+      });
+
       return NextResponse.json({ ok: true, action: 'rollback' });
     }
 
@@ -63,6 +75,16 @@ export async function POST(
         );
       }
       const result = recalculateSnapshot(company.id, target);
+
+      await audit({
+        action: 'import.recalculate',
+        entity: 'import',
+        entityId: id,
+        summary: `Recalculated the figures for "${summary.label ?? id}"`,
+        detail: { snapshotId: target, ...result },
+        companyId: company.id,
+      });
+
       return NextResponse.json({ ok: true, action: 'recalculate', ...result });
     }
 

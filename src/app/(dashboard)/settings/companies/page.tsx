@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { can, currentUser } from '@/lib/auth';
+import { audit, changedFields } from '@/lib/audit';
 import { describeLogoLimits, toLogoDataUri } from '@/lib/companies/logo-upload';
 import { listAllCompanies, updateCompany } from '@/lib/db/repositories/companies';
 import { CompanyRow } from './company-row';
@@ -13,6 +14,16 @@ import { CompanyRow } from './company-row';
  * point: putting a mark on a company should not need a repository checkout, a
  * commit and a deploy to do it.
  */
+/**
+ * The name to write in the log, so a later rename does not rewrite history.
+ *
+ * Module scope on purpose — see the note on the same helper in the projects
+ * settings page.
+ */
+function companyName(id: string): string {
+  return listAllCompanies().find((c) => c.id === id)?.displayName ?? id;
+}
+
 export default async function CompanySettingsPage({
   searchParams,
 }: {
@@ -57,6 +68,15 @@ export default async function CompanySettingsPage({
     }
 
     updateCompany(id, { logo: dataUri });
+
+    await audit({
+      action: 'company.logo_upload',
+      entity: 'company',
+      entityId: id,
+      summary: `Uploaded a logo for ${companyName(id)}`,
+      detail: { fileName: (file as File).name, bytes: (file as File).size },
+      companyId: id,
+    });
     revalidatePath('/settings/companies');
     revalidatePath('/companies');
     redirect(`/settings/companies?notice=${encodeURIComponent('Logo updated.')}`);
@@ -66,7 +86,16 @@ export default async function CompanySettingsPage({
     'use server';
     await guard();
 
-    updateCompany(String(formData.get('id') ?? ''), { logo: null });
+    const removedFrom = String(formData.get('id') ?? '');
+    updateCompany(removedFrom, { logo: null });
+
+    await audit({
+      action: 'company.logo_remove',
+      entity: 'company',
+      entityId: removedFrom,
+      summary: `Removed the logo from ${companyName(removedFrom)}`,
+      companyId: removedFrom,
+    });
     revalidatePath('/settings/companies');
     revalidatePath('/companies');
     redirect(`/settings/companies?notice=${encodeURIComponent('Logo removed.')}`);
@@ -77,11 +106,28 @@ export default async function CompanySettingsPage({
     await guard();
 
     const id = String(formData.get('id') ?? '');
-    updateCompany(id, {
+    const before = listAllCompanies().find((c) => c.id === id);
+    const wanted = {
       displayName: String(formData.get('displayName') ?? '').trim() || undefined,
       companyCode: String(formData.get('companyCode') ?? '').trim() || undefined,
       sortOrder: Number(formData.get('sortOrder') ?? 100),
       active: formData.get('active') === 'on',
+    };
+
+    updateCompany(id, wanted);
+
+    await audit({
+      action: 'company.update',
+      entity: 'company',
+      entityId: id,
+      summary: `Updated ${before?.displayName ?? id}`,
+      detail: before
+        ? { changed: changedFields(
+            { displayName: before.displayName, companyCode: before.companyCode, sortOrder: before.sortOrder, active: before.active },
+            wanted,
+          ) }
+        : { changed: wanted },
+      companyId: id,
     });
 
     revalidatePath('/settings/companies');

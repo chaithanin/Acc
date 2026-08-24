@@ -4,6 +4,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import { UPLOAD_DIR } from '@/lib/db';
 import { saveReport } from '@/lib/db/repositories/customer-card-reports';
 import { DEFAULT_OPTIONS, generateCustomerCardReport } from '@/lib/reports/customer-card';
@@ -145,6 +146,24 @@ export async function POST(request: Request) {
       issues: model.issues,
       needsConfirmation: model.summary.needsConfirmation,
       userId: user.id,
+    });
+
+    await audit({
+      action: 'report.create',
+      entity: 'customer_card_report',
+      entityId: stored.id,
+      summary: `Produced the Customer Card report for ${projectLabel} dated ${reportDate}`,
+      detail: {
+        sourceFileName: file.name,
+        sourceHash: sourceHash.slice(0, 16),
+        sourceRows: model.summary.sourceRows,
+        contracts: model.summary.contracts,
+        units: model.summary.units,
+        ok: model.summary.ok,
+        check: model.summary.check,
+        error: model.summary.error,
+      },
+      companyId: company.id,
     });
 
     const summary = {

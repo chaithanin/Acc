@@ -2,6 +2,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, can, currentUser } from '@/lib/auth';
+import { audit, changedFields } from '@/lib/audit';
+import { writeAudit } from '@/lib/db/repositories/audit';
 import {
   companyIdsForUser,
   grantCompany,
@@ -80,6 +82,15 @@ export default async function UserSettingsPage({
 
     for (const companyId of grantedIds) grantCompany(created.id, companyId);
 
+    await audit({
+      action: 'user.create',
+      entity: 'user',
+      entityId: created.id,
+      summary: `Created the account ${email} as ${role}`,
+      detail: { email, name, role, expiresAt, companies: grantedIds },
+      companyId: null,
+    });
+
     revalidatePath('/settings/users');
     redirect(
       `/settings/users?notice=${encodeURIComponent(`Created ${email} with access to ${grantedIds.length} ${grantedIds.length === 1 ? 'company' : 'companies'}.`)}`,
@@ -127,8 +138,29 @@ export default async function UserSettingsPage({
     const wanted = new Set(formData.getAll('companies').map(String).filter(Boolean));
     const held = new Set(companyIdsForUser(id));
 
-    for (const companyId of wanted) if (!held.has(companyId)) grantCompany(id, companyId);
-    for (const companyId of held) if (!wanted.has(companyId)) revokeCompany(id, companyId);
+    const granted = [...wanted].filter((companyId) => !held.has(companyId));
+    const revoked = [...held].filter((companyId) => !wanted.has(companyId));
+
+    for (const companyId of granted) grantCompany(id, companyId);
+    for (const companyId of revoked) revokeCompany(id, companyId);
+
+    await audit({
+      action: 'user.update',
+      entity: 'user',
+      entityId: id,
+      summary: `Updated the account ${target.email}`,
+      detail: {
+        changed: changedFields(
+          { name: target.name, email: target.email, role: target.role, active: target.active, expiresAt: target.expiresAt },
+          { name: String(formData.get('name') ?? '').trim() || undefined,
+            email: String(formData.get('email') ?? '').trim() || undefined,
+            role, active, expiresAt },
+        ),
+        granted,
+        revoked,
+      },
+      companyId: null,
+    });
 
     revalidatePath('/settings/users');
     revalidatePath('/companies');
@@ -137,7 +169,7 @@ export default async function UserSettingsPage({
 
   async function setPasswordAction(formData: FormData) {
     'use server';
-    await guard();
+    const actor = await guard();
 
     const id = String(formData.get('id') ?? '');
     const password = String(formData.get('password') ?? '');
@@ -150,6 +182,21 @@ export default async function UserSettingsPage({
 
     // Signs the user out everywhere, which is the point of an admin reset.
     setUserPassword(id, password);
+
+    // Written straight to the log rather than through the request-scoped
+    // helper: an administrator resetting their own password has just revoked
+    // their own session, and the helper would find nobody signed in and drop
+    // the entry. The password itself is never written — only that it was
+    // replaced, by whom, and for whom.
+    writeAudit({
+      actorId: actor.id,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'user.password_reset',
+      entity: 'user',
+      entityId: id,
+      summary: `Reset the password for ${target.email} and signed them out everywhere`,
+    });
 
     revalidatePath('/settings/users');
     redirect(

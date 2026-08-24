@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { REPORT_TYPE_LABELS } from '@/config/detection-rules';
 import { Badge, Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { audit } from '@/lib/audit';
 import { listProjects } from '@/lib/db/repositories/projects';
 import { listTemplatesForCompany, setTemplateActiveForCompany } from '@/lib/db/repositories/templates';
 
@@ -33,11 +34,19 @@ export default async function TemplateSettingsPage() {
 
     // Disabling a shared default records this company's choice rather than
     // editing the default, so the other companies keep theirs.
-    setTemplateActiveForCompany(
-      actorCompany.id,
-      String(formData.get('id') ?? ''),
-      formData.get('active') === '1',
-    );
+    const templateId = String(formData.get('id') ?? '');
+    const active = formData.get('active') === '1';
+    setTemplateActiveForCompany(actorCompany.id, templateId, active);
+
+    const name = listTemplatesForCompany(actorCompany.id).find((t) => t.id === templateId)?.name;
+    await audit({
+      action: 'template.toggle',
+      entity: 'template',
+      entityId: templateId,
+      summary: `${active ? 'Enabled' : 'Disabled'} the template ${name ?? templateId} for ${actorCompany.displayName}`,
+      detail: { active },
+      companyId: actorCompany.id,
+    });
     revalidatePath('/settings/templates');
   }
 

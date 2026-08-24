@@ -2,6 +2,14 @@ import { cookies } from 'next/headers';
 import { getDb, newId, nowIso } from '@/lib/db';
 import { companyForUser, type Company } from '@/lib/db/repositories/companies';
 import { canSignIn, findUserById, findUserByEmail, verifyPassword } from '@/lib/db/repositories/users';
+import {
+  clearFailures,
+  clientKey,
+  emailKey,
+  lockoutFor,
+  purgeOldAttempts,
+  recordFailure,
+} from './throttle';
 import type { Role, User } from '@/lib/types';
 
 /**
@@ -14,14 +22,67 @@ import type { Role, User } from '@/lib/types';
 export const SESSION_COOKIE = 'gtg_session';
 const SESSION_DAYS = 7;
 
-export async function signIn(email: string, password: string): Promise<User | null> {
+/**
+ * The outcome of an attempt at the sign-in form.
+ *
+ * A refusal says whether it was the password or the rate limit, because the
+ * caller has to show a different message; it never says whether the address
+ * exists, which is the thing worth hiding.
+ */
+export type SignInResult =
+  | { ok: true; user: User }
+  | { ok: false; reason: 'refused' }
+  | { ok: false; reason: 'throttled'; retryAfterSeconds: number };
+
+export async function attemptSignIn(
+  email: string,
+  password: string,
+  clientAddress: string | null,
+): Promise<SignInResult> {
+  purgeOldAttempts();
+
+  // Counted against the address typed and the caller's own address. A guesser
+  // has to stay under the limit on both.
+  const identifiers = [emailKey(email), ...(clientAddress ? [clientKey(clientAddress)] : [])];
+
+  const locked = lockoutFor(identifiers);
+  if (locked > 0) return { ok: false, reason: 'throttled', retryAfterSeconds: locked };
+
   const user = findUserByEmail(email);
   // An expired or deactivated account is refused before the password is even
   // checked, and refused identically either way so the response cannot be used
   // to work out which accounts exist.
+  if (!user || !canSignIn(user)) {
+    recordFailure(identifiers);
+    return { ok: false, reason: 'refused' };
+  }
+  if (!verifyPassword(password, user.passwordHash)) {
+    recordFailure(identifiers);
+    return { ok: false, reason: 'refused' };
+  }
+
+  // Someone who mistyped their password four times and then got it right is
+  // not part-way to a lockout on their next visit.
+  clearFailures(identifiers);
+
+  return { ok: true, user: await openSession(user) };
+}
+
+/**
+ * Signs in without the rate limit.
+ *
+ * Kept for callers that are not the sign-in form and have already established
+ * who they are talking to.
+ */
+export async function signIn(email: string, password: string): Promise<User | null> {
+  const user = findUserByEmail(email);
   if (!user || !canSignIn(user)) return null;
   if (!verifyPassword(password, user.passwordHash)) return null;
+  return openSession(user);
+}
 
+/** Opens a session for a user whose password has already been checked. */
+async function openSession(user: User & { passwordHash: string }): Promise<User> {
   const sessionId = newId();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400_000);
 

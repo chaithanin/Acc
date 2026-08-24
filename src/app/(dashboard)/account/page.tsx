@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { Card, CardHeader, PageHeader, Stat } from '@/components/ui/primitives';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, currentUser, signOut } from '@/lib/auth';
+import { writeAudit } from '@/lib/db/repositories/audit';
 import { findUserByEmail, setUserPassword, verifyPassword } from '@/lib/db/repositories/users';
 import { MIN_PASSWORD, passwordTooShort } from '@/config/password-policy';
 import { formatDate } from '@/lib/format/number';
@@ -46,6 +47,21 @@ export default async function AccountPage({
     }
 
     setUserPassword(actor.id, next);
+
+    // Written straight to the log rather than through the request-scoped
+    // helper: setUserPassword has just revoked every session including this
+    // one, so there is no longer a signed-in user for the helper to find and
+    // the entry would be dropped in silence. The password itself is never
+    // recorded — only that it was replaced, and by whom.
+    writeAudit({
+      actorId: actor.id,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'user.password_change',
+      entity: 'user',
+      entityId: actor.id,
+      summary: `${actor.email} changed their own password`,
+    });
 
     // setUserPassword revokes every session, including this one, so the cookie
     // is cleared too rather than left pointing at a session that no longer
