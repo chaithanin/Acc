@@ -12,11 +12,13 @@
  *
  * Usage
  *   node scripts/api-probe.mjs --url <url> --token <token>
+ *   node scripts/api-probe.mjs --url <url> --token <t> --user <u> --pass <p>
+ *   node scripts/api-probe.mjs --url <url> --token <t> --login   # find the login route
  *   ALLKONS_API_URL=... ALLKONS_API_TOKEN=... node scripts/api-probe.mjs
  *
- * The token is read from the environment or the command line and is never
- * written to a file, never echoed, and masked in everything printed. Do not
- * put it in a committed file.
+ * The token and the password are read from the environment or the command
+ * line. Neither is written to a file, echoed, or printed unmasked. Do not put
+ * either in a committed file.
  */
 
 /**
@@ -24,12 +26,14 @@
  * target reveals how it behaves — so a report has to say which version
  * produced it, or an old checkout's output gets read as a new result.
  */
-const VERSION = 4;
+const VERSION = 5;
 
 const args = parseArgs(process.argv.slice(2));
 
 const url = args.url ?? process.env.ALLKONS_API_URL;
 const token = args.token ?? process.env.ALLKONS_API_TOKEN;
+const username = args.user ?? process.env.ALLKONS_API_USER ?? null;
+const password = args.pass ?? process.env.ALLKONS_API_PASS ?? null;
 const timeoutMs = Number(args.timeout ?? 20000);
 const bodyMax = Number(args['body-chars'] ?? 600);
 
@@ -53,6 +57,73 @@ const AUTH_STYLES = [
 ];
 
 /**
+ * Credential styles that need a username and a password as well as the token.
+ *
+ * Added once those were supplied. The previous run had only a token and every
+ * combination answered "not found", which is what an unauthenticated gateway
+ * says when it will not tell you what exists — so the missing half may simply
+ * have been the sign-in.
+ */
+const USER_AUTH_STYLES = [
+  {
+    name: 'Basic user:pass',
+    headers: () => ({
+      Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
+    }),
+  },
+  {
+    name: 'Bearer + user headers',
+    headers: (t) => ({ Authorization: `Bearer ${t}`, username, password }),
+  },
+  {
+    name: 'token hdr + user hdr',
+    headers: (t) => ({ token: t, username, password }),
+  },
+];
+
+/** Payload shapes that carry the credentials in the body rather than a header. */
+const CREDENTIAL_BODIES = [
+  { name: 'POST {username,password}', method: 'POST', body: () => ({ username, password }) },
+  { name: 'POST {user,pass}', method: 'POST', body: () => ({ user: username, pass: password }) },
+  {
+    name: 'POST {token,user,pass}',
+    method: 'POST',
+    body: () => ({ token, username, password }),
+  },
+  {
+    name: 'POST {service,credentials}',
+    method: 'POST',
+    body: () => ({
+      service: 'price',
+      method: 'compare',
+      credentials: { username, password },
+      data: {},
+    }),
+  },
+];
+
+/**
+ * Where a service like this keeps its sign-in.
+ *
+ * Tried against every ancestor of the given path, because "adapter" is an
+ * entry point and the login almost certainly is not under it.
+ */
+const LOGIN_ROUTES = [
+  'auth/login',
+  'auth/token',
+  'auth',
+  'login',
+  'signin',
+  'token',
+  'oauth/token',
+  'oauth2/token',
+  'api/login',
+  'api/auth/login',
+  'user/login',
+  'account/login',
+];
+
+/**
  * Request shapes. The empty POST is the control: a well-built API answers it
  * with a validation error naming the fields it wanted, which is more useful
  * than any successful guess.
@@ -63,7 +134,9 @@ const SHAPES = [
   { name: 'POST {service}', method: 'POST', body: { service: '', method: '', data: {} } },
 ];
 
-if (args.discover) {
+if (args.login) {
+  await findLogin();
+} else if (args.discover) {
   await discover();
 } else {
   const results = [];
@@ -72,6 +145,28 @@ if (args.discover) {
       results.push(await probe(shape, style));
     }
   }
+
+  if (username && password) {
+    // Header-carried credentials against every shape, then the shapes that
+    // carry them in the body. Both are common and neither is guessable from
+    // the URL.
+    for (const shape of SHAPES) {
+      for (const style of USER_AUTH_STYLES) {
+        results.push(await probe(shape, style));
+      }
+    }
+    for (const shape of CREDENTIAL_BODIES) {
+      for (const style of [
+        AUTH_STYLES[0],
+        { name: 'none (control)', headers: () => ({}), noToken: true },
+      ]) {
+        results.push(await probe(shape, style));
+      }
+    }
+  } else {
+    console.log('\nNo --user/--pass given, so the sign-in combinations were skipped.');
+  }
+
   report(results);
 }
 
@@ -296,6 +391,145 @@ async function fetchPath(target, method = 'GET') {
   }
 }
 
+/**
+ * Looks for the sign-in.
+ *
+ * The previous run had a token and nothing else, and every combination came
+ * back "not found" — which is equally what a gateway says when it has decided
+ * not to talk to you. With a username and a password there is a second
+ * possibility worth eliminating: that the token is not the credential at all,
+ * but the thing you are given in exchange for signing in.
+ *
+ * So this asks each plausible login route, under every ancestor of the given
+ * path, and reports anything that answers differently from the route that is
+ * known not to exist.
+ */
+async function findLogin() {
+  if (!username || !password) {
+    console.error('--login needs --user and --pass.');
+    process.exit(2);
+  }
+
+  const base = new URL(url);
+  const segments = base.pathname.split('/').filter(Boolean);
+
+  const ancestors = [];
+  for (let i = segments.length; i >= 0; i -= 1) {
+    ancestors.push(`/${segments.slice(0, i).join('/')}`.replace(/\/+$/, '') || '/');
+  }
+
+  console.log(`\nprobe v${VERSION} — looking for a sign-in under ${mask(base.origin)}\n`);
+
+  // What "this route does not exist" looks like, per prefix. Established
+  // before anything else, because this gateway answers 404 in the body under
+  // an HTTP 200 and a status code alone cannot be trusted.
+  const missing = new Map();
+  for (const prefix of ancestors) {
+    const control = await ask(join(prefix, 'zz-probe-no-such-route-4718'), { method: 'POST' });
+    missing.set(prefix, control);
+  }
+
+  const found = [];
+
+  for (const prefix of ancestors) {
+    for (const route of LOGIN_ROUTES) {
+      const path = join(prefix, route);
+
+      for (const attempt of [
+        { name: '{username,password}', body: { username, password } },
+        { name: '{user,pass}', body: { user: username, pass: password } },
+        { name: 'GET', method: 'GET' },
+      ]) {
+        const r = await ask(path, {
+          method: attempt.method ?? 'POST',
+          body: attempt.body,
+        });
+
+        if (looksMissing(r, missing.get(prefix))) continue;
+
+        found.push({ path, attempt: attempt.name, r });
+        console.log(
+          `  FOUND  ${path.padEnd(42)} ${attempt.name.padEnd(20)} ${String(r.status).padEnd(5)} ${r.contentType} ${r.bytes}B`,
+        );
+        console.log(`         ${mask(r.body.slice(0, 300)).replace(/\s+/g, ' ')}`);
+      }
+    }
+  }
+
+  if (found.length === 0) {
+    console.log('  Nothing answered differently from a route that does not exist.');
+    console.log('\n  That means one of three things, and this cannot tell them apart:');
+    console.log('    1. the sign-in is somewhere these names do not cover;');
+    console.log('    2. the service refuses everything from an unrecognised caller,');
+    console.log('       in which case the block is at the network or the account, not the URL;');
+    console.log('    3. the token IS the credential and the account is for a different system.');
+    console.log('\n  Ask Allkons for the endpoint list. One page of documentation settles it,');
+    console.log('  and no amount of guessing will.');
+  }
+}
+
+/** One request, reduced to what the comparison needs. */
+async function ask(pathname, { method = 'GET', body } = {}) {
+  const target = new URL(url);
+  target.pathname = pathname;
+  target.search = '';
+
+  const headers = {
+    Accept: 'application/json, */*',
+    'User-Agent': 'gtg-dashboard-probe/1',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(target, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+      redirect: 'manual',
+    });
+    const text = await res.text();
+    return {
+      status: res.status,
+      contentType: (res.headers.get('content-type') ?? '').split(';')[0] || '(none)',
+      bytes: text.length,
+      body: text,
+    };
+  } catch (err) {
+    return { status: 0, contentType: '(network)', bytes: 0, body: String(err.message ?? err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function join(prefix, route) {
+  return `${prefix === '/' ? '' : prefix}/${route}`;
+}
+
+/**
+ * Whether a reply is indistinguishable from the one a missing route gives.
+ *
+ * Compared against a control fetched from the same prefix, because a catch-all
+ * page differs only by the length of the path it echoes back — which is how an
+ * earlier version reported six routes that did not exist.
+ */
+function looksMissing(r, control) {
+  if (!control) return false;
+  if (r.status === 0) return true;
+  if (r.status === control.status && r.contentType === control.contentType) {
+    const LARGE_ENOUGH = 500;
+    if (r.bytes > LARGE_ENOUGH && control.bytes > LARGE_ENOUGH) {
+      return Math.abs(r.bytes - control.bytes) <= 80;
+    }
+    return r.body.trim() === control.body.trim();
+  }
+  return false;
+}
+
 function tryParseSpec(text) {
   try {
     const parsed = JSON.parse(text);
@@ -316,7 +550,10 @@ async function probe(shape, style) {
     'User-Agent': 'gtg-dashboard-probe/1',
     ...(style.noToken ? {} : style.headers(token)),
   };
-  if (shape.body !== undefined) headers['Content-Type'] = 'application/json';
+  // A shape's body may be a function, so credentials are read at call time
+  // rather than baked into a module-level constant.
+  const body = typeof shape.body === 'function' ? shape.body() : shape.body;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
 
   const started = Date.now();
   const controller = new AbortController();
@@ -326,7 +563,7 @@ async function probe(shape, style) {
     const res = await fetch(target, {
       method: shape.method,
       headers,
-      body: shape.body === undefined ? undefined : JSON.stringify(shape.body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
       redirect: 'manual',
     });
@@ -389,16 +626,29 @@ function saysNotFound(r) {
 }
 
 /** Keeps the credential out of terminal scrollback and pasted output. */
+/**
+ * Hides every secret in anything printed.
+ *
+ * The password is masked entirely rather than by its tail: four characters of
+ * a short password is most of it, and these reports get pasted into chat.
+ */
 function mask(text) {
-  if (!token) return text;
-  const tail = token.slice(-4);
-  return text.split(token).join(`***${tail}`);
+  let out = String(text);
+  if (token) out = out.split(token).join(`***${token.slice(-4)}`);
+  if (password) out = out.split(password).join('***');
+  if (username) out = out.split(username).join('<user>');
+  return out;
 }
 
 function report(rows) {
   console.log(`\nprobe v${VERSION} — probed ${mask(url)}  (${rows.length} attempts)\n`);
 
-  const width = { shape: 16, auth: 22 };
+  // Wide enough for the longest shape name, or the columns run together and
+  // the report stops being readable at exactly the point it gets interesting.
+  const width = {
+    shape: Math.max(16, ...rows.map((r) => r.shape.length)) + 2,
+    auth: Math.max(22, ...rows.map((r) => r.auth.length)) + 2,
+  };
   const header = `${'SHAPE'.padEnd(width.shape)}${'AUTH'.padEnd(width.auth)}${'STATUS'.padEnd(8)}TYPE`;
   console.log(header);
   console.log('-'.repeat(header.length + 20));
