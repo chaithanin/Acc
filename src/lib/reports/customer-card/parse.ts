@@ -144,7 +144,7 @@ export function parseCustomerCard(sheet: RawSheet): ParsedCard {
       issues: [{
         severity: 'error',
         code: 'NO_HEADER',
-        message: `No customer-card header was found in "${sheet.name}". Expected columns such as แปลง/ห้อง, เลขที่สัญญา and จำนวนเงินที่ต้องชำระ.`,
+        message: `No customer-card header was found in "${sheet.name}". Expected the columns of "รายงานการ์ดลูกค้า ตามสัญญา": แปลง/ห้อง, เลขที่สัญญา, วันครบกำหนดชำระเงินตามสัญญา and จำนวนเงินที่ต้องชำระ.`,
       }],
       columns: {},
       headerRow: -1,

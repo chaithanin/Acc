@@ -116,6 +116,28 @@ id answers 404 rather than "forbidden", which would confirm the report exists.
 A workbook runs to a few megabytes, so anyone who can roll back an import can
 also delete a report and its file.
 
+## Where the customer card comes from
+
+Exported by hand from **Mango Anywhere**
+(`https://chaithanin.mangoanywhere.com/production.re/`), report
+**"รายงานการ์ดลูกค้า ตามสัญญา"**, as `.xlsx` — set the company, leave the start
+date empty and set the end date to the as-at date, so the card carries every
+instalment from the beginning.
+
+The report name and the settings are read off a real export: the title, the
+date line and the column headings all print at the top of the file. The exact
+menu path is not recorded, because guessing one is worse than leaving it out —
+it sends people looking in the wrong place and then doubting the rest of the
+instructions. `src/config/source-systems.ts` has a `menuPath` field waiting for
+somebody who uses the system to fill in.
+
+All of this is shown on `/reports/customer-card` above the upload, open by
+default: somebody running it for the first time should not have to discover
+that the instructions exist. The wrong export is the most common way this goes
+wrong — a summary instead of a card, a date range that stops short, a PDF —
+and none of those produce a useful error on their own, so the refusal names the
+report to export instead.
+
 ## What the real export does that a tidy one would not
 
 Everything below was found by running the report against

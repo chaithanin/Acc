@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation';
 import { PageHeader } from '@/components/ui/primitives';
 import { activeCompany, can, currentUser } from '@/lib/auth';
+import { CUSTOMER_CARD_SOURCE } from '@/config/source-systems';
 import { listReports } from '@/lib/db/repositories/customer-card-reports';
 import { DEFAULT_OPTIONS } from '@/lib/reports/customer-card/types';
 import { CustomerCardReport } from './customer-card-report';
 import { ReportHistory } from './report-history';
+import { SourceGuide } from './source-guide';
 
 /**
  * Customer Card Report.
@@ -36,6 +38,7 @@ export default async function CustomerCardReportPage() {
         title="Customer Card Report"
         description="Upload the ลูกหนี้คงค้าง customer card and get back the Interest / Advance-received workbook, reconciled unit by unit. Every run is kept."
       />
+      <SourceGuide guide={CUSTOMER_CARD_SOURCE} />
       <CustomerCardReport
         defaultProjectLabel={company.companyCode}
         defaultCompletionDate={DEFAULT_OPTIONS.completionDate}

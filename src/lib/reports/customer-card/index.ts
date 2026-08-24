@@ -1,3 +1,4 @@
+import { CUSTOMER_CARD_SOURCE } from '@/config/source-systems';
 import { readWorkbook } from '@/lib/excel/read';
 import { buildReport } from './build';
 import { parseCustomerCard, pickCustomerCardSheet } from './parse';
@@ -36,8 +37,11 @@ export async function generateCustomerCardReport(
   const sheet = pickCustomerCardSheet(workbook.sheets);
 
   if (!sheet) {
+    // Naming the report is the useful part of this message. The usual cause is
+    // the wrong export — a summary rather than a card — and "no sheet found"
+    // on its own sends people looking for a fault in the file they have.
     throw new Error(
-      `No customer-card sheet was found in "${fileName}". A sheet with columns such as แปลง/ห้อง, เลขที่สัญญา, วันครบกำหนดชำระเงินตามสัญญา and จำนวนเงินที่ต้องชำระ is expected.`,
+      `"${fileName}" does not look like a customer card. Export "${CUSTOMER_CARD_SOURCE.reportName}" from ${CUSTOMER_CARD_SOURCE.system} as .xlsx — it needs the columns แปลง/ห้อง, เลขที่สัญญา, วันครบกำหนดชำระเงินตามสัญญา and จำนวนเงินที่ต้องชำระ.`,
     );
   }
 
