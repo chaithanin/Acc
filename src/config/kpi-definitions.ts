@@ -53,6 +53,20 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     readsFrom:
       'Derived: contractual less received. Deliberately recomputed rather than read from an accrued column, which the source workbooks often leave stale.',
   },
+  period_income: {
+    meaning: 'Income belonging to the report month alone — what the monthly budget is compared with.',
+    readsFrom: 'Income records dated in the report month, forecast rows excluded.',
+    excludes:
+      'Receivable rows, which carry a due date rather than a posting month and so cannot be placed in a period; and everything contracted in earlier months, which is a balance rather than a month.',
+  },
+  period_collected: {
+    meaning: 'Cash collected against income raised in the report month.',
+    readsFrom: 'The received column of the same month’s income records.',
+  },
+  period_expense: {
+    meaning: 'Spending belonging to the report month alone — what the monthly budget is compared with.',
+    readsFrom: 'Expense records dated in the report month, forecast rows excluded.',
+  },
   expected_future_income: {
     meaning: 'Collections expected after the report date.',
     readsFrom:

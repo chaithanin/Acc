@@ -122,6 +122,14 @@ const EXPECTED: Record<string, number | null> = {
   // Expense: 25,000,000 construction + 1,200,000 marketing + 2,400,000 salary
   // + 600,000 tax.
   total_expense: 29_200_000,
+  // The report month is August. The construction and marketing rows are dated
+  // July and belong to July, however large they are — that is the whole point
+  // of a period figure. Salaries and corporate tax are August's.
+  period_expense: 3_000_000,
+  // No income row in this workbook carries a month, so August's income figure
+  // is nothing. Not the 8,500,000 balance, which is every sale ever made.
+  period_income: 0,
+  period_collected: 0,
   // Not the 25,000,000 of construction spend: the certified work attributable
   // to the units actually sold. The rest is inventory.
   cost_of_goods_sold: 19_000_000,

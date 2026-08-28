@@ -94,11 +94,14 @@ export function FinancialDashboard({
     );
   }
 
-  const totalIncome = m('total_contractual_income')?.current ?? null;
-
+  // The statement runs on revenue earned, not on the order book. The order
+  // book sits above it as its own line so both are visible and neither is
+  // mistaken for the other.
   const statement: StatementLine[] = [
-    { label: 'Total Income', value: totalIncome },
-    { label: 'Cost of Goods Sold', value: negate(m('cost_of_goods_sold')?.current) },
+    { label: 'Contracted Sale Value (order book)', value: m('contracted_sale_value')?.current ?? null },
+    { label: 'Not yet earned', value: negate(m('revenue_backlog')?.current) },
+    { label: 'Recognised Revenue', value: m('recognised_revenue')?.current ?? null, emphasis: true },
+    { label: 'Cost of Sales', value: negate(m('cost_of_goods_sold')?.current) },
     { label: 'Gross Profit', value: m('gross_profit')?.current ?? null, emphasis: true },
     { label: 'Total Operating Expenses', value: negate(m('operating_expenses')?.current) },
     { label: 'Operating Profit (EBIT)', value: m('operating_profit')?.current ?? null, emphasis: true },
@@ -132,7 +135,7 @@ export function FinancialDashboard({
       {/* KPI tiles arranged around the central margin dial. */}
       <section className="grid gap-3 xl:grid-cols-[1fr_auto_1fr]">
         <div className="grid gap-3 sm:grid-cols-2">
-          <KpiTile metric={m('total_contractual_income')} title="Total Income" onOpen={() => open(m('total_contractual_income'))} />
+          <KpiTile metric={m('recognised_revenue')} title="Recognised Revenue" onOpen={() => open(m('recognised_revenue'))} />
           <KpiTile metric={m('total_expense')} title="Total Expenses" onOpen={() => open(m('total_expense'))} />
           <KpiTile metric={m('total_receivable_outstanding')} title="Accounts Receivable" onOpen={() => open(m('total_receivable_outstanding'))} />
           <KpiTile metric={m('total_outstanding_expense')} title="Accounts Payable" onOpen={() => open(m('total_outstanding_expense'))} />
@@ -145,7 +148,7 @@ export function FinancialDashboard({
             label="Net Profit Margin %"
             caption={
               m('net_profit_margin')?.current === null
-                ? 'Not calculable while total income is zero.'
+                ? 'Not calculable until the project’s total sale value is set.'
                 : `Net Profit ${formatTHB(m('net_profit')?.current ?? null, 'millions')}\n${formatPercent(m('net_profit_margin')?.differencePct ?? null, 1)} vs previous period`
             }
           />
@@ -188,14 +191,14 @@ export function FinancialDashboard({
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
           <BudgetDial
-            title="% of Income Budget"
+            title="Income budget for the month"
             utilisation={incomeBudget}
             tone="income"
             month={month}
             canEdit={canEditBudget}
           />
           <BudgetDial
-            title="% of Expenses Budget"
+            title="Expense budget for the month"
             utilisation={expenseBudget}
             tone="expense"
             month={month}
@@ -223,7 +226,7 @@ export function FinancialDashboard({
 
         <Card>
           <CardHeader title="Income Statement" subtitle={formatMonth(month)} />
-          <IncomeStatement lines={statement} totalIncome={totalIncome} />
+          <IncomeStatement lines={statement} totalIncome={m('recognised_revenue')?.current ?? null} />
         </Card>
       </section>
 

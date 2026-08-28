@@ -349,3 +349,57 @@ describe('forecasting without forecast rows', () => {
     assert.equal(v(calc, 'required_funding'), 0);
   });
 });
+
+/**
+ * FIN-03, as fixed.
+ *
+ * The budget is a figure for one month. Comparing it with a balance that has
+ * been accumulating since the project began read 18,873% on the real SUN9
+ * volumes — the budget dial was decoration.
+ */
+describe('the period, as distinct from the balance', () => {
+  const calc = run(auditDataset());
+
+  it('separates the month’s income from everything ever contracted', () => {
+    // The one income row is dated 2026-08, the report month.
+    assert.equal(v(calc, 'period_income'), 6_000_000);
+    assert.equal(v(calc, 'period_collected'), 2_000_000);
+    // Against a balance more than five times larger.
+    assert.equal(v(calc, 'total_contractual_income'), 30_500_000);
+  });
+
+  it('separates the month’s spend from the cumulative total', () => {
+    assert.equal(v(calc, 'period_expense'), 5_000_000);
+    assert.equal(v(calc, 'total_expense'), 5_000_000);
+  });
+
+  it('leaves out records belonging to another month', () => {
+    const data = auditDataset();
+    data.income = [
+      { kind: 'income', ...base, category: 'contract', description: 'July', month: '2026-07',
+        contractualAmount: 9_999_999, receivedAmount: 0, accruedAmount: 9_999_999, isForecast: false },
+      ...data.income,
+    ];
+    assert.equal(v(run(data), 'period_income'), 6_000_000, 'July income landed in the August figure');
+  });
+
+  it('leaves out forecast rows, which are not actuals', () => {
+    const data = auditDataset();
+    data.expense = [
+      ...data.expense,
+      { kind: 'expense', ...base, category: 'construction', description: 'Planned', month: '2026-08',
+        amount: 7_777_777, paidAmount: 0, pendingAmount: 7_777_777, isForecast: true },
+    ];
+    assert.equal(v(run(data), 'period_expense'), 5_000_000, 'a forecast was counted as actual spend');
+  });
+
+  it('a monthly budget against the month reads as a percentage a person recognises', () => {
+    const monthIncome = v(calc, 'period_income') ?? 0;
+    const balance = v(calc, 'total_contractual_income') ?? 0;
+    const budget = 5_000_000;
+
+    assert.equal(Number(((monthIncome / budget) * 100).toFixed(1)), 120);
+    // What the dial used to show.
+    assert.equal(Number(((balance / budget) * 100).toFixed(1)), 610);
+  });
+});

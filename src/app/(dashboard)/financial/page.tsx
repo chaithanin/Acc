@@ -26,6 +26,12 @@ export default async function FinancialDashboardPage({
 
   const keys = [
     'total_contractual_income',
+    'contracted_sale_value',
+    'recognised_revenue',
+    'revenue_backlog',
+    'completion_percent',
+    'period_income',
+    'period_expense',
     'total_expense',
     'total_receivable_outstanding',
     'total_outstanding_expense',
@@ -54,13 +60,16 @@ export default async function FinancialDashboardPage({
     ? getBudget(context.scope.companyId, month, context.scope.projectId)
     : null;
 
+  // The budget is a figure for one month, so it is compared with the month —
+  // not with the contracted balance of every sale the project has ever made.
+  // Dividing the second into the first read 18,873% on real volumes.
   const incomeBudget = utilisation(
     budget?.incomeBudget ?? null,
-    metrics.get('total_contractual_income')?.current ?? 0,
+    metrics.get('period_income')?.current ?? 0,
   );
   const expenseBudget = utilisation(
     budget?.expenseBudget ?? null,
-    metrics.get('total_expense')?.current ?? 0,
+    metrics.get('period_expense')?.current ?? 0,
   );
 
   return (

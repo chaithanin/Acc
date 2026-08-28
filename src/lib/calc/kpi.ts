@@ -265,6 +265,55 @@ export function calculateMetrics(
     }),
   );
 
+  // ------------------------------------------------------- the period itself
+  //
+  // Everything above is a balance: what is owed, what is held, what has been
+  // contracted since the project began. The budget is a monthly figure, and
+  // dividing one into the other read 18,873% on the real SUN9 volumes. These
+  // are the figures the budget is actually comparable with.
+  //
+  // Only records that say which month they belong to can contribute. A
+  // receivable row carries a due date rather than a posting month, so it is
+  // not period income — saying that plainly is better than folding it in and
+  // calling the result a month.
+  const reportMonth = reportDate.slice(0, 7);
+  const periodIncomeRows = data.income.filter((r) => r.month === reportMonth && !r.isForecast);
+  const periodExpenseRows = data.expense.filter((r) => r.month === reportMonth && !r.isForecast);
+
+  const periodIncome = sumBy(periodIncomeRows, (r) => r.contractualAmount);
+  const periodCollected = sumBy(periodIncomeRows, (r) => r.receivedAmount);
+  const periodExpense = sumBy(periodExpenseRows, (r) => r.amount);
+
+  metrics.push(
+    metric({
+      key: 'period_income',
+      label: `Income in ${reportMonth}`,
+      section: 'income',
+      value: periodIncome.value,
+      formula: `SUM(Contractual Amount) on income records dated ${reportMonth}`,
+      inputs: [input(`Income records for ${reportMonth}`, periodIncome)],
+      refIndexes: periodIncome.refIndexes,
+    }),
+    metric({
+      key: 'period_collected',
+      label: `Collected in ${reportMonth}`,
+      section: 'income',
+      value: periodCollected.value,
+      formula: `SUM(Received Amount) on income records dated ${reportMonth}`,
+      inputs: [input(`Income records for ${reportMonth}`, periodCollected)],
+      refIndexes: periodCollected.refIndexes,
+    }),
+    metric({
+      key: 'period_expense',
+      label: `Expense in ${reportMonth}`,
+      section: 'expense',
+      value: periodExpense.value,
+      formula: `SUM(Amount) on expense records dated ${reportMonth}`,
+      inputs: [input(`Expense records for ${reportMonth}`, periodExpense)],
+      refIndexes: periodExpense.refIndexes,
+    }),
+  );
+
   // -------------------------------------------------------------- cashflow
   const projection = projectCashflow(data, availableCash, reportDate);
   const forecastRefs = projectionRefIndexes(projection);
