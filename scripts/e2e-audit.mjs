@@ -66,6 +66,16 @@ function dataset(projectId, file, a) {
       { kind: 'bank', ...base, bankName: 'Kasikorn', accountNo: '1', currentAmount: a, pendingExpense: a * 0.1 },
       { kind: 'bank', ...base, sourceRef: ref(file, 'B3'), bankName: 'Bangkok', accountNo: '2', currentAmount: a * 0.5, pendingExpense: 0 },
     ],
+    payable: [
+      { kind: 'payable', ...base, vendor: 'Somsak Construction', invoiceNo: `${projectId.slice(0, 6)}-INV-1`,
+        description: 'Structure, June', category: 'construction',
+        invoiceDate: '2026-06-15', dueDate: '2026-07-15',
+        invoiceAmount: a * 0.3, paidAmount: a * 0.1, statedOutstanding: a * 0.2 },
+      { kind: 'payable', ...base, sourceRef: ref(file, 'B5'), vendor: 'Design Studio',
+        invoiceNo: `${projectId.slice(0, 6)}-INV-2`, description: 'Consultancy',
+        category: 'administration', invoiceDate: '2026-08-01', dueDate: '2026-09-30',
+        invoiceAmount: a * 0.05, paidAmount: 0, statedOutstanding: a * 0.05 },
+    ],
     receivable: [
       { kind: 'receivable', ...base, category: 'contract', customer: 'Buyer A', unit: 'A-1', contractualAmount: a, receiveAmount: a * 0.4, accrueAmount: a * 0.6, dueDate: null },
       { kind: 'receivable', ...base, sourceRef: ref(file, 'B4'), category: 'reservation', customer: 'Buyer B', unit: 'A-2', contractualAmount: a * 0.2, receiveAmount: 0, accrueAmount: a * 0.2, dueDate: null },
@@ -105,6 +115,7 @@ async function seed() {
   repos.imports = await import('../src/lib/db/repositories/imports.ts');
   repos.reports = await import('../src/lib/db/repositories/customer-card-reports.ts');
   repos.budgets = await import('../src/lib/db/repositories/budgets.ts');
+  repos.projectFinancials = await import('../src/lib/db/repositories/project-financials.ts');
   repos.templates = await import('../src/lib/db/repositories/templates.ts');
   const { bootstrapDatabase } = await import('../src/lib/db/bootstrap.ts');
 
@@ -128,6 +139,15 @@ async function seed() {
       companyId: company.id, reportDate: REPORT_DATE, label: `${code} August`,
       userId: people.admin.id, files: [parsedFile(project.id, `${code}.xlsx`, amount)],
       issues: [], mode: 'new',
+    });
+
+    // The board's own figure for the project. Revenue recognition needs it,
+    // and in production it is entered once in project settings.
+    repos.projectFinancials.setProjectFinancials({
+      companyId: company.id, projectId: project.id,
+      totalSaleValue: amount * 4, costBudget: amount * 3,
+      revisedCostBudget: null, committedCost: amount * 0.5,
+      userId: people.admin.id,
     });
 
     const report = repos.reports.saveReport({
@@ -515,6 +535,7 @@ async function audit() {
     ['/', 'Executive Overview', 'dashboard:view'],
     ['/financial', 'Financial', 'dashboard:view'],
     ['/projects', 'Bank', 'dashboard:view'],
+    ['/payable', 'Payable', 'dashboard:view'],
     ['/receivable', 'Receivable', 'dashboard:view'],
     ['/boq', 'BOQ', 'dashboard:view'],
     ['/cashflow', 'Cash Flow', 'dashboard:view'],
@@ -1119,7 +1140,7 @@ async function audit() {
     );
     check('the empty company really has no records', records === 0, `${records} records`, 'Critical');
 
-    for (const page of ['/', '/financial', '/projects', '/receivable', '/boq', '/cashflow', '/ledger', '/reconciliation']) {
+    for (const page of ['/', '/financial', '/projects', '/receivable', '/payable', '/boq', '/cashflow', '/ledger', '/reconciliation']) {
       const r = await get(page, who);
       if (r.status >= 400 || streamedError(r.text)) {
         check(`${page} renders for a company with no data`, false, `status ${r.status}`, 'High');
@@ -1232,7 +1253,16 @@ async function audit() {
       'down_payment_outstanding', 'transfer_outstanding',
       'boq_total', 'boq_to_date', 'boq_paid', 'boq_outstanding', 'remaining_boq',
       'total_expense', 'other_expense', 'wip_ytd', 'advance_outstanding',
-      'cost_of_goods_sold', 'operating_expenses', 'taxes', 'total_outstanding_expense',
+      'operating_expenses', 'taxes', 'total_outstanding_expense',
+      'payable_invoiced', 'payable_paid', 'accounts_payable', 'total_owed',
+      'receivable_aged_current', 'receivable_aged_1_30', 'receivable_aged_31_60',
+      'receivable_aged_61_90', 'receivable_aged_91_120', 'receivable_aged_120_plus',
+      'receivable_overdue', 'receivable_undated',
+      'payable_aged_current', 'payable_aged_1_30', 'payable_aged_31_60',
+      'payable_aged_61_90', 'payable_aged_91_120', 'payable_aged_120_plus',
+      'payable_overdue', 'payable_undated',
+      'period_income', 'period_collected', 'period_expense',
+      'contracted_sale_value',
     ];
 
     for (const key of OFFERED) {
@@ -1262,8 +1292,24 @@ async function audit() {
       round2(['reservation_outstanding', 'contract_outstanding', 'down_payment_outstanding', 'transfer_outstanding']
         .reduce((sum, k) => sum + (stored(k) ?? 0), 0)),
       stored('total_receivable_outstanding'));
-    identity('gross profit = income less cost of sales',
-      stored('gross_profit'), round2(stored('total_contractual_income') - stored('cost_of_goods_sold')));
+    identity('gross profit = revenue earned less the cost of earning it',
+      stored('gross_profit'), round2(stored('recognised_revenue') - stored('cost_of_goods_sold')));
+    identity('the order book splits into what is earned and what is not',
+      stored('contracted_sale_value'),
+      round2(stored('recognised_revenue') + stored('revenue_backlog')));
+    identity('total owed is vendors plus certified construction plus pending',
+      stored('total_owed'),
+      round2(stored('accounts_payable') + stored('total_outstanding_expense')));
+    identity('the receivable buckets foot to the receivable balance',
+      round2(['current', '1_30', '31_60', '61_90', '91_120', '120_plus']
+        .reduce((sum, k) => sum + (stored(`receivable_aged_${k}`) ?? 0), 0)
+        + (stored('receivable_undated') ?? 0)),
+      stored('total_receivable_outstanding'));
+    identity('the payable buckets foot to the payable balance',
+      round2(['current', '1_30', '31_60', '61_90', '91_120', '120_plus']
+        .reduce((sum, k) => sum + (stored(`payable_aged_${k}`) ?? 0), 0)
+        + (stored('payable_undated') ?? 0)),
+      stored('accounts_payable'));
     identity('operating profit = gross profit less operating expenses',
       stored('operating_profit'), round2(stored('gross_profit') - stored('operating_expenses')));
     identity('net profit = operating profit less tax',
@@ -1274,16 +1320,18 @@ async function audit() {
     // The four composites are made of other KPIs rather than of records, so a
     // record list is not what explains them — "View Calculation" is. Everything
     // that IS a sum over records has to open.
-    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position']) {
+    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position',
+      'cost_of_goods_sold']) {
       const r = await drill(key);
       if (!r.supported) noDrill.push(key);
     }
     check('the composite profit figures are explained by their calculation, not by a record list',
-      noDrill.length === 4,
+      noDrill.length === 5,
       `expected the four composites to have no record drill-down; got ${noDrill.join(', ') || 'none'}`,
       'Medium');
 
-    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position']) {
+    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position',
+      'cost_of_goods_sold']) {
       const stated = row(
         `SELECT formula, inputs_json FROM calculated_metrics
           WHERE snapshot_id = ? AND company_id = ? AND metric_key = ? AND project_id IS NULL`,
@@ -1301,8 +1349,15 @@ async function audit() {
           AND unit = 'THB' AND value <> 0
           AND (source_ref_ids_json IS NULL OR source_ref_ids_json = '[]')`,
       alpha.snapshotId, alpha.companyId);
+    const untraceableKeys = all(
+      `SELECT metric_key FROM calculated_metrics
+        WHERE snapshot_id = ? AND company_id = ? AND project_id IS NULL
+          AND unit = 'THB' AND value <> 0
+          AND (source_ref_ids_json IS NULL OR source_ref_ids_json = '[]')`,
+      alpha.snapshotId, alpha.companyId).map((r) => r.metric_key);
     check('every money figure cites the cells it came from',
-      untraceable === 0, `${untraceable} money KPIs carry no source reference`, 'High');
+      untraceable === 0,
+      `${untraceable} money KPIs carry no source reference: ${untraceableKeys.join(', ')}`, 'High');
 
     const refsExist = count(
       `SELECT COUNT(*) AS n FROM source_references WHERE import_id = ?`, alpha.importId);

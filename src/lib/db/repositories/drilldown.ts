@@ -56,6 +56,8 @@ const RECEIVABLE_OUTSTANDING = 't.contractual_amount - t.receive_amount';
 const RECEIVABLE_DESCRIPTION = "COALESCE(t.customer, t.unit, '—')";
 const BOQ_DESCRIPTION = "COALESCE(t.description, t.contractor, '—')";
 const BOQ_CATEGORY = "COALESCE(t.cost_category, 'BOQ')";
+const PAYABLE_OUTSTANDING = 't.invoice_amount - t.paid_amount';
+const PAYABLE_DESCRIPTION = "COALESCE(t.vendor, t.invoice_no, t.description, '—')";
 const INCOME_DESCRIPTION = "COALESCE(t.description, t.category, '—')";
 const EXPENSE_DESCRIPTION = "COALESCE(t.description, t.category, '—')";
 
@@ -190,13 +192,50 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     where: 't.category <> ?',
     params: ['construction'],
   },
-  cost_of_goods_sold: {
-    label: 'Direct cost of sales',
+  direct_cost_incurred: {
+    label: 'Direct cost incurred',
     table: 'expense_records',
     amount: 't.amount',
     category: 't.category',
     description: EXPENSE_DESCRIPTION,
     where: "t.category IN ('construction', 'contractor', 'material')",
+  },
+  contracted_sale_value: {
+    label: 'Order book',
+    table: 'receivable_records',
+    amount: 't.contractual_amount',
+    category: 't.category',
+    description: RECEIVABLE_DESCRIPTION,
+    // Reservation and transfer fees are consideration for something other than
+    // the unit and are not part of the price revenue is recognised against.
+    where: "t.category IN ('contract', 'down_payment')",
+    also: [{ ...INCOME_SHEET, amount: 't.contractual_amount' }],
+  },
+  period_income: {
+    label: 'Income raised this month',
+    table: 'income_records',
+    amount: 't.contractual_amount',
+    category: 't.category',
+    description: INCOME_DESCRIPTION,
+    // The month the snapshot is for, taken from the record's own report date
+    // so the predicate needs nothing the scope does not carry.
+    where: "t.month = substr(t.report_date, 1, 7) AND t.is_forecast = 0",
+  },
+  period_collected: {
+    label: 'Collected this month',
+    table: 'income_records',
+    amount: 't.received_amount',
+    category: 't.category',
+    description: INCOME_DESCRIPTION,
+    where: "t.month = substr(t.report_date, 1, 7) AND t.is_forecast = 0",
+  },
+  period_expense: {
+    label: 'Spend this month',
+    table: 'expense_records',
+    amount: 't.amount',
+    category: 't.category',
+    description: EXPENSE_DESCRIPTION,
+    where: "t.month = substr(t.report_date, 1, 7) AND t.is_forecast = 0",
   },
   operating_expenses: {
     label: 'Operating expenses',
@@ -223,6 +262,41 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     category: BOQ_CATEGORY,
     description: BOQ_DESCRIPTION,
     also: [
+      { table: 'bank_balances', amount: 't.pending_expense', category: "'Pending'",
+        description: "COALESCE(t.bank_name, t.account_no, '—')" },
+      EXPENSE_PENDING,
+    ],
+  },
+  payable_invoiced: {
+    label: 'Vendor invoices',
+    table: 'payable_records',
+    amount: 't.invoice_amount',
+    category: "COALESCE(t.category, 'Payable')",
+    description: PAYABLE_DESCRIPTION,
+  },
+  payable_paid: {
+    label: 'Vendor invoices paid',
+    table: 'payable_records',
+    amount: 't.paid_amount',
+    category: "COALESCE(t.category, 'Payable')",
+    description: PAYABLE_DESCRIPTION,
+  },
+  accounts_payable: {
+    label: 'Owed to vendors',
+    table: 'payable_records',
+    amount: PAYABLE_OUTSTANDING,
+    category: "COALESCE(t.category, 'Payable')",
+    description: PAYABLE_DESCRIPTION,
+  },
+  total_owed: {
+    label: 'Everything owed',
+    table: 'payable_records',
+    amount: PAYABLE_OUTSTANDING,
+    category: "COALESCE(t.category, 'Vendor')",
+    description: PAYABLE_DESCRIPTION,
+    also: [
+      { table: 'boq_records', amount: 't.boq_to_date - t.paid_amount',
+        category: BOQ_CATEGORY, description: BOQ_DESCRIPTION },
       { table: 'bank_balances', amount: 't.pending_expense', category: "'Pending'",
         description: "COALESCE(t.bank_name, t.account_no, '—')" },
       EXPENSE_PENDING,
@@ -259,6 +333,42 @@ const RECEIVABLE_CATEGORY_METRICS: Record<string, string> = {
  * scope does not carry — so the predicate is written against the report date
  * stored on the record itself. Every fact row has one.
  */
+/** Payable ageing, on the same boundaries as the receivable side. */
+const PAYABLE_AGEING: Record<string, { label: string; where: string }> = {
+  payable_aged_current: {
+    label: 'Not yet due',
+    where: "t.due_date IS NOT NULL AND julianday(t.due_date) >= julianday(t.report_date)",
+  },
+  payable_aged_1_30: {
+    label: '1–30 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 1 AND 30",
+  },
+  payable_aged_31_60: {
+    label: '31–60 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 31 AND 60",
+  },
+  payable_aged_61_90: {
+    label: '61–90 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 61 AND 90",
+  },
+  payable_aged_91_120: {
+    label: '91–120 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 91 AND 120",
+  },
+  payable_aged_120_plus: {
+    label: 'More than 120 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) > 120",
+  },
+  payable_overdue: {
+    label: 'Overdue payable',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) > julianday(t.due_date)",
+  },
+  payable_undated: {
+    label: 'Owed with no due date',
+    where: 't.due_date IS NULL',
+  },
+};
+
 const AGEING_METRICS: Record<string, { label: string; where: string }> = {
   receivable_aged_current: {
     label: 'Not yet due',
@@ -295,6 +405,18 @@ const AGEING_METRICS: Record<string, { label: string; where: string }> = {
 };
 
 function sourceFor(metricKey: string): DrilldownSource | null {
+  const payableAged = PAYABLE_AGEING[metricKey];
+  if (payableAged) {
+    return {
+      label: payableAged.label,
+      table: 'payable_records',
+      amount: PAYABLE_OUTSTANDING,
+      category: "COALESCE(t.due_date, 'no due date')",
+      description: PAYABLE_DESCRIPTION,
+      where: `${payableAged.where} AND ${PAYABLE_OUTSTANDING} > 0`,
+    };
+  }
+
   const aged = AGEING_METRICS[metricKey];
   if (aged) {
     return {

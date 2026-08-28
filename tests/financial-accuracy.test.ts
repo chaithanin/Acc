@@ -298,21 +298,73 @@ describe('position and liquidity', () => {
   });
 
   /**
-   * FIN-04. The liquidity ratios divide by a construction proxy, not payables.
+   * FIN-04 and FIN-05, as fixed.
    *
-   * There is no accounts-payable module — no vendor, no invoice, no due date.
-   * The denominator is certified-but-unpaid construction plus pending bank
-   * payments, which is a real obligation but not the company's payables. A
-   * quick ratio computed this way flatters any month with light certification.
+   * The denominator was certified-but-unpaid construction plus pending bank
+   * payments, labelled "Accounts Payable". That is a real obligation and it is
+   * not the company's payables: it said nothing about a vendor invoice sitting
+   * unpaid on someone's desk. Payables are now their own records, and the
+   * denominator is all three obligations with each one visible.
    */
-  it('uses BOQ outstanding plus pending as the payables denominator', () => {
+  it('divides by everything owed, with vendor invoices among it', () => {
+    const withVendors = { ...auditDataset() };
+    withVendors.payable = [
+      { kind: 'payable', ...base, vendor: 'Somsak Construction', invoiceNo: 'INV-1',
+        description: 'Structure, June', category: 'construction',
+        invoiceDate: '2026-06-15', dueDate: '2026-07-15',
+        invoiceAmount: 3_000_000, paidAmount: 1_000_000, statedOutstanding: 2_000_000 },
+      { kind: 'payable', ...base, vendor: 'Design Studio', invoiceNo: 'INV-2',
+        description: 'Consultancy', category: 'administration',
+        invoiceDate: '2026-08-01', dueDate: '2026-09-30',
+        invoiceAmount: 500_000, paidAmount: 0, statedOutstanding: 500_000 },
+    ];
+
+    const c = run(withVendors);
+    assert.equal(c.byKey.get('payable_invoiced')?.value, 3_500_000);
+    assert.equal(c.byKey.get('payable_paid')?.value, 1_000_000);
+    assert.equal(c.byKey.get('accounts_payable')?.value, 2_500_000);
+
+    // 2,500,000 owed to vendors + 4,000,000 certified unpaid + 2,000,000 pending.
+    assert.equal(c.byKey.get('total_owed')?.value, 8_500_000);
+
+    // Quick = (13,000,000 cash + 14,500,000 receivable) ÷ 8,500,000.
+    assert.equal(c.byKey.get('quick_ratio')?.value, 3.24);
+
+    const quick = c.byKey.get('quick_ratio');
+    assert.ok(quick);
+    assert.equal(quick.inputs.find((i) => i.label === 'Accounts Payable')?.value, 2_500_000);
+    assert.equal(quick.inputs.find((i) => i.label === 'Total owed')?.value, 8_500_000);
+  });
+
+  it('ages the payables so the company can see its own arrears', () => {
+    const withVendors = { ...auditDataset() };
+    withVendors.payable = [
+      // 47 days past due on 2026-08-31.
+      { kind: 'payable', ...base, vendor: 'Somsak Construction', invoiceNo: 'INV-1',
+        description: null, category: null, invoiceDate: '2026-06-15', dueDate: '2026-07-15',
+        invoiceAmount: 3_000_000, paidAmount: 1_000_000, statedOutstanding: null },
+      // Not yet due.
+      { kind: 'payable', ...base, vendor: 'Design Studio', invoiceNo: 'INV-2',
+        description: null, category: null, invoiceDate: '2026-08-01', dueDate: '2026-09-30',
+        invoiceAmount: 500_000, paidAmount: 0, statedOutstanding: null },
+    ];
+
+    const c = run(withVendors);
+    assert.equal(c.byKey.get('payable_aged_31_60')?.value, 2_000_000);
+    assert.equal(c.byKey.get('payable_aged_current')?.value, 500_000);
+    assert.equal(c.byKey.get('payable_overdue')?.value, 2_000_000);
+
+    const buckets = ['current', '1_30', '31_60', '61_90', '91_120', '120_plus']
+      .reduce((sum, k) => sum + (c.byKey.get(`payable_aged_${k}`)?.value ?? 0), 0);
+    assert.equal(buckets + (c.byKey.get('payable_undated')?.value ?? 0),
+      c.byKey.get('accounts_payable')?.value, 'the payable buckets do not foot to the balance');
+  });
+
+  it('still counts construction obligations when there are no vendor invoices', () => {
+    assert.equal(v(calc, 'accounts_payable'), 0);
+    assert.equal(v(calc, 'total_owed'), 6_000_000);
     assert.equal(v(calc, 'quick_ratio'), 4.58);
     assert.equal(v(calc, 'current_ratio'), 6.08);
-
-    const quick = calc.byKey.get('quick_ratio');
-    assert.ok(quick);
-    assert.ok(quick.formula.includes('Accounts Payable'));
-    assert.equal(quick.inputs.find((i) => i.label === 'Accounts Payable')?.value, 6_000_000);
   });
 
   it('reports both as not calculable rather than infinity with nothing owed', () => {

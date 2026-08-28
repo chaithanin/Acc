@@ -356,6 +356,18 @@ export function loadDataset(
     });
   }
 
+  for (const row of db.prepare<[string, string], any>('SELECT * FROM payable_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
+    const index = indexOf(row.source_ref_id);
+    data.payable.push({
+      kind: 'payable', sourceRef: refAt(index), sourceRefIndex: index,
+      projectId: row.project_id, projectLabel: null,
+      vendor: row.vendor, invoiceNo: row.invoice_no, description: row.description,
+      category: row.category, invoiceDate: row.invoice_date, dueDate: row.due_date,
+      invoiceAmount: row.invoice_amount, paidAmount: row.paid_amount,
+      statedOutstanding: row.stated_outstanding,
+    });
+  }
+
   for (const row of db.prepare<[string, string], any>('SELECT * FROM income_records WHERE snapshot_id = ? AND company_id = ?').all(...args)) {
     const index = indexOf(row.source_ref_id);
     data.income.push({

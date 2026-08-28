@@ -6,6 +6,7 @@ import type { NormalizeContext } from './context';
 import { normalizeGeneralLedger } from './general-ledger';
 import { normalizeExpense, normalizeIncome } from './income-expense';
 import { extractKeyValues } from './key-value';
+import { normalizePayable } from './payable';
 import { normalizeReceivable } from './receivable';
 import { normalizeWip } from './wip';
 
@@ -28,6 +29,10 @@ export function normalizeSheet(ctx: NormalizeContext): NormalizedDataset {
 
     case 'receivable':
       data.receivable = normalizeReceivable(ctx);
+      break;
+
+    case 'payable':
+      data.payable = normalizePayable(ctx);
       break;
 
     case 'wip':

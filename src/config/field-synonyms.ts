@@ -46,6 +46,11 @@ export type CanonicalField =
   | 'accrued_amount'
   | 'contractor'
   | 'remaining_amount'
+  // payable
+  | 'invoice_no'
+  | 'invoice_date'
+  | 'invoice_amount'
+  | 'outstanding_amount'
   // income / expense
   | 'income_amount'
   | 'expense_amount'
@@ -74,6 +79,24 @@ export interface FieldSynonym {
 }
 
 export const FIELD_SYNONYMS: FieldSynonym[] = [
+  // --------------------------------------------------------------- payable
+  {
+    field: 'invoice_no',
+    labels: ['invoice no', 'invoice number', 'invoice', 'bill no', 'เลขที่ใบแจ้งหนี้', 'เลขที่บิล', 'เลขที่ใบวางบิล'],
+  },
+  {
+    field: 'invoice_date',
+    labels: ['invoice date', 'bill date', 'วันที่ใบแจ้งหนี้', 'วันที่วางบิล', 'ลงวันที่'],
+  },
+  {
+    field: 'invoice_amount',
+    labels: ['invoice amount', 'bill amount', 'amount due', 'ยอดใบแจ้งหนี้', 'จำนวนเงินตามใบแจ้งหนี้', 'ยอดหนี้'],
+  },
+  {
+    field: 'outstanding_amount',
+    labels: ['outstanding', 'outstanding amount', 'balance due', 'unpaid', 'คงค้าง', 'ยอดคงค้าง', 'ค้างชำระ'],
+  },
+
   // ---------------------------------------------------------------- shared
   {
     field: 'project',

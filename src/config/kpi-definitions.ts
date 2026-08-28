@@ -216,6 +216,56 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     meaning: 'Everything owed and due: certified construction work plus pending payments.',
     readsFrom: 'Derived: BOQ outstanding plus pending expense.',
   },
+  payable_invoiced: {
+    meaning: 'The value of vendor invoices received.',
+    readsFrom: 'Payable records — the invoice-amount column.',
+  },
+  payable_paid: {
+    meaning: 'How much of those invoices has been settled.',
+    readsFrom: 'Payable records — the paid-amount column.',
+  },
+  accounts_payable: {
+    meaning: 'What the company owes its vendors: invoices received and not yet paid.',
+    readsFrom: 'Derived: invoiced less paid across every payable record.',
+    excludes:
+      'Construction certified and not yet paid for, which is BOQ Outstanding, and payments committed but not made, which is Pending Expense. All three together are Total Owed.',
+  },
+  payable_overdue: {
+    meaning: 'Invoices past their due date and still unpaid — the company’s own arrears.',
+    readsFrom: 'Payable records aged against the report date.',
+  },
+  payable_undated: {
+    meaning: 'Unpaid invoices with no due date in the file, so nothing can say whether they are late.',
+    readsFrom: 'Payable records with no due date.',
+  },
+  payable_aged_current: {
+    meaning: 'Owed to vendors but not yet due.',
+    readsFrom: 'Payable rows whose due date is on or after the report date.',
+  },
+  payable_aged_1_30: {
+    meaning: 'Vendor invoices between one and thirty days overdue.',
+    readsFrom: 'Payable rows aged against the report date.',
+  },
+  payable_aged_31_60: {
+    meaning: 'Vendor invoices between thirty-one and sixty days overdue.',
+    readsFrom: 'Payable rows aged against the report date.',
+  },
+  payable_aged_61_90: {
+    meaning: 'Vendor invoices between sixty-one and ninety days overdue.',
+    readsFrom: 'Payable rows aged against the report date.',
+  },
+  payable_aged_91_120: {
+    meaning: 'Vendor invoices between ninety-one and a hundred and twenty days overdue.',
+    readsFrom: 'Payable rows aged against the report date.',
+  },
+  payable_aged_120_plus: {
+    meaning: 'Vendor invoices more than a hundred and twenty days overdue — the ones that damage a relationship.',
+    readsFrom: 'Payable rows aged against the report date.',
+  },
+  total_owed: {
+    meaning: 'Everything the company owes: vendors, certified construction, and committed payments.',
+    readsFrom: 'Derived: Accounts Payable plus BOQ Outstanding plus Pending Expense. The denominator of both liquidity ratios.',
+  },
   net_financial_position: {
     meaning: 'What the company would be worth in cash terms if everything due settled today.',
     readsFrom: 'Derived: available cash plus accrued income less total outstanding expense.',

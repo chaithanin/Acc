@@ -165,9 +165,24 @@ export type NormalizedRecord =
   | CashflowRecord
   | GlRecord;
 
+export interface PayableRecord extends NormalizedBase {
+  kind: 'payable';
+  vendor: string | null;
+  invoiceNo: string | null;
+  description: string | null;
+  category: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  invoiceAmount: number;
+  paidAmount: number;
+  /** What the file says is left. Recomputed rather than trusted. */
+  statedOutstanding: number | null;
+}
+
 export interface NormalizedDataset {
   bank: BankRecord[];
   receivable: ReceivableRecord[];
+  payable: PayableRecord[];
   income: IncomeRecord[];
   expense: ExpenseRecord[];
   boq: BoqRecord[];
@@ -177,19 +192,34 @@ export interface NormalizedDataset {
 }
 
 export function emptyDataset(): NormalizedDataset {
-  return { bank: [], receivable: [], income: [], expense: [], boq: [], wip: [], cashflow: [], gl: [] };
+  return {
+    bank: [], receivable: [], payable: [], income: [], expense: [],
+    boq: [], wip: [], cashflow: [], gl: [],
+  };
 }
 
+/**
+ * Combines two datasets.
+ *
+ * Each list is defaulted rather than spread blind: a dataset assembled by hand
+ * — a test fixture, a script, a parser written before a record kind existed —
+ * is missing that key rather than carrying an empty list, and spreading
+ * `undefined` throws in the middle of an import transaction.
+ */
 export function mergeDatasets(a: NormalizedDataset, b: NormalizedDataset): NormalizedDataset {
+  const both = <K extends keyof NormalizedDataset>(key: K): NormalizedDataset[K] =>
+    [...(a[key] ?? []), ...(b[key] ?? [])] as NormalizedDataset[K];
+
   return {
-    bank: [...a.bank, ...b.bank],
-    receivable: [...a.receivable, ...b.receivable],
-    income: [...a.income, ...b.income],
-    expense: [...a.expense, ...b.expense],
-    boq: [...a.boq, ...b.boq],
-    wip: [...a.wip, ...b.wip],
-    cashflow: [...a.cashflow, ...b.cashflow],
-    gl: [...a.gl, ...b.gl],
+    bank: both('bank'),
+    receivable: both('receivable'),
+    payable: both('payable'),
+    income: both('income'),
+    expense: both('expense'),
+    boq: both('boq'),
+    wip: both('wip'),
+    cashflow: both('cashflow'),
+    gl: both('gl'),
   };
 }
 

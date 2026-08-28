@@ -63,6 +63,7 @@ export const COMPANY_SCOPED_TABLES = [
   'income_records',
   'expense_records',
   'receivable_records',
+  'payable_records',
   'boq_records',
   'wip_records',
   'gl_entries',

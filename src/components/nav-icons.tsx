@@ -144,6 +144,13 @@ export const NAV_ICONS: Record<string, React.ReactNode> = {
       <path d="M16 4.5a3.5 3.5 0 010 7M18 20c0-2.2-.9-4.2-2.3-5.6" />
     </svg>
   ),
+  '/payable': (
+    <svg {...base}>
+      <path d="M3.5 7.5h17v11h-17z" />
+      <path d="M3.5 11h17" />
+      <path d="M7 15h4" />
+    </svg>
+  ),
   '/settings/audit': (
     <svg {...base}>
       <path d="M5 3.5h9l5 5v12H5z" />

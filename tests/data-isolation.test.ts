@@ -60,6 +60,7 @@ function dataset(projectId: string, file: string, amount: number): NormalizedDat
   return {
     bank: [{ kind: 'bank', ...base, bankName: 'Test Bank', accountNo: '1', currentAmount: amount, pendingExpense: 0 }],
     // Two, so a limited drill-down genuinely has something left over.
+    payable: [],
     receivable: [
       {
         kind: 'receivable', ...base, category: 'contract', customer: 'Buyer', unit: 'A-1',

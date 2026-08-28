@@ -82,7 +82,8 @@ describe('the golden workbook', () => {
     // normalizer started rejecting rows it used to accept.
     assert.deepEqual(
       Object.fromEntries(Object.entries(parsed.data).map(([k, v]) => [k, v.length])),
-      { bank: 2, receivable: 4, income: 0, expense: 4, boq: 2, wip: 2, cashflow: 0, gl: 0 },
+      // This workbook carries no vendor payable sheet.
+      { bank: 2, receivable: 4, payable: 0, income: 0, expense: 4, boq: 2, wip: 2, cashflow: 0, gl: 0 },
     );
 
     assert.deepEqual(parsed.issues, [], 'the workbook should parse without issues');
@@ -173,6 +174,21 @@ const EXPECTED: Record<string, number | null> = {
 
   // Position: 7M certified-unpaid + 2.2M pending.
   total_outstanding_expense: 9_200_000,
+
+  // Accounts payable. No vendor sheet in this workbook, so nothing is owed to
+  // a vendor and the whole obligation is construction and pending payments.
+  payable_invoiced: 0,
+  payable_paid: 0,
+  accounts_payable: 0,
+  payable_overdue: 0,
+  payable_undated: 0,
+  payable_aged_current: 0,
+  payable_aged_1_30: 0,
+  payable_aged_31_60: 0,
+  payable_aged_61_90: 0,
+  payable_aged_91_120: 0,
+  payable_aged_120_plus: 0,
+  total_owed: 9_200_000,
   // 27.8M cash + 5.1M receivable − 9.2M owed.
   net_financial_position: 23_700_000,
 

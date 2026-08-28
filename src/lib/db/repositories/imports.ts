@@ -388,6 +388,20 @@ function persistRecords(
     count += 1;
   }
 
+  const payable = db.prepare(
+    `INSERT INTO payable_records
+       (id, snapshot_id, import_id, project_id, company_id, report_date, vendor, invoice_no,
+        description, category, invoice_date, due_date, invoice_amount, paid_amount,
+        stated_outstanding, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const r of data.payable) {
+    payable.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate,
+      r.vendor, r.invoiceNo, r.description, r.category, r.invoiceDate, r.dueDate,
+      r.invoiceAmount, r.paidAmount, r.statedOutstanding, refIdOf(r.sourceRefIndex));
+    count += 1;
+  }
+
   const income = db.prepare(
     `INSERT INTO income_records
        (id, snapshot_id, import_id, project_id, company_id, report_date, category, description, month,

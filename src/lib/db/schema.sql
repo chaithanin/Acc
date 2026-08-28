@@ -366,6 +366,38 @@ CREATE TABLE IF NOT EXISTS boq_records (
 CREATE INDEX IF NOT EXISTS idx_boq_snapshot ON boq_records(snapshot_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_boq_month ON boq_records(snapshot_id, month);
 
+-- Accounts payable.
+--
+-- The liquidity ratios used to divide by certified-but-unpaid construction
+-- plus pending bank payments, and called the result Accounts Payable. That is
+-- a real obligation and it is not the company's payables: it says nothing
+-- about a vendor invoice sitting unpaid, when it falls due, or how far past
+-- due it already is.
+CREATE TABLE IF NOT EXISTS payable_records (
+  id              TEXT PRIMARY KEY,
+  snapshot_id     TEXT NOT NULL REFERENCES financial_snapshots(id) ON DELETE CASCADE,
+  import_id       TEXT NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+  project_id      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  company_id      TEXT REFERENCES companies(id),
+  report_date     TEXT NOT NULL,
+  vendor          TEXT,
+  invoice_no      TEXT,
+  description     TEXT,
+  category        TEXT,
+  /* When the invoice was raised, and when it falls due. */
+  invoice_date    TEXT,
+  due_date        TEXT,
+  invoice_amount  NUMERIC NOT NULL DEFAULT 0,
+  paid_amount     NUMERIC NOT NULL DEFAULT 0,
+  /* What the file itself states is left. Recomputed rather than trusted, and
+     compared with the recomputation as a reconciliation check. */
+  stated_outstanding NUMERIC,
+  source_ref_id   TEXT REFERENCES source_references(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payable_snapshot ON payable_records(snapshot_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_payable_vendor ON payable_records(snapshot_id, vendor);
+CREATE INDEX IF NOT EXISTS idx_payable_due ON payable_records(snapshot_id, due_date);
+
 CREATE TABLE IF NOT EXISTS wip_records (
   id              TEXT PRIMARY KEY,
   snapshot_id     TEXT NOT NULL REFERENCES financial_snapshots(id) ON DELETE CASCADE,

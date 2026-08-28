@@ -12,6 +12,7 @@ export type ReportType =
   | 'financial_report'
   | 'bank_statement'
   | 'receivable'
+  | 'payable'
   | 'wip'
   | 'boq'
   | 'cashflow'
@@ -26,6 +27,7 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   financial_report: 'Financial Report',
   bank_statement: 'Bank Statement',
   receivable: 'Customer Receivable',
+  payable: 'Accounts Payable',
   wip: 'Work In Progress',
   boq: 'BOQ / Construction',
   cashflow: 'Cash Flow Forecast',
@@ -68,6 +70,23 @@ export const SHEET_RULES: SheetRule[] = [
     ],
     signatureFields: ['bank_current_amount', 'pending_expense'],
     weight: 1.15,
+  },
+  {
+    // Vendor payables. Kept above the receivable rule and given a little more
+    // weight, because a payable sheet says "เจ้าหนี้" where a receivable sheet
+    // says "ลูกหนี้" and the two differ by one character — a misclassification
+    // here would put money the company owes into the money it is owed.
+    type: 'payable',
+    namePatterns: [
+      'payable', 'accounts payable', 'ap aging', 'ap ageing', 'vendor',
+      'เจ้าหนี้', 'เจ้าหนี้การค้า', 'ค้างจ่าย', 'ใบวางบิล',
+    ],
+    headerKeywords: [
+      'vendor', 'supplier', 'invoice no', 'invoice date', 'invoice amount',
+      'เจ้าหนี้', 'ผู้ขาย', 'ผู้จำหน่าย', 'เลขที่ใบแจ้งหนี้', 'ยอดคงค้าง',
+    ],
+    signatureFields: ['invoice_amount', 'invoice_no'],
+    weight: 1.2,
   },
   {
     type: 'receivable',

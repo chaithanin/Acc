@@ -3,7 +3,7 @@ import type { IncomeCategory } from '@/config/field-synonyms';
 import { formatTHB } from '@/lib/format/number';
 import type { Metric, MetricInput, MetricSection, NormalizedDataset } from '@/lib/types';
 import { addSums, dedupe, round2, sumBy, type Sum } from './aggregate';
-import { ageReceivables, bucketKey } from './ageing';
+import { ageReceivables, agePayables, bucketKey } from './ageing';
 import {
   projectCashflow,
   projectionRefIndexes,
@@ -505,7 +505,7 @@ export function calculateMetrics(
       // not foot to the receivable balance.
       formula: 'SUM(Contractual − Received) on rows whose file carries no due date',
       inputs: [plain('Records', ageing.undatedCount), plain('Amount', ageing.undated)],
-      refIndexes: [],
+      refIndexes: ageing.undatedRefIndexes,
     }),
     metric({
       key: 'receivable_oldest_days',
@@ -521,6 +521,87 @@ export function calculateMetrics(
       refIndexes: [],
     }),
   );
+
+  // -------------------------------------------------------------- payable
+  //
+  // What the company owes its vendors. Until this existed the liquidity ratios
+  // divided by certified-but-unpaid construction and called it Accounts
+  // Payable — a real obligation, but not one that says whether an invoice is
+  // sitting unpaid or how far past due it is.
+  const payableInvoiced = sumBy(data.payable, (r) => r.invoiceAmount);
+  const payablePaid = sumBy(data.payable, (r) => r.paidAmount);
+  const payableOutstanding = round2(payableInvoiced.value - payablePaid.value);
+  const payableAgeing = agePayables(data.payable, reportDate);
+
+  metrics.push(
+    metric({
+      key: 'payable_invoiced',
+      label: 'Vendor Invoices',
+      section: 'expense',
+      value: payableInvoiced.value,
+      formula: 'SUM(Invoice Amount) across payable records',
+      inputs: [input('Payable records', payableInvoiced)],
+      refIndexes: payableInvoiced.refIndexes,
+    }),
+    metric({
+      key: 'payable_paid',
+      label: 'Vendor Invoices Paid',
+      section: 'expense',
+      value: payablePaid.value,
+      formula: 'SUM(Paid Amount) across payable records',
+      inputs: [input('Payable records', payablePaid)],
+      refIndexes: payablePaid.refIndexes,
+    }),
+    metric({
+      key: 'accounts_payable',
+      label: 'Accounts Payable',
+      section: 'position',
+      value: payableOutstanding,
+      formula: 'SUM(Invoice Amount − Paid Amount) across payable records',
+      inputs: [input('Invoiced', payableInvoiced), input('Paid', payablePaid)],
+      refIndexes: [...payableInvoiced.refIndexes, ...payablePaid.refIndexes],
+    }),
+    metric({
+      key: 'payable_overdue',
+      label: 'Overdue Payable',
+      section: 'position',
+      value: payableAgeing.overdue,
+      formula: `SUM(Invoice − Paid) where the due date is before ${reportDate}`,
+      inputs: [
+        plain('Overdue', payableAgeing.overdue),
+        plain('Total unpaid', payableAgeing.total),
+      ],
+      refIndexes: payableAgeing.buckets.flatMap((b) => (b.from > 0 ? b.refIndexes : [])),
+    }),
+    metric({
+      key: 'payable_undated',
+      label: 'Payable With No Due Date',
+      section: 'position',
+      value: payableAgeing.undated,
+      formula: 'SUM(Invoice − Paid) on rows whose file carries no due date',
+      inputs: [plain('Records', payableAgeing.undatedCount)],
+      refIndexes: payableAgeing.undatedRefIndexes,
+    }),
+  );
+
+  for (const bucket of payableAgeing.buckets) {
+    metrics.push(
+      metric({
+        key: `payable_aged_${bucketKey(bucket.label)}`,
+        label: `Payable ${bucket.label}`,
+        section: 'position',
+        value: bucket.amount,
+        formula:
+          bucket.to === null
+            ? `SUM(Invoice − Paid) where the due date is more than ${bucket.from - 1} days before ${reportDate}`
+            : bucket.from <= 0
+              ? `SUM(Invoice − Paid) where the due date is on or after ${reportDate}`
+              : `SUM(Invoice − Paid) where the due date is ${bucket.from}–${bucket.to} days before ${reportDate}`,
+        inputs: [plain('Records', bucket.count), plain('Amount', bucket.amount)],
+        refIndexes: bucket.refIndexes,
+      }),
+    );
+  }
 
   // -------------------------------------------------------------- position
   const outstandingExpense = round2(boqOutstanding + pendingExpense.value);
@@ -836,13 +917,32 @@ export function calculateMetrics(
   );
 
   // ------------------------------------------------------------ liquidity
+  //
+  // The denominator is what the company owes: vendor invoices unpaid, plus
+  // construction certified and not yet paid for, plus payments committed and
+  // not yet made. It used to be the last two alone, labelled Accounts Payable,
+  // which flattered any month with light certification and said nothing about
+  // an invoice sitting on someone's desk.
+  //
   // Both ratios are undefined without payables to divide by, so they report
   // null rather than infinity.
-  const payables = outstandingExpense;
+  const payables = round2(payableOutstanding + outstandingExpense);
   const quickAssets = round2(availableCash + totalReceivableOutstanding);
   const currentAssets = round2(quickAssets + advanceOutstanding.value + wipYtd.value);
 
   metrics.push(
+    metric({
+      key: 'total_owed',
+      label: 'Total Owed',
+      section: 'position',
+      value: payables,
+      formula: 'Accounts Payable + certified construction unpaid + pending payments',
+      inputs: [
+        plain('Accounts Payable', payableOutstanding),
+        plain('Certified construction unpaid + pending', outstandingExpense),
+      ],
+      refIndexes: [...payableInvoiced.refIndexes, ...boqToDate.refIndexes],
+    }),
     metric({
       key: 'quick_ratio',
       label: 'Quick Ratio',
@@ -852,11 +952,13 @@ export function calculateMetrics(
       formula:
         payables === 0
           ? 'Not calculable — there are no payables to divide by'
-          : '(Available Cash + Accounts Receivable) ÷ Accounts Payable',
+          : '(Available Cash + Accounts Receivable) ÷ (Accounts Payable + certified construction unpaid + pending payments)',
       inputs: [
         plain('Available Cash', availableCash),
         plain('Accounts Receivable', totalReceivableOutstanding),
-        plain('Accounts Payable', payables),
+        plain('Accounts Payable', payableOutstanding),
+        plain('Certified construction unpaid + pending', outstandingExpense),
+        plain('Total owed', payables),
       ],
       refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
     }),
@@ -869,13 +971,15 @@ export function calculateMetrics(
       formula:
         payables === 0
           ? 'Not calculable — there are no payables to divide by'
-          : '(Available Cash + Accounts Receivable + Advances + Work In Progress) ÷ Accounts Payable',
+          : '(Available Cash + Accounts Receivable + Advances + Work In Progress) ÷ (Accounts Payable + certified construction unpaid + pending payments)',
       inputs: [
         plain('Available Cash', availableCash),
         plain('Accounts Receivable', totalReceivableOutstanding),
         plain('Advances & Deposits', advanceOutstanding.value),
         plain('Work In Progress', wipYtd.value),
-        plain('Accounts Payable', payables),
+        plain('Accounts Payable', payableOutstanding),
+        plain('Certified construction unpaid + pending', outstandingExpense),
+        plain('Total owed', payables),
       ],
       refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
     }),

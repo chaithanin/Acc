@@ -29,6 +29,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { href: '/', label: 'Executive Overview', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/projects', label: 'Project Dashboard', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/receivable', label: 'Receivable', roles: ['admin', 'finance', 'management', 'viewer'] },
+      { href: '/payable', label: 'Payable', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/boq', label: 'BOQ / Construction', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/cashflow', label: 'Cash Flow Forecast', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/ledger', label: 'Ledger & Advances', roles: ['admin', 'finance', 'management', 'viewer'] },

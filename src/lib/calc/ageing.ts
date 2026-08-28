@@ -1,5 +1,5 @@
 import { POLICY } from '@/config/accounting-policy';
-import type { ReceivableRecord } from '@/lib/types';
+import type { PayableRecord, ReceivableRecord } from '@/lib/types';
 import { round2 } from './aggregate';
 
 /**
@@ -34,6 +34,8 @@ export interface AgeingResult {
   /** Outstanding with no due date in the file — aged nowhere, reported here. */
   undated: number;
   undatedCount: number;
+  /** The rows that could not be aged, so the figure can be opened like any other. */
+  undatedRefIndexes: number[];
   /** The oldest overdue item, in days. Null when nothing is overdue. */
   oldestDays: number | null;
 }
@@ -62,6 +64,7 @@ export function ageReceivables(rows: ReceivableRecord[], reportDate: string): Ag
   let overdue = 0;
   let undated = 0;
   let undatedCount = 0;
+  const undatedRefIndexes: number[] = [];
   let oldestDays: number | null = null;
 
   for (const row of rows) {
@@ -73,16 +76,22 @@ export function ageReceivables(rows: ReceivableRecord[], reportDate: string): Ag
 
     total += outstanding;
 
-    if (!row.dueDate) {
+    const noteUndated = () => {
       undated += outstanding;
       undatedCount += 1;
+      if (row.sourceRefIndex !== undefined && row.sourceRefIndex >= 0) {
+        undatedRefIndexes.push(row.sourceRefIndex);
+      }
+    };
+
+    if (!row.dueDate) {
+      noteUndated();
       continue;
     }
 
     const daysPastDue = daysBetween(row.dueDate, reportDate);
     if (daysPastDue === null) {
-      undated += outstanding;
-      undatedCount += 1;
+      noteUndated();
       continue;
     }
 
@@ -109,6 +118,7 @@ export function ageReceivables(rows: ReceivableRecord[], reportDate: string): Ag
     overdue: round2(overdue),
     undated: round2(undated),
     undatedCount,
+    undatedRefIndexes,
     oldestDays,
   };
 }
@@ -128,4 +138,32 @@ export function ageingFoots(result: AgeingResult, tolerance = POLICY.roundingTol
 /** A key safe to put in a metric name: "1–30" becomes "1_30". */
 export function bucketKey(label: string): string {
   return label.toLowerCase().replace(/[–—-]/g, '_').replace(/\+/g, '_plus').replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * The same ageing, on the other side of the ledger.
+ *
+ * A payable ages from the date the invoice falls due, and the identity is the
+ * same: every bucket plus everything that cannot be aged must equal the total
+ * unpaid. Overdue here is money the company has already had the benefit of and
+ * has not paid for.
+ */
+export function agePayables(rows: PayableRecord[], reportDate: string): AgeingResult {
+  return ageReceivables(
+    rows.map((r) => ({
+      kind: 'receivable' as const,
+      sourceRef: r.sourceRef,
+      sourceRefIndex: r.sourceRefIndex,
+      projectId: r.projectId,
+      projectLabel: r.projectLabel,
+      category: 'contract' as const,
+      customer: r.vendor,
+      unit: r.invoiceNo,
+      contractualAmount: r.invoiceAmount,
+      receiveAmount: r.paidAmount,
+      accrueAmount: r.invoiceAmount - r.paidAmount,
+      dueDate: r.dueDate,
+    })),
+    reportDate,
+  );
 }

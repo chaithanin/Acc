@@ -235,6 +235,71 @@ export interface ReceivableTableRow {
   sourceCell: string | null;
 }
 
+export interface PayableTableRow {
+  projectName: string | null;
+  vendor: string | null;
+  invoiceNo: string | null;
+  description: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  /** Days past due on the report date. Negative means not yet due. */
+  daysPastDue: number | null;
+  invoice: number;
+  paid: number;
+  outstanding: number;
+  /** What the file itself said was left, where it said. */
+  stated: number | null;
+  sourceFile: string | null;
+  sourceSheet: string | null;
+  sourceCell: string | null;
+}
+
+/**
+ * The payables ledger, oldest debt first.
+ *
+ * Ordered by how overdue each invoice is rather than by size, because the
+ * question this table answers is which vendor has been waiting longest — a
+ * small invoice ninety days late does more damage to a relationship than a
+ * large one that is not due yet.
+ */
+export function getPayableRows(scope: DataScope): PayableTableRow[] {
+  const db = getDb();
+  const { where, params: args } = scopeClause(scope, 't');
+  const sql = `
+    SELECT p.name AS project_name, t.vendor, t.invoice_no, t.description,
+           t.invoice_date, t.due_date, t.report_date,
+           t.invoice_amount, t.paid_amount, t.stated_outstanding,
+           CASE WHEN t.due_date IS NULL THEN NULL
+                ELSE CAST(julianday(t.report_date) - julianday(t.due_date) AS INTEGER)
+           END AS days_past_due,
+           sr.source_file, sr.source_sheet, sr.source_cell
+      FROM payable_records t
+      LEFT JOIN projects p ON p.id = t.project_id
+      LEFT JOIN source_references sr ON sr.id = t.source_ref_id
+     WHERE ${where}
+     ORDER BY days_past_due DESC NULLS LAST, t.invoice_amount DESC`;
+
+  return db
+    .prepare<string[], any>(sql)
+    .all(...args)
+    .map((row) => ({
+      projectName: row.project_name,
+      vendor: row.vendor,
+      invoiceNo: row.invoice_no,
+      description: row.description,
+      invoiceDate: row.invoice_date,
+      dueDate: row.due_date,
+      daysPastDue: row.days_past_due,
+      invoice: row.invoice_amount ?? 0,
+      paid: row.paid_amount ?? 0,
+      outstanding: (row.invoice_amount ?? 0) - (row.paid_amount ?? 0),
+      stated: row.stated_outstanding,
+      sourceFile: row.source_file,
+      sourceSheet: row.source_sheet,
+      sourceCell: row.source_cell,
+    }));
+}
+
 export function getReceivableRows(scope: DataScope): ReceivableTableRow[] {
   const db = getDb();
   const { where, params: args } = scopeClause(scope, 't');
