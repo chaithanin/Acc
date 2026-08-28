@@ -1,6 +1,11 @@
 import { cookies } from 'next/headers';
 import { getDb, newId, nowIso } from '@/lib/db';
-import { companyForUser, type Company } from '@/lib/db/repositories/companies';
+import {
+  companiesForUser,
+  companyForUser,
+  countActiveCompanies,
+  type Company,
+} from '@/lib/db/repositories/companies';
 import { canSignIn, findUserById, findUserByEmail, verifyPassword } from '@/lib/db/repositories/users';
 import {
   clearFailures,
@@ -122,6 +127,7 @@ interface SessionRow {
   user_id: string;
   expires_at: string;
   active_company_id: string | null;
+  group_mode: number;
 }
 
 /** The live session row, or null when signed out, lapsed, or barred. */
@@ -132,7 +138,7 @@ async function currentSession(): Promise<{ id: string; row: SessionRow; user: Us
 
   const row = getDb()
     .prepare<[string], SessionRow>(
-      'SELECT user_id, expires_at, active_company_id FROM auth_sessions WHERE id = ?',
+      'SELECT user_id, expires_at, active_company_id, group_mode FROM auth_sessions WHERE id = ?',
     )
     .get(sessionId);
 
@@ -171,6 +177,47 @@ export async function activeCompany(): Promise<Company | null> {
 }
 
 /**
+ * Whether this session is looking at the whole group.
+ *
+ * Re-checked against the user's grants on every request, exactly as the single
+ * company is: a group view is only a group view if the reader may open every
+ * company in it, and someone whose grants were reduced while they were signed
+ * in must stop seeing the group at once.
+ */
+export async function isGroupView(): Promise<boolean> {
+  const session = await currentSession();
+  if (!session?.row.group_mode) return false;
+  return await canSeeGroup(session.user.id);
+}
+
+/**
+ * Whether this user may look at the group.
+ *
+ * Every active company, and more than one of them. Someone granted a single
+ * company has no group to see, and someone granted five of six would read a
+ * "group" total that is not the group's — which is worse than no total at all,
+ * because nothing on the page would say what was missing.
+ */
+export async function canSeeGroup(userId: string): Promise<boolean> {
+  const granted = companiesForUser(userId).length;
+  if (granted < 2) return false;
+  return granted === countActiveCompanies();
+}
+
+/** Puts this session into the group view, or refuses. */
+export async function setGroupView(): Promise<boolean> {
+  const session = await currentSession();
+  if (!session) return false;
+  if (!(await canSeeGroup(session.user.id))) return false;
+
+  getDb()
+    .prepare('UPDATE auth_sessions SET group_mode = 1, active_company_id = NULL WHERE id = ?')
+    .run(session.id);
+
+  return true;
+}
+
+/**
  * Chooses the company for this session.
  *
  * Refuses a company the user has no grant for, so the choice cannot be made by
@@ -185,7 +232,7 @@ export async function setActiveCompany(companyId: string): Promise<Company | nul
   if (!company) return null;
 
   getDb()
-    .prepare('UPDATE auth_sessions SET active_company_id = ? WHERE id = ?')
+    .prepare('UPDATE auth_sessions SET active_company_id = ?, group_mode = 0 WHERE id = ?')
     .run(company.id, session.id);
 
   return company;
@@ -197,7 +244,7 @@ export async function clearActiveCompany(): Promise<void> {
   if (!session) return;
 
   getDb()
-    .prepare('UPDATE auth_sessions SET active_company_id = NULL WHERE id = ?')
+    .prepare('UPDATE auth_sessions SET active_company_id = NULL, group_mode = 0 WHERE id = ?')
     .run(session.id);
 }
 

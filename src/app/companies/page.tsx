@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { clearActiveCompany, currentUser, setActiveCompany } from '@/lib/auth';
+import { canSeeGroup, clearActiveCompany, currentUser, setActiveCompany, setGroupView } from '@/lib/auth';
 import { companiesForUser } from '@/lib/db/repositories/companies';
 import { CompanyLogo } from './company-logo';
 import styles from './companies.module.css';
@@ -27,6 +27,16 @@ export default async function SelectCompanyPage({
 
   const { error } = await searchParams;
   const companies = companiesForUser(user.id);
+  // Offered only to someone who can open every company: a group total missing
+  // a subsidiary is worse than none, because nothing on the page would say
+  // what was left out.
+  const groupAvailable = await canSeeGroup(user.id);
+
+  async function chooseGroup() {
+    'use server';
+    if (!(await setGroupView())) redirect('/companies?error=denied');
+    redirect('/group');
+  }
 
   async function chooseCompany(formData: FormData) {
     'use server';
@@ -47,9 +57,26 @@ export default async function SelectCompanyPage({
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">Welcome</h1>
           <p className="mt-2 text-ink-secondary">
-            Select a company to access the Financial Dashboard.
+            Select a company to access the Financial Dashboard
+            {groupAvailable ? ', or open the group.' : '.'}
           </p>
         </div>
+
+        {groupAvailable ? (
+          <form action={chooseGroup} className="mx-auto mb-8 max-w-md">
+            <button
+              type="submit"
+              className="w-full rounded-[var(--radius-card)] border border-accent/40 bg-accent/5 px-5 py-4 text-left transition hover:bg-accent/10"
+            >
+              <span className="block text-sm font-semibold text-ink">
+                All {companies.length} companies
+              </span>
+              <span className="mt-0.5 block text-sm text-ink-secondary">
+                Consolidated, with trade between the companies eliminated.
+              </span>
+            </button>
+          </form>
+        ) : null}
 
         {error ? (
           <p className="mx-auto mb-6 max-w-md rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-center text-sm text-critical">

@@ -95,6 +95,21 @@ export function companyByCodeForUser(userId: string, code: string): Company | nu
 }
 
 /** Every company, for administration screens only. */
+/**
+ * How many companies are live.
+ *
+ * The group view is only offered to someone who can open all of them: a
+ * "group" total missing a subsidiary is worse than none, because nothing on
+ * the page would say what was left out.
+ */
+export function countActiveCompanies(): number {
+  return (
+    getDb()
+      .prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM companies WHERE active = 1')
+      .get()?.n ?? 0
+  );
+}
+
 export function listAllCompanies(includeInactive = true): Company[] {
   return getDb()
     .prepare<[], CompanyRow>(

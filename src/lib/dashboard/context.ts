@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { redirect } from 'next/navigation';
-import { activeCompany } from '@/lib/auth';
+import { activeCompany, isGroupView } from '@/lib/auth';
 import { compareMetrics } from '@/lib/compare';
 import { listProjects } from '@/lib/db/repositories/projects';
 import {
@@ -29,7 +29,10 @@ export async function loadDashboard(filters: DashboardFilters): Promise<Dashboar
   // cannot be pointed at another company by editing a URL, and no caller can
   // forget to pass it.
   const company = await activeCompany();
-  if (!company) redirect('/companies');
+  // A session looking at the group has no company to scope by, and these pages
+  // read one company's snapshot. Sending it to the group page is better than
+  // rendering an empty dashboard that looks like a company with no data.
+  if (!company) redirect((await isGroupView()) ? '/group' : '/companies');
 
   // Scoped before anything is read, so a project outside this company is not
   // available to be selected, summed, or drilled into.

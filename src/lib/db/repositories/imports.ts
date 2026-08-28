@@ -1,4 +1,5 @@
 import { calculateMetrics } from '@/lib/calc/kpi';
+import { CounterpartyResolver } from '@/lib/consolidate/counterparty';
 import { filterByProject, indexSourceRefs, projectIdsIn } from '@/lib/calc/aggregate';
 import type { ParsedFileResult } from '@/lib/import/pipeline';
 import type { RawSheet } from '@/lib/excel/types';
@@ -361,6 +362,38 @@ function persistRecords(
       .map((r) => [r.id, r.company_id]),
   );
 
+  /**
+   * Who, inside the group, is on the other side of each transaction.
+   *
+   * Resolved once per import against every name the group knows its companies
+   * by. Almost always null — the great majority of trade is with the outside
+   * world — but without it a management fee between two subsidiaries would be
+   * counted in full on both sides of any group total.
+   */
+  const counterparties = new CounterpartyResolver(
+    db
+      .prepare<[], { id: string; company_code: string; legal_name: string; display_name: string }>(
+        'SELECT id, company_code, legal_name, display_name FROM companies',
+      )
+      .all()
+      .map((c) => ({
+        id: c.id,
+        companyCode: c.company_code,
+        legalName: c.legal_name,
+        displayName: c.display_name,
+        aliases: [],
+      })),
+  );
+
+  /** The counterparty for a row, seen from the company being imported into. */
+  const counterparty = (...names: (string | null | undefined)[]): string | null => {
+    for (const name of names) {
+      const found = counterparties.resolve(name, companyId);
+      if (found) return found;
+    }
+    return null;
+  };
+
   let count = 0;
 
   const bank = db.prepare(
@@ -378,13 +411,15 @@ function persistRecords(
   const receivable = db.prepare(
     `INSERT INTO receivable_records
        (id, snapshot_id, import_id, project_id, company_id, report_date, category, customer, unit,
-        contractual_amount, receive_amount, accrue_amount, computed_accrue, due_date, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        contractual_amount, receive_amount, accrue_amount, computed_accrue, due_date,
+        counterparty_company_id, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.receivable) {
     receivable.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.customer,
       r.unit, r.contractualAmount, r.receiveAmount, r.accrueAmount,
-      r.contractualAmount - r.receiveAmount, r.dueDate, refIdOf(r.sourceRefIndex));
+      r.contractualAmount - r.receiveAmount, r.dueDate,
+      counterparty(r.customer), refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
@@ -392,39 +427,41 @@ function persistRecords(
     `INSERT INTO payable_records
        (id, snapshot_id, import_id, project_id, company_id, report_date, vendor, invoice_no,
         description, category, invoice_date, due_date, invoice_amount, paid_amount,
-        stated_outstanding, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        stated_outstanding, counterparty_company_id, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.payable) {
     payable.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate,
       r.vendor, r.invoiceNo, r.description, r.category, r.invoiceDate, r.dueDate,
-      r.invoiceAmount, r.paidAmount, r.statedOutstanding, refIdOf(r.sourceRefIndex));
+      r.invoiceAmount, r.paidAmount, r.statedOutstanding,
+      counterparty(r.vendor, r.description), refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
   const income = db.prepare(
     `INSERT INTO income_records
        (id, snapshot_id, import_id, project_id, company_id, report_date, category, description, month,
-        contractual_amount, received_amount, accrued_amount, is_forecast, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        contractual_amount, received_amount, accrued_amount, is_forecast,
+        counterparty_company_id, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.income) {
     income.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.description,
       r.month, r.contractualAmount, r.receivedAmount, r.accruedAmount, toDbBool(r.isForecast),
-      refIdOf(r.sourceRefIndex));
+      counterparty(r.description), refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
   const expense = db.prepare(
     `INSERT INTO expense_records
        (id, snapshot_id, import_id, project_id, company_id, report_date, category, description, month,
-        amount, paid_amount, pending_amount, is_forecast, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        amount, paid_amount, pending_amount, is_forecast, counterparty_company_id, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.expense) {
     expense.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.category, r.description,
       r.month, r.amount, r.paidAmount, r.pendingAmount, toDbBool(r.isForecast),
-      refIdOf(r.sourceRefIndex));
+      counterparty(r.description), refIdOf(r.sourceRefIndex));
     count += 1;
   }
 
@@ -457,13 +494,14 @@ function persistRecords(
     `INSERT INTO gl_entries
        (id, snapshot_id, import_id, project_id, company_id, report_date, account_code, account_name,
         entry_date, voucher_no, vendor, description, cost_code, module, job,
-        debit, credit, balance, is_opening, source_ref_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        debit, credit, balance, is_opening, counterparty_company_id, source_ref_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const r of data.gl) {
     gl.run(newId(), snapshotId, importId, r.projectId, companyOf(r.projectId), reportDate, r.accountCode, r.accountName,
       r.entryDate, r.voucherNo, r.vendor, r.description, r.costCode, r.module, r.job,
-      r.debit, r.credit, r.balance, toDbBool(r.isOpeningBalance), refIdOf(r.sourceRefIndex));
+      r.debit, r.credit, r.balance, toDbBool(r.isOpeningBalance),
+      counterparty(r.vendor, r.description), refIdOf(r.sourceRefIndex));
     count += 1;
   }
 

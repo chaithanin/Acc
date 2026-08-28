@@ -21,12 +21,16 @@ interface NavItem {
   roles: Role[];
 }
 
+/** What is reachable while the session is looking at the group. */
+const GROUP_PAGES = new Set(['/group', '/account']);
+
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Dashboards',
     items: [
-      { href: '/financial', label: 'Financial Dashboard', roles: ['admin', 'finance', 'management', 'viewer'] },
+      { href: '/group', label: 'Group', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/', label: 'Executive Overview', roles: ['admin', 'finance', 'management', 'viewer'] },
+      { href: '/financial', label: 'Financial Dashboard', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/projects', label: 'Project Dashboard', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/receivable', label: 'Receivable', roles: ['admin', 'finance', 'management', 'viewer'] },
       { href: '/payable', label: 'Payable', roles: ['admin', 'finance', 'management', 'viewer'] },
@@ -69,12 +73,31 @@ export interface ActiveCompany {
 export function AppShell({
   user,
   company,
+  group = null,
   children,
 }: {
   user: User;
-  company: ActiveCompany;
+  /** Null when the session is looking at the group rather than one company. */
+  company: ActiveCompany | null;
+  group?: { companyCount: number } | null;
   children: React.ReactNode;
 }) {
+  // One shape for whatever this session is looking at, so the places that
+  // render it do not each have to know whether it is a company or the group.
+  const scope = company
+    ? {
+        initial: company.companyCode.slice(0, 1),
+        name: company.displayName,
+        code: company.companyCode,
+        detail: `${company.projectCount} ${company.projectCount === 1 ? 'project' : 'projects'}`,
+      }
+    : {
+        initial: 'G',
+        name: 'Group',
+        code: 'ALL',
+        detail: `${group?.companyCount ?? 0} companies, consolidated`,
+      };
+
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -116,34 +139,39 @@ export function AppShell({
             aria-hidden
             className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sidebar-active text-sm font-bold text-white"
           >
-            {company.companyCode.slice(0, 1)}
+            {scope.initial}
           </span>
           {collapsed ? null : (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold leading-tight text-sidebar-ink">
-                {company.displayName}
+                {scope.name}
               </p>
               <p className="mt-0.5 truncate text-[11px] text-sidebar-ink-muted">
-                {company.companyCode} · Financial Management
+                {scope.code} · Financial Management
               </p>
             </div>
           )}
         </div>
 
         <nav className="flex-1 px-2 py-3">
-          {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((item) => item.roles.includes(user.role));
+          {NAV_GROUPS.map((section) => {
+            const items = section.items
+              .filter((item) => item.roles.includes(user.role))
+              // The group view is a consolidation, not a company: the pages
+              // that read one company's snapshot have nothing to show while it
+              // is on, so they are not offered.
+              .filter((item) => !group || GROUP_PAGES.has(item.href));
             if (items.length === 0) return null;
 
             return (
-              <div key={group.title} className="mb-4">
+              <div key={section.title} className="mb-4">
                 {collapsed ? (
                   // A rule instead of a word: the grouping still reads, and a
                   // truncated label would read as a mistake.
                   <div className="mx-2 mb-2 border-t border-sidebar-border" />
                 ) : (
                   <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-ink-muted">
-                    {group.title}
+                    {section.title}
                   </p>
                 )}
                 {items.map((item) => {
@@ -213,11 +241,10 @@ export function AppShell({
           ) : (
             <div className="rounded-xl bg-sidebar-hover p-3">
               <p className="truncate text-xs font-medium text-sidebar-ink">
-                {company.displayName}
+                {scope.name}
               </p>
               <p className="mt-0.5 text-[11px] text-sidebar-ink-muted">
-                {company.projectCount}{' '}
-                {company.projectCount === 1 ? 'project' : 'projects'}
+                {scope.detail}
               </p>
               <Link
                 href="/companies"
@@ -255,7 +282,7 @@ export function AppShell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar user={user} company={company} onMenu={() => setMobileOpen(true)} />
+        <TopBar user={user} company={company} group={group} onMenu={() => setMobileOpen(true)} />
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
     </div>
@@ -265,10 +292,12 @@ export function AppShell({
 function TopBar({
   user,
   company,
+  group = null,
   onMenu,
 }: {
   user: User;
-  company: ActiveCompany;
+  company: ActiveCompany | null;
+  group?: { companyCount: number } | null;
   onMenu: () => void;
 }) {
   return (
@@ -296,13 +325,15 @@ function TopBar({
         title="Switch company"
       >
         <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-ink">{company.displayName}</span>
+          <span className="truncate text-sm font-semibold text-ink">
+            {company?.displayName ?? 'Group'}
+          </span>
           <span aria-hidden className="text-[10px] text-ink-muted">
             ▾
           </span>
         </span>
         <span className="block text-[11px] leading-tight text-ink-muted">
-          {company.companyCode}
+          {company?.companyCode ?? `${group?.companyCount ?? 0} companies`}
         </span>
       </Link>
 

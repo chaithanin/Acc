@@ -117,6 +117,7 @@ async function seed() {
   repos.budgets = await import('../src/lib/db/repositories/budgets.ts');
   repos.projectFinancials = await import('../src/lib/db/repositories/project-financials.ts');
   repos.templates = await import('../src/lib/db/repositories/templates.ts');
+  repos.group = await import('../src/lib/db/repositories/group.ts');
   const { bootstrapDatabase } = await import('../src/lib/db/bootstrap.ts');
 
   bootstrapDatabase();
@@ -178,6 +179,7 @@ async function seed() {
 
   const orphan = repos.users.createUser({ email: 'orphan@example.com', name: 'No companies', password: PASSWORD, role: 'finance' });
 
+
   // A company with a user and nothing else. Its screens are the test for
   // invented data: anything but zero on them was not read from a file.
   const emptyCo = repos.companies.createCompany({ companyCode: 'E2EEMPTY', legalName: 'E2EEMPTY Co Ltd' });
@@ -185,6 +187,13 @@ async function seed() {
     email: 'admin.e2eempty@example.com', name: 'admin of E2EEMPTY', password: PASSWORD, role: 'admin',
   });
   repos.companies.grantCompany(emptyAdmin.id, emptyCo.id);
+  // The group user holds every company there is — the two seeded here, the one
+  // with no import, and the six the bootstrap creates — because the group view
+  // is only offered to someone who can open all of them. A "group" missing a
+  // subsidiary is worse than none.
+  for (const company of repos.companies.listAllCompanies()) {
+    repos.companies.grantCompany(both.id, company.id);
+  }
 
   return {
     alpha, beta,
@@ -420,6 +429,29 @@ async function submitForm(page, who, { contains = [], fields = {}, expect } = {}
   };
 }
 
+/**
+ * Chooses a company, and insists it took.
+ *
+ * The chooser registers two actions — pick a company, or open the group — and
+ * a sweep that returns on the first one that does not error will sometimes
+ * pick the wrong one. The session row is the only proof that the right thing
+ * happened, so it is what is checked.
+ */
+async function selectCompany(who, companyId) {
+  return submit('/companies', { companyId }, who, {
+    // Checked against the session this cookie names, not against any session
+    // this user has: an earlier sign-in leaves its row behind, and a query on
+    // the user would be satisfied by a session the harness is no longer using.
+    expect: () => !!row(
+      `SELECT 1 AS ok FROM auth_sessions
+        WHERE id = ? AND active_company_id = ? AND group_mode = 0`,
+      sessionOf(who), companyId),
+  });
+}
+
+/** The session id this actor's cookie names. */
+const sessionOf = (who) => who?.cookies?.get('gtg_session') ?? '';
+
 /** Signs in through the real login form and keeps the session cookie. */
 async function login(who, password = PASSWORD) {
   who.cookies = new Map();
@@ -497,7 +529,7 @@ async function audit() {
   module_('M2 · Company selection');
   {
     const admin = alpha.people.admin;
-    const picked = await submit('/companies', { companyId: alpha.companyId }, admin);
+    const picked = await selectCompany(admin, alpha.companyId);
     check('choosing a company is accepted', picked.ok, picked.reason, 'Critical');
 
     const active = row('SELECT active_company_id FROM auth_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', admin.id);
@@ -507,15 +539,15 @@ async function audit() {
 
     for (const role of ROLES) {
       const who = alpha.people[role];
-      await submit('/companies', { companyId: alpha.companyId }, who);
+      await selectCompany(who, alpha.companyId);
     }
-    await submit('/companies', { companyId: beta.companyId }, beta.people.admin);
-    await submit('/companies', { companyId: beta.companyId }, beta.people.finance);
-    await submit('/companies', { companyId: alpha.companyId }, both);
+    await selectCompany(beta.people.admin, beta.companyId);
+    await selectCompany(beta.people.finance, beta.companyId);
+    await selectCompany(both, alpha.companyId);
 
     // A company the user has no grant for must not become active.
     const before = row('SELECT active_company_id AS c FROM auth_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', alpha.people.finance.id)?.c;
-    await submit('/companies', { companyId: beta.companyId }, alpha.people.finance);
+    await selectCompany(alpha.people.finance, beta.companyId);
     const after = row('SELECT active_company_id AS c FROM auth_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', alpha.people.finance.id)?.c;
     check('a company the user was never granted cannot be selected',
       after === before && after !== beta.companyId,
@@ -621,7 +653,7 @@ async function audit() {
     const gone = row('SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?', alpha.people.viewer.id);
     check('logout removed the session row', gone.n === 0, `${gone.n} sessions remain`, 'High');
     await login(alpha.people.viewer);
-    await submit('/companies', { companyId: alpha.companyId }, alpha.people.viewer);
+    await selectCompany(alpha.people.viewer, alpha.companyId);
   }
 
   // -------------------------------------------------------- M5 CRUD
@@ -743,7 +775,7 @@ async function audit() {
     const restored = await login(admin);
     check('the admin session is usable again after the password round trip',
       restored.signedIn, 'could not sign back in with the original password', 'Critical');
-    await submit('/companies', { companyId: alpha.companyId }, admin);
+    await selectCompany(admin, alpha.companyId);
     const scoped = await get('/', admin);
     check('the restored session is scoped to a company again',
       scoped.status < 400 && !streamedError(scoped.text),
@@ -952,7 +984,7 @@ async function audit() {
 
       // The audit's own session was replaced by the browser's work above.
       await login(admin);
-      await submit('/companies', { companyId: alpha.companyId }, admin);
+      await selectCompany(admin, alpha.companyId);
     }
   }
 
@@ -1131,7 +1163,7 @@ async function audit() {
   {
     const who = world.empty.admin;
     await login(who);
-    await submit('/companies', { companyId: world.empty.companyId }, who);
+    await selectCompany(who, world.empty.companyId);
 
     const EMPTY_TABLES = ['bank_balances', 'receivable_records', 'income_records', 'expense_records', 'calculated_metrics'];
     const records = EMPTY_TABLES.reduce(
@@ -1175,7 +1207,7 @@ async function audit() {
       'another company’s reports are listed', 'Critical');
 
     await login(admin);
-    await submit('/companies', { companyId: alpha.companyId }, admin);
+    await selectCompany(admin, alpha.companyId);
   }
 
   // ---------------------------- M13 every figure back to the records behind it
@@ -1187,7 +1219,7 @@ async function audit() {
   module_('M13 · Financial reconciliation');
   {
     await login(admin);
-    await submit('/companies', { companyId: alpha.companyId }, admin);
+    await selectCompany(admin, alpha.companyId);
 
     /** The stored KPI for this company's live snapshot, group level. */
     const stored = (key) => row(
@@ -1374,55 +1406,126 @@ async function audit() {
       `stored ${satang}`, 'Medium');
   }
 
-  // ---------------------------------- M14 the group, and what it cannot show
+  // ------------------------------------------------ M14 group consolidation
+  //
+  // The group total is a sum of per-company reads, each scoped the way every
+  // other read is. The checks below are in two halves: the arithmetic, and the
+  // guarantee that the sum never reaches a company the reader cannot open.
   module_('M14 · Group consolidation');
   {
-    // `both` is granted every company — the closest thing the system has to a
-    // group user, and the account a CEO would be given.
+    // `both` holds a grant for every company, which is what the group view
+    // requires. `admin` holds one, which is what it must refuse.
     const ceo = { ...both, cookies: new Map() };
     await login(ceo);
 
-    const grants = count('SELECT COUNT(*) AS n FROM user_companies WHERE user_id = ?', both.id);
-    check('a group user can be granted every company', grants >= 2, `${grants} grants`, 'High');
+    const activeCompanies = count('SELECT COUNT(*) AS n FROM companies WHERE active = 1');
+    const ceoGrants = count('SELECT COUNT(*) AS n FROM user_companies WHERE user_id = ?', both.id);
 
-    // Choosing a company is mandatory: there is no "all companies" option.
     const chooser = await get('/companies', ceo);
-    check('the company chooser offers no group or all-companies view',
-      !/all compan|group view|consolidat/i.test(chooser.text),
-      'a group option appeared — this check needs updating', 'Improvement');
-
-    await submit('/companies', { companyId: alpha.companyId }, ceo);
-    const dash = await get('/', ceo);
-    check('the dashboard shows one company at a time', dash.status < 400,
-      `status ${dash.status}`, 'High');
-
-    // The figures a CEO would need added together, as the system holds them:
-    // one row per company, and never a row for the group.
-    const cashRows = all(
-      `SELECT company_id, value FROM calculated_metrics
-        WHERE metric_key = 'bank_current_amount' AND project_id IS NULL`);
-
-    check('every cash figure belongs to exactly one company',
-      cashRows.length > 0 && cashRows.every((r) => !!r.company_id),
-      `${cashRows.length} cash figures, ${cashRows.filter((r) => !r.company_id).length} without a company`,
+    const offered = /Consolidated, with trade between the companies eliminated/.test(chooser.text);
+    check('the group is offered to a user who can open every company',
+      offered || ceoGrants < activeCompanies,
+      `granted ${ceoGrants} of ${activeCompanies} active companies, chooser ${offered ? 'offers' : 'does not offer'} the group`,
       'High');
 
-    // FIN-08. Nothing anywhere adds them up.
-    const groupTotal = round2(cashRows.reduce((sum, r) => sum + (r.value ?? 0), 0));
-    check('a group total exists somewhere in the system',
-      cashRows.some((r) => !r.company_id),
-      `no metric row is stored without a company, and no page renders more than one company at a `
-      + `time; group cash of ${groupTotal} across ${cashRows.length} live company figures is a total `
-      + 'the CEO must add up by hand from as many dashboards as the group has companies', 'High');
+    // --- a user granted one company is not offered a "group" of one
+    const single = { ...alpha.people.admin, cookies: new Map() };
+    await login(single);
+    const singleChooser = await get('/companies', single);
+    check('a user granted one company is not offered a group',
+      !/Consolidated, with trade between the companies eliminated/.test(singleChooser.text),
+      'the group was offered to someone who cannot see all of it', 'Critical');
 
-    // Intercompany: nothing marks a transaction as being with another company.
-    const interco = all(
-      "SELECT name FROM pragma_table_info('gl_entries') WHERE name LIKE '%interco%' OR name LIKE '%counterparty%'");
-    check('intercompany transactions can be identified and eliminated',
-      interco.length > 0,
-      'no column on any record marks a counterparty inside the group, so an intercompany loan, a '
-      + 'management fee or a shared cost would be counted in full in both companies if a group '
-      + 'total were ever produced', 'High');
+    const forced = await submit('/companies', {}, single);
+    const forcedPage = await get('/group', single);
+    check('and cannot reach the group page by asking for it',
+      forcedPage.status === 307 && forcedPage.location === '/companies',
+      `status ${forcedPage.status}, location ${forcedPage.location}`, 'Critical');
+    void forced;
+
+    if (ceoGrants < activeCompanies) {
+      warn('the group view could not be exercised',
+        `the seeded group user holds ${ceoGrants} of ${activeCompanies} active companies`);
+    } else {
+      await login(ceo);
+      const entered = await submit('/companies', {}, ceo, {
+        expect: () => !!row(
+          'SELECT 1 AS ok FROM auth_sessions WHERE id = ? AND group_mode = 1', sessionOf(ceo)),
+      });
+      check('choosing the group puts the session into it', entered.ok,
+        entered.reason ?? 'the session did not enter group mode', 'High');
+
+      const page = await get('/group', ceo);
+      check('the group page renders', renders(page, 'Group'), `status ${page.status}`, 'High');
+
+      check('the group session carries no single company',
+        !row('SELECT active_company_id AS c FROM auth_sessions WHERE id = ?', sessionOf(ceo))?.c,
+        'a company is still selected alongside the group', 'Critical');
+
+      // --- the arithmetic, against the database
+      const perCompany = all(
+        `SELECT m.company_id, m.value
+           FROM calculated_metrics m
+           JOIN financial_snapshots s ON s.id = m.snapshot_id
+          WHERE m.metric_key = 'bank_current_amount' AND m.project_id IS NULL
+            AND s.is_current = 1
+            AND m.company_id IN (SELECT company_id FROM user_companies WHERE user_id = ?)`,
+        both.id);
+      const expected = round2(perCompany.reduce((sum, r) => sum + (r.value ?? 0), 0));
+
+      const consolidated = repos.group.groupFigures(both.id);
+      check('group cash is exactly the sum of the companies the reader may open',
+        near(consolidated.values.get('bank_current_amount') ?? 0, expected),
+        `the group reads ${consolidated.values.get('bank_current_amount')}, `
+        + `the ${perCompany.length} companies sum to ${expected}`, 'Critical');
+
+      check('every company in the total is one the reader holds a grant for',
+        consolidated.companies.every((c) => perCompany.some((p) => p.company_id === c.companyId)),
+        'a company with no live snapshot for this reader reached the total', 'Critical');
+
+      // --- and never reaches one they may not
+      const ungranted = all(
+        `SELECT id, company_code FROM companies
+          WHERE id NOT IN (SELECT company_id FROM user_companies WHERE user_id = ?)`, both.id);
+      for (const company of ungranted) {
+        check(`the group does not name ${company.company_code}, which this reader has no grant for`,
+          !page.text.includes(company.company_code),
+          'an ungranted company appeared on the group page', 'Critical');
+      }
+
+      // --- a company with no import is named, not silently dropped
+      const emptyName = row('SELECT display_name AS n FROM companies WHERE id = ?',
+        world.empty.companyId)?.n;
+      const emptyGranted = count(
+        'SELECT COUNT(*) AS n FROM user_companies WHERE user_id = ? AND company_id = ?',
+        both.id, world.empty.companyId);
+      if (emptyGranted > 0) {
+        check('a company that has imported nothing is named rather than dropped',
+          page.text.includes(String(emptyName)),
+          `${emptyName} contributes nothing and is not mentioned`, 'High');
+      }
+
+      // --- intercompany marking exists and is used
+      const marked = count(
+        `SELECT COUNT(*) AS n FROM receivable_records WHERE counterparty_company_id IS NOT NULL`);
+      const columns = all("SELECT name FROM pragma_table_info('receivable_records')")
+        .map((c) => c.name);
+      check('a transaction can name another group company as its counterparty',
+        columns.includes('counterparty_company_id'),
+        'no column marks a counterparty inside the group', 'High');
+      check('the group page says what it eliminated',
+        /Eliminated/i.test(page.text),
+        'nothing on the page accounts for intercompany trade', 'High');
+      void marked;
+
+      // --- leaving the group
+      const left = await selectCompany(ceo, alpha.companyId);
+      check('choosing a company leaves the group', left.ok,
+        left.reason ?? 'the session is in the group and in a company at once', 'Critical');
+    }
+
+    await login(admin);
+    await selectCompany(admin, alpha.companyId);
   }
 
   // ------------------------- M12 the things a brief asks about but code hides
@@ -1517,10 +1620,10 @@ async function audit() {
 
     // --- two people saving the same budget month at once
     await login(admin);
-    await submit('/companies', { companyId: alpha.companyId }, admin);
+    await selectCompany(admin, alpha.companyId);
     const rival = { ...both, cookies: new Map() };
     await login(rival);
-    await submit('/companies', { companyId: alpha.companyId }, rival);
+    await selectCompany(rival, alpha.companyId);
 
     await Promise.all([
       submit('/settings/budget', { month: '2026-11', incomeBudget: '1000', expenseBudget: '500' }, admin),

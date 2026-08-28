@@ -89,6 +89,11 @@ function applyMigrations(db: Database.Database): void {
       column: 'active_company_id',
       definition: 'TEXT REFERENCES companies(id)',
     },
+    // Whether this session is looking at the group rather than at one company.
+    // A separate flag rather than a sentinel in active_company_id, so every
+    // query that scopes by company keeps failing closed on a null instead of
+    // silently matching a magic string.
+    { table: 'auth_sessions', column: 'group_mode', definition: 'INTEGER NOT NULL DEFAULT 0' },
     // Every fact table carries the company as its own column. It could be
     // reached through project_id each time, but a record whose project is
     // unassigned would then belong to no company and fall out of every scoped
@@ -99,6 +104,20 @@ function applyMigrations(db: Database.Database): void {
       definition: 'TEXT REFERENCES companies(id)',
     })),
   ];
+
+  // Who, inside the group, is on the other side of this transaction.
+  //
+  // Nothing could mark one before, so an intercompany loan or a management fee
+  // would have been counted in full on both sides of any group total. The
+  // column is nullable and almost always null: the overwhelming majority of
+  // transactions are with the outside world.
+  for (const table of ['receivable_records', 'payable_records', 'expense_records', 'income_records', 'gl_entries']) {
+    columns.push({
+      table,
+      column: 'counterparty_company_id',
+      definition: 'TEXT REFERENCES companies(id)',
+    });
+  }
 
   for (const { table, column, definition } of columns) {
     const existing = db
@@ -115,6 +134,11 @@ function applyMigrations(db: Database.Database): void {
   // Indexes on migrated columns belong here rather than in the schema file,
   // which runs before these columns exist on an upgraded database.
   db.exec('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
+  for (const table of ['receivable_records', 'payable_records', 'expense_records', 'income_records', 'gl_entries']) {
+    db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_${table}_counterparty ON ${table}(counterparty_company_id)`,
+    );
+  }
 
   // The budget key gained the company. An index of that name may already exist
   // over (month, project) alone, and CREATE ... IF NOT EXISTS would leave it
