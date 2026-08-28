@@ -24,13 +24,91 @@ export function runValidations(
 
   results.push(...validateReceivableRows(data, projectId));
   results.push(...validateBankIdentity(data, calc, projectId));
-  results.push(...validateIncomeComponents(calc, projectId));
+  results.push(...validateIncomeComponents(data, projectId));
   results.push(...validateExpenseComponents(data, calc, projectId));
   results.push(...validateBoq(data, calc, projectId));
   results.push(...validateCashflowMonths(calc, projectId));
   results.push(...validateLedgerFooters(data, projectId));
+  results.push(...validateTransactionIdentity(data, projectId));
 
   return results;
+}
+
+/**
+ * The same transaction, imported twice.
+ *
+ * Duplicate control was at file level: the same workbook uploaded again, or a
+ * second file for a report date already on record. Neither notices a contract
+ * repeated inside one file, or an invoice that appears on both a summary tab
+ * and a detail tab of the same workbook — and a duplicated payable is a bill
+ * the company may pay twice.
+ *
+ * Keyed on whatever identity the row actually carries: an invoice number for a
+ * payable, a voucher number for a ledger posting, customer and unit for a
+ * receivable. Rows with no identity at all are not compared, because every
+ * blank row would match every other.
+ */
+function validateTransactionIdentity(
+  data: NormalizedDataset,
+  projectId: string | null,
+): ValidationResult[] {
+  const label = 'No transaction appears twice';
+
+  const keyed: { key: string; amount: number; refIndex?: number }[] = [];
+
+  for (const row of data.payable) {
+    if (!row.invoiceNo) continue;
+    keyed.push({
+      key: `payable|${row.vendor ?? ''}|${row.invoiceNo}`,
+      amount: row.invoiceAmount,
+      refIndex: row.sourceRefIndex,
+    });
+  }
+
+  for (const row of data.gl) {
+    if (!row.voucherNo || row.isOpeningBalance) continue;
+    keyed.push({
+      key: `gl|${row.voucherNo}|${row.accountCode ?? ''}|${row.debit}|${row.credit}`,
+      amount: row.debit || row.credit,
+      refIndex: row.sourceRefIndex,
+    });
+  }
+
+  for (const row of data.receivable) {
+    // A customer and a unit together identify an instalment schedule; either
+    // alone does not, and a repeated instalment inside one schedule is normal.
+    if (!row.customer || !row.unit) continue;
+    keyed.push({
+      key: `receivable|${row.customer}|${row.unit}|${row.category}|${row.contractualAmount}|${row.dueDate ?? ''}`,
+      amount: row.contractualAmount,
+      refIndex: row.sourceRefIndex,
+    });
+  }
+
+  if (keyed.length === 0) {
+    return [
+      skipped('transaction_identity', label, 'Import', projectId,
+        'No imported row carries an invoice number, a voucher number or a customer and unit together.'),
+    ];
+  }
+
+  const seen = new Map<string, number>();
+  let duplicated = 0;
+  const refIndexes: number[] = [];
+
+  for (const row of keyed) {
+    const before = seen.get(row.key) ?? 0;
+    if (before > 0) {
+      duplicated = round2(duplicated + row.amount);
+      if (row.refIndex !== undefined && row.refIndex >= 0) refIndexes.push(row.refIndex);
+    }
+    seen.set(row.key, before + 1);
+  }
+
+  // Expected nothing repeated; imported whatever was found more than once.
+  return [
+    compare('transaction_identity', label, 'Import', projectId, 0, duplicated, refIndexes),
+  ];
 }
 
 /**
@@ -164,47 +242,103 @@ function validateReceivableRows(data: NormalizedDataset, projectId: string | nul
   ];
 }
 
-/** Bank − Pending must equal the Available Cash the engine reports. */
+/**
+ * Pending as the bank sheets state it, against pending as the expense records
+ * carry it.
+ *
+ * This used to compare Available Cash with Bank − Pending, which is how
+ * Available Cash is defined: the two were equal by construction and the rule
+ * could not fail. It sat on the dashboard beside the real checks in the same
+ * green, which overstated how much had been verified.
+ *
+ * The two figures below are stated independently — one by whoever prepared the
+ * bank summary, one by whoever entered the payment run — so they can disagree,
+ * and when they do somebody has committed money in one place and not the
+ * other.
+ */
 function validateBankIdentity(
   data: NormalizedDataset,
   calc: CalculationResult,
   projectId: string | null,
 ): ValidationResult[] {
-  const bank = calc.byKey.get('bank_current_amount')?.value ?? null;
-  const pending = calc.byKey.get('pending_expense')?.value ?? null;
-  const available = calc.byKey.get('available_cash')?.value ?? null;
-
   if (data.bank.length === 0) {
     return [
-      skipped('bank_identity', 'Bank − Pending = Available', 'Bank', projectId,
-        'No bank records were imported.'),
+      skipped('bank_identity', 'Pending on the bank sheet = pending on the expense records', 'Bank',
+        projectId, 'No bank records were imported.'),
     ];
   }
 
-  const expected = round2((bank ?? 0) - (pending ?? 0));
+  const fromBank = round2(data.bank.reduce((sum, r) => sum + r.pendingExpense, 0));
+  const fromExpense = round2(data.expense.reduce((sum, r) => sum + r.pendingAmount, 0));
+
+  // A sheet that states no pending at all is not disagreeing with anything.
+  if (fromBank === 0 || fromExpense === 0) {
+    return [
+      skipped('bank_identity', 'Pending on the bank sheet = pending on the expense records', 'Bank',
+        projectId,
+        fromBank === 0
+          ? 'The bank sheets carry no pending column.'
+          : 'The expense records carry no pending amounts.'),
+    ];
+  }
+
   return [
-    compare('bank_identity', 'Bank − Pending = Available', 'Bank', projectId, expected, available,
-      calc.byKey.get('available_cash')?.sourceRefIndexes ?? []),
+    compare('bank_identity', 'Pending on the bank sheet = pending on the expense records', 'Bank',
+      projectId, fromBank, fromExpense,
+      calc.byKey.get('pending_expense')?.sourceRefIndexes ?? []),
   ];
 }
 
-/** The income components must add up to the reported total. */
-function validateIncomeComponents(calc: CalculationResult, projectId: string | null): ValidationResult[] {
-  const contractual = calc.byKey.get('total_contractual_income')?.value ?? 0;
-  const received = calc.byKey.get('received_income')?.value ?? 0;
-  const accrued = calc.byKey.get('accrued_income')?.value ?? 0;
+/**
+ * The receivable ledger against the sales ledger, where both describe the same
+ * contracts.
+ *
+ * This used to check that Received + Accrued equals Total Contractual, which
+ * is how Accrued is defined — true by construction, and unable to fail.
+ *
+ * What can go wrong, and did, is that a receivable export and a sales export
+ * covering the same contracts are both ordinary monthly files, both are
+ * accepted, and their contractual amounts are added together. Revenue doubles
+ * and nothing says so. Matching is on the customer or unit the two ledgers
+ * name, because that is the only identity they share.
+ */
+function validateIncomeComponents(
+  data: NormalizedDataset,
+  projectId: string | null,
+): ValidationResult[] {
+  const label = 'The sales ledger does not restate the receivable ledger';
 
-  if (contractual === 0 && received === 0) {
+  if (data.receivable.length === 0 || data.income.length === 0) {
     return [
-      skipped('income_components', 'Received + Accrued = Total Contractual', 'Income', projectId,
-        'No income or receivable records were imported.'),
+      skipped('income_components', label, 'Income', projectId,
+        'Only one of the two ledgers was imported, so there is nothing to compare.'),
     ];
   }
 
+  const key = (text: string | null) => (text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const inReceivable = new Map<string, number>();
+  for (const row of data.receivable) {
+    for (const name of [row.customer, row.unit]) {
+      const k = key(name);
+      if (k.length < 3) continue;
+      inReceivable.set(k, round2((inReceivable.get(k) ?? 0) + row.contractualAmount));
+    }
+  }
+
+  let overlap = 0;
+  const refIndexes: number[] = [];
+  for (const row of data.income) {
+    const k = key(row.description);
+    if (k.length < 3) continue;
+    if (!inReceivable.has(k)) continue;
+    overlap = round2(overlap + row.contractualAmount);
+    if (row.sourceRefIndex !== undefined && row.sourceRefIndex >= 0) refIndexes.push(row.sourceRefIndex);
+  }
+
+  // Expected nothing in common; imported whatever was found twice.
   return [
-    compare('income_components', 'Received + Accrued = Total Contractual', 'Income', projectId,
-      contractual, round2(received + accrued),
-      calc.byKey.get('total_contractual_income')?.sourceRefIndexes ?? []),
+    compare('income_components', label, 'Income', projectId, 0, overlap, refIndexes),
   ];
 }
 
@@ -242,28 +376,43 @@ function validateExpenseComponents(
   ];
 }
 
-/** BOQ Paid + BOQ Outstanding must reconcile with BOQ To Date. */
+/**
+ * The BOQ sheet's own pending column against the gap between certified and
+ * paid.
+ *
+ * This used to check that Paid + Outstanding equals To Date, which is how
+ * Outstanding is defined — a third rule that could not fail.
+ *
+ * A BOQ sheet states its own pending amount, so it can be compared with what
+ * remains unpaid on the certified work. When they disagree, either work has
+ * been certified and not raised for payment, or a payment has been raised
+ * against work that was never certified.
+ */
 function validateBoq(
   data: NormalizedDataset,
   calc: CalculationResult,
   projectId: string | null,
 ): ValidationResult[] {
+  const label = 'BOQ pending as stated = certified less paid';
+
   if (data.boq.length === 0) {
     return [
-      skipped('boq_reconciliation', 'BOQ Paid + Outstanding = BOQ To Date', 'BOQ', projectId,
-        'No BOQ records were imported.'),
+      skipped('boq_reconciliation', label, 'BOQ', projectId, 'No BOQ records were imported.'),
     ];
   }
 
   const toDate = calc.byKey.get('boq_to_date')?.value ?? 0;
   const paid = calc.byKey.get('boq_paid')?.value ?? 0;
-  const outstanding = calc.byKey.get('boq_outstanding')?.value ?? 0;
+  const statedPending = round2(data.boq.reduce((sum, r) => sum + r.pendingAmount, 0));
 
-  const results: ValidationResult[] = [
-    compare('boq_reconciliation', 'BOQ Paid + Outstanding = BOQ To Date', 'BOQ', projectId,
-      toDate, round2(paid + outstanding),
-      calc.byKey.get('boq_to_date')?.sourceRefIndexes ?? []),
-  ];
+  const results: ValidationResult[] = statedPending === 0
+    ? [skipped('boq_reconciliation', label, 'BOQ', projectId,
+        'The BOQ sheets carry no pending column to compare with.')]
+    : [
+        compare('boq_reconciliation', label, 'BOQ', projectId,
+          round2(toDate - paid), statedPending,
+          calc.byKey.get('boq_outstanding')?.sourceRefIndexes ?? []),
+      ];
 
   // Work billed to date can never exceed the contract value.
   const total = calc.byKey.get('boq_total')?.value ?? 0;

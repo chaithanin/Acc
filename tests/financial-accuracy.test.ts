@@ -235,46 +235,77 @@ describe('double counting between the receivable and income sheets', () => {
 });
 
 /**
- * FIN-03. Three of the eight reconciliation rules cannot fail.
+ * FIN-04, as fixed.
  *
- * Each compares a derived figure with the definition it was derived from, so
- * the two are equal by construction. They are shown to management beside the
- * five real checks, in the same green, which overstates how much has been
- * verified.
+ * Three rules compared a derived figure with the definition it was derived
+ * from: Available Cash against Bank − Pending, Received + Accrued against
+ * Total Contractual, Paid + Outstanding against To Date. Each was true by
+ * construction and could not fail, and each sat beside the real checks in the
+ * same green, overstating how much had been verified.
+ *
+ * Each now compares two figures the file states independently, so each can
+ * disagree — and the cases below make them.
  */
-describe('validation rules that prove themselves', () => {
-  const tautologies = ['bank_identity', 'income_components', 'boq_reconciliation'];
+describe('reconciliation rules that can fail', () => {
+  const failures = (data: NormalizedDataset) =>
+    runValidations(data, run(data), null)
+      .filter((r) => r.status === 'error' || r.status === 'warning')
+      .map((r) => r.ruleKey);
 
-  it('stay green on data engineered to be wrong', () => {
+  it('passes on a workbook that agrees with itself', () => {
     const data = auditDataset();
-    // Every stated figure in the file contradicts the others: the accrue
-    // column disagrees with contractual less received, the bank sheet's
-    // pending disagrees with the expense records, BOQ paid exceeds the
-    // certified value.
-    data.receivable[0]!.accrueAmount = 999;
-    data.bank[0]!.pendingExpense = 12_345_678;
-    data.boq[0]!.paidAmount = 45_000_000;
-
-    const calc = run(data);
-    const results = runValidations(data, calc, null);
-
-    for (const key of tautologies) {
-      const rule = results.find((r) => r.ruleKey === key);
-      assert.ok(rule, `${key} did not run`);
-      assert.equal(rule.status, 'pass',
-        `${key} failed — it may have become a real check, in which case this test should go`);
-      assert.equal(rule.difference, 0);
-    }
+    // The bank sheet says 1,000,000 pending and the expense records carry
+    // 1,000,000; the BOQ sheet's pending matches certified less paid.
+    assert.deepEqual(failures(data), []);
   });
 
-  it('while the rules that read the file’s own stated figures do fail', () => {
+  it('notices when the bank sheet and the payment run disagree about pending', () => {
     const data = auditDataset();
-    data.receivable[0]!.accrueAmount = 999;
+    data.bank[0]!.pendingExpense = 4_500_000;
+    assert.ok(failures(data).includes('bank_identity'),
+      'somebody committed money in one place and not the other, and nothing said so');
+  });
 
-    const results = runValidations(data, run(data), null);
-    const rowIdentity = results.find((r) => r.ruleKey === 'receivable_row_identity');
-    assert.ok(rowIdentity);
-    assert.notEqual(rowIdentity.status, 'pass', 'the one real receivable check did not notice');
+  it('notices when BOQ pending disagrees with certified less paid', () => {
+    const data = auditDataset();
+    // Certified 20,000,000 less paid 16,000,000 is 4,000,000; the sheet says
+    // 9,000,000, so either work was certified and never billed or a payment
+    // was raised against work that was never certified.
+    data.boq[0]!.pendingAmount = 9_000_000;
+    assert.ok(failures(data).includes('boq_reconciliation'));
+  });
+
+  it('notices when the sales ledger restates the receivable ledger', () => {
+    const data = auditDataset();
+    data.income = data.receivable.map((r) => ({
+      kind: 'income' as const, ...base, category: r.category,
+      description: r.customer, month: '2026-08',
+      contractualAmount: r.contractualAmount, receivedAmount: r.receiveAmount,
+      accruedAmount: r.accrueAmount, isForecast: false,
+    }));
+
+    assert.ok(failures(data).includes('income_components'),
+      'the same contracts were counted in both ledgers and no rule noticed');
+  });
+
+  it('does not cry overlap when the two ledgers describe different things', () => {
+    const data = auditDataset();
+    data.income = [
+      { kind: 'income', ...base, category: 'contract', description: 'Car park licences',
+        month: '2026-08', contractualAmount: 800_000, receivedAmount: 200_000,
+        accruedAmount: 600_000, isForecast: false },
+    ];
+    assert.ok(!failures(data).includes('income_components'));
+  });
+
+  it('says a rule could not run rather than passing it', () => {
+    const data = auditDataset();
+    data.income = [];
+
+    const overlap = runValidations(data, run(data), null)
+      .find((r) => r.ruleKey === 'income_components');
+    assert.equal(overlap?.status, 'skipped',
+      'a check with nothing to compare reported as passed');
   });
 });
 
@@ -534,5 +565,71 @@ describe('receivables ageing', () => {
 
     // The August reading is unchanged by the December one existing.
     assert.equal(v(calc, 'receivable_oldest_days'), 62);
+  });
+});
+
+/**
+ * FIN-13, as fixed.
+ *
+ * Duplicate control was at file level — the same workbook uploaded again, or a
+ * second file for a report date already on record. Neither notices a contract
+ * repeated inside one file, or an invoice appearing on both a summary tab and
+ * a detail tab of the same workbook. A duplicated payable is a bill the
+ * company may pay twice.
+ */
+describe('the same transaction twice inside one import', () => {
+  const failures = (data: NormalizedDataset) =>
+    runValidations(data, run(data), null)
+      .filter((r) => r.status === 'error' || r.status === 'warning')
+      .map((r) => r.ruleKey);
+
+  const invoice = (over: Partial<import('@/lib/types').PayableRecord> = {}) => ({
+    kind: 'payable' as const, ...base, vendor: 'Somsak Construction', invoiceNo: 'INV-77',
+    description: 'Structure', category: 'construction',
+    invoiceDate: '2026-07-01', dueDate: '2026-08-01',
+    invoiceAmount: 2_000_000, paidAmount: 0, statedOutstanding: 2_000_000,
+    ...over,
+  });
+
+  it('catches the same vendor invoice number twice', () => {
+    const data = { ...auditDataset(), payable: [invoice(), invoice()] };
+    assert.ok(failures(data).includes('transaction_identity'));
+  });
+
+  it('lets two different invoices from the same vendor through', () => {
+    const data = { ...auditDataset(), payable: [invoice(), invoice({ invoiceNo: 'INV-78' })] };
+    assert.ok(!failures(data).includes('transaction_identity'));
+  });
+
+  it('catches the same ledger voucher posted twice', () => {
+    const data = auditDataset();
+    const entry = {
+      kind: 'gl' as const, ...base, accountCode: '5100', accountName: 'Construction',
+      entryDate: '2026-08-04', voucherNo: 'JV-2026-081', vendor: null,
+      description: 'Progress payment', costCode: null, module: null, job: null,
+      debit: 1_500_000, credit: 0, balance: 0, isOpeningBalance: false,
+    };
+    data.gl = [entry, { ...entry }];
+    assert.ok(failures(data).includes('transaction_identity'));
+  });
+
+  it('catches the same instalment for the same unit twice', () => {
+    const data = auditDataset();
+    const row = data.receivable[0]!;
+    data.receivable = [row, { ...row }];
+    assert.ok(failures(data).includes('transaction_identity'));
+  });
+
+  it('does not compare rows that carry no identity at all', () => {
+    const data = auditDataset();
+    // No invoice number, no voucher, no customer-and-unit pair: nothing to key
+    // on, and every blank row would otherwise match every other.
+    data.receivable = data.receivable.map((r) => ({ ...r, customer: null, unit: null }));
+    data.payable = [];
+    data.gl = [];
+
+    const rule = runValidations(data, run(data), null)
+      .find((r) => r.ruleKey === 'transaction_identity');
+    assert.equal(rule?.status, 'skipped');
   });
 });
