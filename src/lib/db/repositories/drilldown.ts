@@ -1,3 +1,4 @@
+import { round2 } from '@/lib/calc/aggregate';
 import { getDb } from '../index';
 import { scopeClause, type DataScope } from '../scope';
 
@@ -38,12 +39,40 @@ interface DrilldownSource {
   /** Optional extra predicate, parameterised via `params`. */
   where?: string;
   params?: (string | number)[];
+  /**
+   * Further record sets that belong to the same figure.
+   *
+   * A KPI that adds two tables together has to open both. Pending Expense is
+   * the bank sheets' pending column *plus* the pending on every expense
+   * record, and Total Contractual Income is the receivable ledger *plus* the
+   * sales sheet — drilling into only the first left the drill-down footing to
+   * less than the KPI it was explaining, which is the one thing a drill-down
+   * must never do.
+   */
+  also?: Omit<DrilldownSource, 'label' | 'also'>[];
 }
 
 const RECEIVABLE_OUTSTANDING = 't.contractual_amount - t.receive_amount';
 const RECEIVABLE_DESCRIPTION = "COALESCE(t.customer, t.unit, '—')";
 const BOQ_DESCRIPTION = "COALESCE(t.description, t.contractor, '—')";
 const BOQ_CATEGORY = "COALESCE(t.cost_category, 'BOQ')";
+const INCOME_DESCRIPTION = "COALESCE(t.description, t.category, '—')";
+const EXPENSE_DESCRIPTION = "COALESCE(t.description, t.category, '—')";
+
+/** The sales sheet, as a second half of the income figures. */
+const INCOME_SHEET = {
+  table: 'income_records',
+  category: 't.category',
+  description: INCOME_DESCRIPTION,
+};
+
+/** Pending payments carried on the expense records rather than the bank sheet. */
+const EXPENSE_PENDING = {
+  table: 'expense_records',
+  amount: 't.pending_amount',
+  category: "'Pending'",
+  description: EXPENSE_DESCRIPTION,
+};
 
 const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
   bank_current_amount: {
@@ -59,6 +88,7 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: 't.pending_expense',
     category: "'Pending'",
     description: "COALESCE(t.bank_name, t.account_no, '—')",
+    also: [EXPENSE_PENDING],
   },
   available_cash: {
     label: 'Bank accounts',
@@ -66,6 +96,9 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: 't.current_amount - t.pending_expense',
     category: "'Available'",
     description: "COALESCE(t.bank_name, t.account_no, '—')",
+    // Available Cash nets off the pending on the expense records too, so the
+    // drill-down carries them as negatives rather than footing high.
+    also: [{ ...EXPENSE_PENDING, amount: '-t.pending_amount' }],
   },
   current_cash: {
     label: 'Bank accounts',
@@ -73,6 +106,7 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: 't.current_amount - t.pending_expense',
     category: "'Available'",
     description: "COALESCE(t.bank_name, t.account_no, '—')",
+    also: [{ ...EXPENSE_PENDING, amount: '-t.pending_amount' }],
   },
   total_contractual_income: {
     label: 'Contractual income',
@@ -80,6 +114,7 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: 't.contractual_amount',
     category: 't.category',
     description: RECEIVABLE_DESCRIPTION,
+    also: [{ ...INCOME_SHEET, amount: 't.contractual_amount' }],
   },
   received_income: {
     label: 'Received income',
@@ -87,6 +122,7 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: 't.receive_amount',
     category: 't.category',
     description: RECEIVABLE_DESCRIPTION,
+    also: [{ ...INCOME_SHEET, amount: 't.received_amount' }],
   },
   accrued_income: {
     label: 'Accrued income',
@@ -94,6 +130,7 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     amount: RECEIVABLE_OUTSTANDING,
     category: 't.category',
     description: RECEIVABLE_DESCRIPTION,
+    also: [{ ...INCOME_SHEET, amount: 't.contractual_amount - t.received_amount' }],
   },
   total_receivable_outstanding: {
     label: 'Outstanding receivable',
@@ -152,6 +189,44 @@ const DRILLDOWN_SOURCES: Record<string, DrilldownSource> = {
     description: "COALESCE(t.description, '—')",
     where: 't.category <> ?',
     params: ['construction'],
+  },
+  cost_of_goods_sold: {
+    label: 'Direct cost of sales',
+    table: 'expense_records',
+    amount: 't.amount',
+    category: 't.category',
+    description: EXPENSE_DESCRIPTION,
+    where: "t.category IN ('construction', 'contractor', 'material')",
+  },
+  operating_expenses: {
+    label: 'Operating expenses',
+    table: 'expense_records',
+    amount: 't.amount',
+    category: 't.category',
+    description: EXPENSE_DESCRIPTION,
+    // Everything that is neither a direct cost nor tax: tax is taken once,
+    // below operating profit, and must not appear on this line as well.
+    where: "t.category NOT IN ('construction', 'contractor', 'material', 'tax')",
+  },
+  taxes: {
+    label: 'Tax charged',
+    table: 'expense_records',
+    amount: 't.amount',
+    category: 't.category',
+    description: EXPENSE_DESCRIPTION,
+    where: "t.category = 'tax'",
+  },
+  total_outstanding_expense: {
+    label: 'Owed and due',
+    table: 'boq_records',
+    amount: 't.boq_to_date - t.paid_amount',
+    category: BOQ_CATEGORY,
+    description: BOQ_DESCRIPTION,
+    also: [
+      { table: 'bank_balances', amount: 't.pending_expense', category: "'Pending'",
+        description: "COALESCE(t.bank_name, t.account_no, '—')" },
+      EXPENSE_PENDING,
+    ],
   },
   wip_ytd: {
     label: 'WIP accounts',
@@ -230,40 +305,68 @@ export function drilldown(
     return { rows: [], label: '', supported: false, total: 0, recordCount: 0, truncated: false };
   }
 
-  const scoped = scopeClause(scope, 't');
-  const predicates = [scoped.where];
-  const params: (string | number)[] = [...scoped.params];
+  // Every record set this figure is made of, in order.
+  const parts = [source, ...(source.also ?? [])];
 
-  if (source.where) {
-    predicates.push(source.where);
-    params.push(...(source.params ?? []));
+  /** The scoped predicate for one record set, with its parameters. */
+  const clauseFor = (part: { amount: string; where?: string; params?: (string | number)[] }) => {
+    const scoped = scopeClause(scope, 't');
+    const predicates = [scoped.where];
+    const params: (string | number)[] = [...scoped.params];
+
+    if (part.where) {
+      predicates.push(part.where);
+      params.push(...(part.params ?? []));
+    }
+
+    return {
+      where: `${predicates.join(' AND ')}
+         AND ${part.amount} IS NOT NULL
+         AND ${part.amount} <> 0`,
+      params,
+    };
+  };
+
+  // The true footing, computed over every contributing record in every part.
+  // Read before the rows so the limit below cannot change it.
+  let totalValue = 0;
+  let recordCount = 0;
+  for (const part of parts) {
+    const clause = clauseFor(part);
+    const totals = getDb()
+      .prepare<(string | number)[], { n: number; total: number | null }>(
+        `SELECT COUNT(*) AS n, SUM(${part.amount}) AS total FROM ${part.table} t WHERE ${clause.where}`,
+      )
+      .get(...clause.params) ?? { n: 0, total: 0 };
+    totalValue += totals.total ?? 0;
+    recordCount += totals.n;
   }
+  const totals = { n: recordCount, total: round2(totalValue) };
 
-  const where = `${predicates.join(' AND ')}
-       AND ${source.amount} IS NOT NULL
-       AND ${source.amount} <> 0`;
-
-  // The true footing, computed over every contributing record. Read before the
-  // rows so the limit below cannot change it.
-  const totals = getDb()
-    .prepare<(string | number)[], { n: number; total: number | null }>(
-      `SELECT COUNT(*) AS n, SUM(${source.amount}) AS total FROM ${source.table} t WHERE ${where}`,
-    )
-    .get(...params) ?? { n: 0, total: 0 };
-
-  // Table and expressions come from the constant map above, never from input.
-  const sql = `
-    SELECT p.name                AS project_name,
-           ${source.category}    AS category,
-           ${source.description} AS description,
-           ${source.amount}      AS amount,
+  // Tables and expressions come from the constant map above, never from input.
+  const params: (string | number)[] = [];
+  const selects = parts.map((part) => {
+    const clause = clauseFor(part);
+    params.push(...clause.params);
+    return `
+    SELECT p.name              AS project_name,
+           ${part.category}    AS category,
+           ${part.description} AS description,
+           ${part.amount}      AS amount,
            sr.source_file, sr.source_sheet, sr.source_row, sr.source_cell,
            sr.source_formula, sr.created_at AS imported_at
-      FROM ${source.table} t
+      FROM ${part.table} t
       LEFT JOIN projects p           ON p.id = t.project_id
       LEFT JOIN source_references sr ON sr.id = t.source_ref_id
-     WHERE ${where}
-     ORDER BY ABS(${source.amount}) DESC
+     WHERE ${clause.where}`;
+  });
+
+  // Wrapped in a subquery: SQLite will not order a compound SELECT by an
+  // expression, only by a bare output column or an ordinal.
+  const sql = `
+    SELECT * FROM (${selects.join('\n     UNION ALL\n')}
+    )
+     ORDER BY ABS(amount) DESC
      LIMIT ?`;
 
   params.push(limit);

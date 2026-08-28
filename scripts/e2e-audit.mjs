@@ -412,6 +412,11 @@ async function login(who, password = PASSWORD) {
 const streamedError = (text) => /E\{\\"digest\\":\\"\d/.test(text);
 const renders = (r, marker) => r.status < 400 && r.text.includes(marker) && !streamedError(r.text);
 
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+/** Money agrees when it agrees to the satang. */
+const near = (a, b, tolerance = 0.01) =>
+  a !== null && b !== null && Math.abs(Number(a) - Number(b)) <= tolerance;
+
 const row = (sql, ...p) => db.getDb().prepare(sql).get(...p);
 const all = (sql, ...p) => db.getDb().prepare(sql).all(...p);
 const count = (sql, ...p) => row(sql, ...p)?.n ?? 0;
@@ -1150,6 +1155,219 @@ async function audit() {
 
     await login(admin);
     await submit('/companies', { companyId: alpha.companyId }, admin);
+  }
+
+  // ---------------------------- M13 every figure back to the records behind it
+  //
+  // The financial audit. For each KPI that offers a drill-down, three numbers
+  // have to be the same: what the engine stored, what the drill-down API
+  // foots to, and what the records themselves add up to in SQL. Where they
+  // differ, the difference is the finding.
+  module_('M13 · Financial reconciliation');
+  {
+    await login(admin);
+    await submit('/companies', { companyId: alpha.companyId }, admin);
+
+    /** The stored KPI for this company's live snapshot, group level. */
+    const stored = (key) => row(
+      `SELECT value FROM calculated_metrics
+        WHERE snapshot_id = ? AND company_id = ? AND metric_key = ? AND project_id IS NULL`,
+      alpha.snapshotId, alpha.companyId, key)?.value ?? null;
+
+    const drill = async (key) => {
+      const r = await get(
+        `/api/drilldown?snapshotId=${alpha.snapshotId}&metricKey=${key}`, admin);
+      return JSON.parse(r.text || '{}');
+    };
+
+    /** SQL, straight over the records, scoped the way the engine scopes them. */
+    const sqlSum = (expr, table, extra = '') => round2(row(
+      `SELECT SUM(${expr}) AS n FROM ${table} t
+        WHERE t.snapshot_id = ? AND t.company_id = ? ${extra}`,
+      alpha.snapshotId, alpha.companyId)?.n ?? 0);
+
+    const RECONCILE = [
+      { key: 'bank_current_amount', expr: 't.current_amount', table: 'bank_balances' },
+      { key: 'total_receivable_outstanding', expr: 't.contractual_amount - t.receive_amount', table: 'receivable_records' },
+      { key: 'boq_total', expr: 't.boq_amount', table: 'boq_records' },
+      { key: 'boq_to_date', expr: 't.boq_to_date', table: 'boq_records' },
+      { key: 'boq_paid', expr: 't.paid_amount', table: 'boq_records' },
+      { key: 'total_expense', expr: 't.amount', table: 'expense_records' },
+      { key: 'wip_ytd', expr: 't.ytd', table: 'wip_records' },
+    ];
+
+    // Income is the one KPI that reads two tables on purpose — the receivable
+    // ledger and the sales sheet — so its SQL side has to read both too.
+    const incomeKpi = stored('total_contractual_income');
+    const incomeSql = round2(
+      sqlSum('t.contractual_amount', 'receivable_records') +
+      sqlSum('t.contractual_amount', 'income_records'));
+    const incomeDrill = await drill('total_contractual_income');
+    check('total contractual income: dashboard = drill-down = records',
+      near(incomeKpi, incomeSql) && near(incomeKpi, incomeDrill.total),
+      `dashboard ${incomeKpi}, drill-down ${incomeDrill.total}, records ${incomeSql} `
+      + `(receivable ${sqlSum('t.contractual_amount', 'receivable_records')} + `
+      + `income ${sqlSum('t.contractual_amount', 'income_records')})`, 'Critical');
+
+    for (const { key, expr, table } of RECONCILE) {
+      const kpi = stored(key);
+      const api = await drill(key);
+      const sql = sqlSum(expr, table);
+
+      check(`${key}: dashboard = drill-down = records`,
+        near(kpi, api.total) && near(kpi, sql),
+        `dashboard ${kpi}, drill-down ${api.total}, records ${sql}`, 'Critical');
+
+      check(`${key}: the drill-down names every contributing record`,
+        api.recordCount > 0 && api.supported,
+        `${api.recordCount} records, supported ${api.supported}`, 'High');
+    }
+
+    // --- Every drill-down the system offers must foot to the KPI it explains.
+    //     Three of them did not: they read one table where the KPI read two.
+    const OFFERED = [
+      'bank_current_amount', 'pending_expense', 'available_cash', 'current_cash',
+      'total_contractual_income', 'received_income', 'accrued_income',
+      'total_receivable_outstanding', 'reservation_outstanding', 'contract_outstanding',
+      'down_payment_outstanding', 'transfer_outstanding',
+      'boq_total', 'boq_to_date', 'boq_paid', 'boq_outstanding', 'remaining_boq',
+      'total_expense', 'other_expense', 'wip_ytd', 'advance_outstanding',
+      'cost_of_goods_sold', 'operating_expenses', 'taxes', 'total_outstanding_expense',
+    ];
+
+    for (const key of OFFERED) {
+      const kpi = stored(key);
+      const opened = await drill(key);
+      if (!opened.supported) {
+        check(`${key}: opens`, false, 'the drill-down is not supported', 'High');
+        continue;
+      }
+      check(`${key}: the drill-down foots to the KPI it explains`,
+        near(kpi, opened.total),
+        `the KPI reads ${kpi}, the drill-down foots to ${opened.total} `
+        + `(difference ${round2((kpi ?? 0) - (opened.total ?? 0))})`, 'Critical');
+    }
+
+    // --- the derived identities the engine states
+    const identity = (name, left, right, severity = 'Critical') =>
+      check(name, near(left, right), `${left} vs ${right}`, severity);
+
+    identity('available cash = bank less pending',
+      stored('available_cash'), round2(stored('bank_current_amount') - stored('pending_expense')));
+    identity('accrued income = contracted less received',
+      stored('accrued_income'), round2(stored('total_contractual_income') - stored('received_income')));
+    identity('BOQ outstanding = certified less paid',
+      stored('boq_outstanding'), round2(stored('boq_to_date') - stored('boq_paid')));
+    identity('receivable buckets add up to the receivable total',
+      round2(['reservation_outstanding', 'contract_outstanding', 'down_payment_outstanding', 'transfer_outstanding']
+        .reduce((sum, k) => sum + (stored(k) ?? 0), 0)),
+      stored('total_receivable_outstanding'));
+    identity('gross profit = income less cost of sales',
+      stored('gross_profit'), round2(stored('total_contractual_income') - stored('cost_of_goods_sold')));
+    identity('operating profit = gross profit less operating expenses',
+      stored('operating_profit'), round2(stored('gross_profit') - stored('operating_expenses')));
+    identity('net profit = operating profit less tax',
+      stored('net_profit'), round2(stored('operating_profit') - stored('taxes')));
+
+    // --- FIN-07. The profit line has no drill-down at all.
+    const noDrill = [];
+    // The four composites are made of other KPIs rather than of records, so a
+    // record list is not what explains them — "View Calculation" is. Everything
+    // that IS a sum over records has to open.
+    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position']) {
+      const r = await drill(key);
+      if (!r.supported) noDrill.push(key);
+    }
+    check('the composite profit figures are explained by their calculation, not by a record list',
+      noDrill.length === 4,
+      `expected the four composites to have no record drill-down; got ${noDrill.join(', ') || 'none'}`,
+      'Medium');
+
+    for (const key of ['gross_profit', 'operating_profit', 'net_profit', 'net_financial_position']) {
+      const stated = row(
+        `SELECT formula, inputs_json FROM calculated_metrics
+          WHERE snapshot_id = ? AND company_id = ? AND metric_key = ? AND project_id IS NULL`,
+        alpha.snapshotId, alpha.companyId, key);
+      const inputs = JSON.parse(stated?.inputs_json ?? '[]');
+      check(`${key} states its formula and the figures that fed it`,
+        !!stated?.formula && inputs.length > 0,
+        `formula "${stated?.formula}", ${inputs.length} inputs`, 'High');
+    }
+
+    // --- traceability: a figure with no cell behind it cannot be checked
+    const untraceable = count(
+      `SELECT COUNT(*) AS n FROM calculated_metrics
+        WHERE snapshot_id = ? AND company_id = ? AND project_id IS NULL
+          AND unit = 'THB' AND value <> 0
+          AND (source_ref_ids_json IS NULL OR source_ref_ids_json = '[]')`,
+      alpha.snapshotId, alpha.companyId);
+    check('every money figure cites the cells it came from',
+      untraceable === 0, `${untraceable} money KPIs carry no source reference`, 'High');
+
+    const refsExist = count(
+      `SELECT COUNT(*) AS n FROM source_references WHERE import_id = ?`, alpha.importId);
+    check('the cited references are real rows in the reference table',
+      refsExist > 0, `${refsExist} references stored`, 'High');
+
+    // --- satang survive the round trip
+    const satang = row(
+      `SELECT current_amount AS a FROM bank_balances
+        WHERE snapshot_id = ? AND company_id = ? ORDER BY current_amount DESC LIMIT 1`,
+      alpha.snapshotId, alpha.companyId)?.a;
+    check('amounts keep their satang through the database',
+      typeof satang === 'number' && Math.abs(satang - Math.round(satang * 100) / 100) < 1e-9,
+      `stored ${satang}`, 'Medium');
+  }
+
+  // ---------------------------------- M14 the group, and what it cannot show
+  module_('M14 · Group consolidation');
+  {
+    // `both` is granted every company — the closest thing the system has to a
+    // group user, and the account a CEO would be given.
+    const ceo = { ...both, cookies: new Map() };
+    await login(ceo);
+
+    const grants = count('SELECT COUNT(*) AS n FROM user_companies WHERE user_id = ?', both.id);
+    check('a group user can be granted every company', grants >= 2, `${grants} grants`, 'High');
+
+    // Choosing a company is mandatory: there is no "all companies" option.
+    const chooser = await get('/companies', ceo);
+    check('the company chooser offers no group or all-companies view',
+      !/all compan|group view|consolidat/i.test(chooser.text),
+      'a group option appeared — this check needs updating', 'Improvement');
+
+    await submit('/companies', { companyId: alpha.companyId }, ceo);
+    const dash = await get('/', ceo);
+    check('the dashboard shows one company at a time', dash.status < 400,
+      `status ${dash.status}`, 'High');
+
+    // The figures a CEO would need added together, as the system holds them:
+    // one row per company, and never a row for the group.
+    const cashRows = all(
+      `SELECT company_id, value FROM calculated_metrics
+        WHERE metric_key = 'bank_current_amount' AND project_id IS NULL`);
+
+    check('every cash figure belongs to exactly one company',
+      cashRows.length > 0 && cashRows.every((r) => !!r.company_id),
+      `${cashRows.length} cash figures, ${cashRows.filter((r) => !r.company_id).length} without a company`,
+      'High');
+
+    // FIN-08. Nothing anywhere adds them up.
+    const groupTotal = round2(cashRows.reduce((sum, r) => sum + (r.value ?? 0), 0));
+    check('a group total exists somewhere in the system',
+      cashRows.some((r) => !r.company_id),
+      `no metric row is stored without a company, and no page renders more than one company at a `
+      + `time; group cash of ${groupTotal} across ${cashRows.length} live company figures is a total `
+      + 'the CEO must add up by hand from as many dashboards as the group has companies', 'High');
+
+    // Intercompany: nothing marks a transaction as being with another company.
+    const interco = all(
+      "SELECT name FROM pragma_table_info('gl_entries') WHERE name LIKE '%interco%' OR name LIKE '%counterparty%'");
+    check('intercompany transactions can be identified and eliminated',
+      interco.length > 0,
+      'no column on any record marks a counterparty inside the group, so an intercompany loan, a '
+      + 'management fee or a shared cost would be counted in full in both companies if a group '
+      + 'total were ever produced', 'High');
   }
 
   // ------------------------- M12 the things a brief asks about but code hides
