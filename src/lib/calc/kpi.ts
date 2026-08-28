@@ -338,7 +338,7 @@ export function calculateMetrics(
   metrics.push(
     metric({
       key: 'expected_future_income',
-      label: 'Expected Future Income',
+      label: hasForecast ? 'Expected Future Income' : 'Expected Future Income (uncollected balance)',
       section: 'income',
       value: expectedFutureIncome,
       formula: expectedFutureIncomeFormula,
@@ -349,7 +349,7 @@ export function calculateMetrics(
     }),
     metric({
       key: 'total_future_expense',
-      label: 'Total Future Expense',
+      label: hasForecast ? 'Total Future Expense' : 'Total Future Expense (commitments only)',
       section: 'expense',
       value: totalFutureExpense,
       formula: totalFutureExpenseFormula,
@@ -369,7 +369,7 @@ export function calculateMetrics(
     }),
     metric({
       key: 'forecast_cash',
-      label: 'Forecast Cash',
+      label: hasForecast ? 'Forecast Cash' : 'Forecast Cash (no forecast imported)',
       section: 'cash',
       value: projection.forecastCash,
       formula: hasForecast
@@ -384,7 +384,7 @@ export function calculateMetrics(
     }),
     metric({
       key: 'lowest_forecast_cash',
-      label: 'Lowest Forecast Cash',
+      label: hasForecast ? 'Lowest Forecast Cash' : 'Lowest Forecast Cash (no forecast imported)',
       section: 'cash',
       value: projection.lowestCash,
       formula: projection.lowestMonth

@@ -42,6 +42,18 @@ export async function GET(
 
   const name = `Interest-Advance received_${report.projectLabel}_${report.reportDate.replaceAll('-', '.')}.xlsx`;
 
+  // A workbook leaving the system is the point at which financial detail
+  // stops being controlled by it, so who took a copy and when is worth as
+  // much of a record as who changed a figure.
+  await audit({
+    action: 'report.download',
+    entity: 'customer_card_report',
+    entityId: id,
+    summary: `Downloaded the Customer Card report for ${report.projectLabel} dated ${report.reportDate}`,
+    detail: { fileName: name, bytes: bytes.length },
+    companyId: company.id,
+  });
+
   return new NextResponse(new Uint8Array(bytes), {
     status: 200,
     headers: {

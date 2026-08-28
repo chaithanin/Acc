@@ -4,6 +4,8 @@ import { OverviewCharts } from './overview-charts';
 import { getProjectMetrics, getProjection, loadDatasetSummary } from '@/lib/dashboard/queries';
 import { loadDashboard, pickMetrics } from '@/lib/dashboard/context';
 import { SectionLabel } from '@/components/ui/primitives';
+import { AlertPanel } from '@/components/alert-panel';
+import { buildAlerts } from '@/lib/alerts';
 
 /** Executive Overview (requirement 12.1). */
 export default async function OverviewPage({
@@ -30,6 +32,15 @@ export default async function OverviewPage({
     'advance_outstanding',
   ]);
 
+  // Everything management should be told without having to look for it. Built
+  // from figures that already exist, so an alert cannot silently stop working
+  // when a data source it alone depended on goes quiet.
+  const alerts = buildAlerts({
+    metrics: context.byKey,
+    reportDate: context.snapshot?.reportDate ?? null,
+    importedAt: context.snapshot?.createdAt ?? null,
+  });
+
   const charts = context.scope
     ? {
         projection: getProjection(context.scope),
@@ -44,6 +55,8 @@ export default async function OverviewPage({
       description="Group-wide financial position for the selected reporting period."
       context={context}
     >
+      <AlertPanel alerts={alerts} />
+
       <SectionLabel>Financial position</SectionLabel>
       <KpiGrid>
         {headline.map((metric, index) => (

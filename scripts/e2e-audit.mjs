@@ -940,11 +940,30 @@ async function audit() {
         }
 
         // ------------------------------------------------------ companies
-        const companyActions = ACTIONS.get('/settings/companies') ?? [];
-        check('adding a company is possible without database access', false,
-          `/settings/companies registers ${companyActions.length} actions and none of them creates a company `
-          + '(upload logo, remove logo, update details), and the page has no add form; a new subsidiary '
-          + 'can only be added by writing to the database', 'Improvement');
+    
+
+        // --- a new subsidiary can be added without database access
+        const before = count('SELECT COUNT(*) AS n FROM companies');
+        await page.goto('/settings/companies', { waitUntil: 'domcontentloaded' });
+        const addCo = page.locator('form:has(button:text("Add company"))');
+        await addCo.locator('input[name="companyCode"]').fill('E2ENEW');
+        await addCo.locator('input[name="legalName"]').fill('บริษัท อีทูอี นิว จำกัด');
+        await addCo.locator('input[name="displayName"]').fill('E2E New Co');
+        await addCo.locator('button:text("Add company")').click();
+        await page.waitForLoadState('networkidle');
+
+        const added = row('SELECT id, legal_name AS legal FROM companies WHERE company_code = ?', 'E2ENEW');
+        check('a new subsidiary can be added without database access', !!added,
+          `company count went from ${before} to ${count('SELECT COUNT(*) AS n FROM companies')}`,
+          'High');
+
+        if (added) {
+          check('the new company keeps the registered legal name it was given',
+            added.legal === 'บริษัท อีทูอี นิว จำกัด', `stored as ${added.legal}`, 'Medium');
+          check('nobody can open it until they are granted it',
+            count('SELECT COUNT(*) AS n FROM user_companies WHERE company_id = ?', added.id) === 0,
+            'the new company was granted to somebody automatically', 'Critical');
+        }
 
         const renamed = 'E2E Alpha Renamed';
         await page.goto('/settings/companies', { waitUntil: 'domcontentloaded' });
@@ -1332,6 +1351,26 @@ async function audit() {
         + `(difference ${round2((kpi ?? 0) - (opened.total ?? 0))})`, 'Critical');
     }
 
+    // --- alerts and freshness
+    const overview = await get('/', admin);
+    const alertsShown = /Needs attention/.test(overview.text);
+    const overdueShare = (stored('receivable_overdue') ?? 0) / (stored('total_receivable_outstanding') || 1);
+    check('management is told what needs attention, without having to look',
+      overdueShare < 0.25 || alertsShown,
+      `${round2(overdueShare * 100)}% of the receivable balance is overdue and the overview says nothing`,
+      'High');
+
+    check('a snapshot older than the close window says so',
+      /old|overdue/i.test(overview.text) || alertsShown,
+      'nothing on the overview distinguishes this month from one three months stale', 'Medium');
+
+    // --- a workbook leaving the system is recorded
+    const downloaded = await get(`/api/reports/customer-card/${alpha.reportId}`, admin);
+    check('downloading a report is recorded',
+      downloaded.status !== 200
+        || count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'report.download'") > 0,
+      'a workbook left the system with nothing saying who took it', 'High');
+
     // --- the derived identities the engine states
     const identity = (name, left, right, severity = 'Critical') =>
       check(name, near(left, right), `${left} vs ${right}`, severity);
@@ -1439,6 +1478,13 @@ async function audit() {
     // requires. `admin` holds one, which is what it must refuse.
     const ceo = { ...both, cookies: new Map() };
     await login(ceo);
+
+    // M5b added a company through the form, so the group user's grants are one
+    // short of the group. Granting it here is what an administrator would do,
+    // and it is the condition the view requires: every company, or no group.
+    for (const company of repos.companies.listAllCompanies()) {
+      repos.companies.grantCompany(both.id, company.id);
+    }
 
     const activeCompanies = count('SELECT COUNT(*) AS n FROM companies WHERE active = 1');
     const ceoGrants = count('SELECT COUNT(*) AS n FROM user_companies WHERE user_id = ?', both.id);

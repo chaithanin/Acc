@@ -23,6 +23,17 @@ export interface DefaultProject {
   aliases: string[];
 }
 
+/**
+ * The legal names below are the ones the group supplied for the 2026 audit.
+ *
+ * They differ from the spellings this file previously carried — มารีน่า for
+ * มาริน่า, วิกตอเรีย for วิคทอเรีย, เจนีวา for เจนิวา — and in one case name a
+ * different entity: เอสอาร์ where this said เอลย่า. Every previous spelling is
+ * kept as an alias, so a workbook exported by a system that still uses the old
+ * one is recognised exactly as before. A dashboard used for management
+ * reporting should carry the registered name; the importer should recognise
+ * whatever the file happens to say.
+ */
 export const DEFAULT_PROJECTS: DefaultProject[] = [
   {
     code: 'HAMONIA',
@@ -55,7 +66,7 @@ export const DEFAULT_PROJECTS: DefaultProject[] = [
   {
     code: 'MARINA_VTR',
     name: 'Marina Golden Bay Victoria',
-    company: 'บริษัท มาริน่า โกลเด้น เบย์ วิคทอเรีย จำกัด',
+    company: 'บริษัท มารีน่า โกลเด้น เบย์ วิกตอเรีย จำกัด',
     sortOrder: 20,
     aliases: [
       'Marina Golden Bay Victoria',
@@ -78,7 +89,7 @@ export const DEFAULT_PROJECTS: DefaultProject[] = [
   {
     code: 'MARINA_ELYA',
     name: 'Marina Golden Bay Elya',
-    company: 'บริษัท มาริน่า โกลเด้น เบย์ เอลย่า จำกัด',
+    company: 'บริษัท มารีน่า โกลเด้น เบย์ เอสอาร์ จำกัด',
     sortOrder: 21,
     aliases: [
       'Marina Golden Bay Elya',
@@ -89,12 +100,21 @@ export const DEFAULT_PROJECTS: DefaultProject[] = [
       'มารีน่า โกลเด้น เบย์ เอลย่า',
       'มาริน่าโกลเด้นเบย์เอลย่า',
       'เอลย่า',
+      // The group's 2026 list names this entity เอสอาร์, where this file has
+      // always said เอลย่า. Both are recognised until somebody confirms which
+      // is on the certificate: refusing to read a file because the name moved
+      // would be worse than reading it under either.
+      'Marina Golden Bay SR',
+      'MGB-SR',
+      'มารีน่า โกลเด้น เบย์ เอสอาร์',
+      'มาริน่า โกลเด้น เบย์ เอสอาร์',
+      'เอสอาร์',
     ],
   },
   {
     code: 'MARINA_GENEVA',
     name: 'Marina Golden Bay Geneva',
-    company: 'บริษัท มาริน่า โกลเด้น เบย์ เจนิวา จำกัด',
+    company: 'บริษัท มารีน่า โกลเด้น เบย์ เจนีวา จำกัด',
     sortOrder: 22,
     aliases: [
       'Marina Golden Bay Geneva',
@@ -104,6 +124,8 @@ export const DEFAULT_PROJECTS: DefaultProject[] = [
       'มาริน่า โกลเด้น เบย์ เจนิวา',
       'มารีน่า โกลเด้น เบย์ เจนิวา',
       'มาริน่าโกลเด้นเบย์เจนิวา',
+      'มารีน่า โกลเด้น เบย์ เจนีวา',
+      'เจนีวา',
       'เจนิวา',
     ],
   },

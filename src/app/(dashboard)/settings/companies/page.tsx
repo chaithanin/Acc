@@ -4,7 +4,7 @@ import { Card, CardHeader, PageHeader } from '@/components/ui/primitives';
 import { can, currentUser } from '@/lib/auth';
 import { audit, changedFields } from '@/lib/audit';
 import { describeLogoLimits, toLogoDataUri } from '@/lib/companies/logo-upload';
-import { listAllCompanies, updateCompany } from '@/lib/db/repositories/companies';
+import { createCompany, listAllCompanies, updateCompany } from '@/lib/db/repositories/companies';
 import { CompanyRow } from './company-row';
 
 /**
@@ -101,6 +101,41 @@ export default async function CompanySettingsPage({
     redirect(`/settings/companies?notice=${encodeURIComponent('Logo removed.')}`);
   }
 
+  async function createCompanyAction(formData: FormData) {
+    'use server';
+    await guard();
+
+    const companyCode = String(formData.get('companyCode') ?? '').trim().toUpperCase();
+    const legalName = String(formData.get('legalName') ?? '').trim();
+    const displayName = String(formData.get('displayName') ?? '').trim() || undefined;
+
+    if (!companyCode || !legalName) {
+      redirect(`/settings/companies?error=${encodeURIComponent('A code and a legal name are both required.')}`);
+    }
+
+    let created;
+    try {
+      created = createCompany({ companyCode, legalName, displayName });
+    } catch (err) {
+      redirect(`/settings/companies?error=${encodeURIComponent((err as Error).message)}`);
+    }
+
+    await audit({
+      action: 'company.create',
+      entity: 'company',
+      entityId: created.id,
+      summary: `Added ${legalName} to the group`,
+      detail: { companyCode, legalName, displayName },
+      companyId: created.id,
+    });
+
+    revalidatePath('/settings/companies');
+    revalidatePath('/companies');
+    redirect(
+      `/settings/companies?notice=${encodeURIComponent(`Added ${legalName}. Nobody can open it until they are granted access in Users & Roles.`)}`,
+    );
+  }
+
   async function updateDetailsAction(formData: FormData) {
     'use server';
     await guard();
@@ -165,6 +200,47 @@ export default async function CompanySettingsPage({
           />
         ))}
       </div>
+
+      <Card className="mt-4">
+        <CardHeader
+          title="Add a company"
+          subtitle="A new subsidiary. Nobody can open it until they are granted access in Users & Roles — including the person who adds it."
+        />
+        <form action={createCompanyAction} className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Code</span>
+            <input
+              name="companyCode"
+              placeholder="e.g. MGBSR"
+              required
+              className="w-32 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm uppercase text-ink"
+            />
+          </label>
+          <label className="flex min-w-64 flex-1 flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Registered legal name</span>
+            <input
+              name="legalName"
+              placeholder="บริษัท ... จำกัด"
+              required
+              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Short name (optional)</span>
+            <input
+              name="displayName"
+              placeholder="Shown on screen"
+              className="w-56 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            Add company
+          </button>
+        </form>
+      </Card>
 
       <Card className="mt-4">
         <CardHeader
