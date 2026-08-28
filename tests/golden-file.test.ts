@@ -192,9 +192,23 @@ const EXPECTED: Record<string, number | null> = {
   // 27.8M cash + 5.1M receivable − 9.2M owed.
   net_financial_position: 23_700_000,
 
-  // Liquidity, against 9.2M payables.
-  quick_ratio: 3.58, //           (27.8 + 5.1) / 9.2
-  current_ratio: 5.15, //         (27.8 + 5.1 + 2.5 + 12) / 9.2
+  // Balance sheet: 30.0M bank + 5.1M receivable + 2.5M advances + 12.0M WIP
+  // against 0 payable + 7.0M certified unpaid + 2.2M pending.
+  current_assets: 49_600_000,
+  current_liabilities: 9_200_000,
+  working_capital: 40_400_000,
+
+  // Liquidity, the balance sheet divided. Bank rather than Available Cash:
+  // pending sits in liabilities and is not netted off cash as well.
+  quick_ratio: 3.82, //            (30.0 + 5.1) / 9.2
+  current_ratio: 5.39, //          49.6 / 9.2
+
+  // Cash flow for the report month. Salaries and corporate tax are August's,
+  // and both were paid; nothing in this workbook is land or capital; and no
+  // loan or dividend record exists, so financing is unknown rather than zero.
+  operating_cash_flow: -3_000_000,
+  investing_cash_flow: 0,
+  financing_cash_flow: null,
 
   // Cash: no forecast rows in this workbook, so the projection holds flat.
   current_cash: 27_800_000,

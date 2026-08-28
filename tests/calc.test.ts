@@ -278,13 +278,14 @@ describe('income statement and liquidity', () => {
     assert.equal(byKey.get('contracted_sale_value')?.value, 10_000_000);
   });
 
-  it('computes the liquidity ratios against payables', () => {
-    // The unpaid tax is pending, so it both reduces available cash and forms
-    // the payable: cash 3.0M − 0.5M = 2.5M; payables = 0.5M.
+  it('computes the liquidity ratios against the balance sheet', () => {
+    // The unpaid tax is pending, so it is a liability. It is counted there and
+    // nowhere else: netting it off cash as well would count the same
+    // commitment twice, which is what the ratios used to do.
     assert.equal(byKey.get('available_cash')?.value, 2_500_000);
-    assert.equal(byKey.get('total_outstanding_expense')?.value, 500_000);
-    // Quick = (2.5M available + 4.0M receivable outstanding) ÷ 0.5M
-    assert.equal(byKey.get('quick_ratio')?.value, 13);
+    assert.equal(byKey.get('current_liabilities')?.value, 500_000);
+    // Quick = (3.0M bank + 4.0M receivable outstanding) ÷ 0.5M
+    assert.equal(byKey.get('quick_ratio')?.value, 14);
     assert.equal(byKey.get('quick_ratio')?.unit, 'RATIO');
   });
 

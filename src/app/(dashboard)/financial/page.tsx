@@ -45,6 +45,12 @@ export default async function FinancialDashboardPage({
     'operating_expenses',
     'operating_profit',
     'taxes',
+    'current_assets',
+    'current_liabilities',
+    'working_capital',
+    'operating_cash_flow',
+    'investing_cash_flow',
+    'financing_cash_flow',
   ];
 
   const metrics = new Map(pickMetrics(context, keys).map((m) => [m.key, m]));

@@ -358,13 +358,15 @@ describe('position and liquidity', () => {
     // 2,500,000 owed to vendors + 4,000,000 certified unpaid + 2,000,000 pending.
     assert.equal(c.byKey.get('total_owed')?.value, 8_500_000);
 
-    // Quick = (13,000,000 cash + 14,500,000 receivable) ÷ 8,500,000.
-    assert.equal(c.byKey.get('quick_ratio')?.value, 3.24);
+    // Quick = (15,000,000 bank + 14,500,000 receivable) ÷ 8,500,000 owed.
+    // Bank, not Available Cash: pending belongs in liabilities, and netting it
+    // off cash as well counted the same commitment twice.
+    assert.equal(c.byKey.get('quick_ratio')?.value, 3.47);
 
     const quick = c.byKey.get('quick_ratio');
     assert.ok(quick);
-    assert.equal(quick.inputs.find((i) => i.label === 'Accounts Payable')?.value, 2_500_000);
-    assert.equal(quick.inputs.find((i) => i.label === 'Total owed')?.value, 8_500_000);
+    assert.equal(quick.inputs.find((i) => i.label === 'Current Liabilities')?.value, 8_500_000);
+    assert.equal(c.byKey.get('current_liabilities')?.value, 8_500_000);
   });
 
   it('ages the payables so the company can see its own arrears', () => {
@@ -394,8 +396,33 @@ describe('position and liquidity', () => {
   it('still counts construction obligations when there are no vendor invoices', () => {
     assert.equal(v(calc, 'accounts_payable'), 0);
     assert.equal(v(calc, 'total_owed'), 6_000_000);
-    assert.equal(v(calc, 'quick_ratio'), 4.58);
-    assert.equal(v(calc, 'current_ratio'), 6.08);
+    assert.equal(v(calc, 'quick_ratio'), 4.92);
+    assert.equal(v(calc, 'current_ratio'), 6.42);
+  });
+
+  /**
+   * The working-capital half of a balance sheet. Not a statutory one — the
+   * imports carry no share capital, no borrowing and no accumulated profit —
+   * but enough that the difference between what is held and what is owed has
+   * a name and can be checked.
+   */
+  it('states current assets, current liabilities and the gap between them', () => {
+    // 15,000,000 bank + 14,500,000 receivable + 2,000,000 advances + 7,000,000 WIP.
+    assert.equal(v(calc, 'current_assets'), 38_500_000);
+    // 0 payable + 4,000,000 certified unpaid + 2,000,000 pending.
+    assert.equal(v(calc, 'current_liabilities'), 6_000_000);
+    assert.equal(v(calc, 'working_capital'), 32_500_000);
+  });
+
+  it('the ratios are the balance sheet divided, so the three agree', () => {
+    const assets = v(calc, 'current_assets') ?? 0;
+    const liabilities = v(calc, 'current_liabilities') ?? 0;
+
+    assert.equal(v(calc, 'working_capital'), assets - liabilities);
+    assert.equal(
+      v(calc, 'current_ratio'),
+      Math.round((assets / liabilities) * 100) / 100,
+    );
   });
 
   it('reports both as not calculable rather than infinity with nothing owed', () => {

@@ -916,6 +916,139 @@ export function calculateMetrics(
     }),
   );
 
+  // ------------------------------------------------------- cash flow, by kind
+  //
+  // Operating, investing and financing. A developer's construction spend is
+  // the argument: building the units it sells is what this business does, so
+  // it is operating cash flow, not investing — the units are inventory, not
+  // fixed assets. Land is the other way round and is classified as investing
+  // where the expense records name it.
+  //
+  // Nothing here is a projection. These are the movements the imported records
+  // account for in the report month, which is what a treasurer reconciles
+  // against the bank statement.
+  const operatingIn = periodCollected.value;
+  const operatingOutRows = periodExpenseRows.filter(
+    (r) => !(POLICY.capitalCategories as readonly string[]).includes(r.category),
+  );
+  const investingOutRows = periodExpenseRows.filter(
+    (r) => (POLICY.capitalCategories as readonly string[]).includes(r.category),
+  );
+
+  const operatingOut = sumBy(operatingOutRows, (r) => r.paidAmount || r.amount);
+  const investingOut = sumBy(investingOutRows, (r) => r.paidAmount || r.amount);
+  const operatingNet = round2(operatingIn - operatingOut.value);
+
+  metrics.push(
+    metric({
+      key: 'operating_cash_flow',
+      label: `Operating Cash Flow, ${reportMonth}`,
+      section: 'cash',
+      value: operatingNet,
+      formula: `Collections in ${reportMonth} − operating payments in ${reportMonth}`,
+      inputs: [
+        input('Collected', periodCollected),
+        input('Paid out', operatingOut),
+      ],
+      refIndexes: [...periodCollected.refIndexes, ...operatingOut.refIndexes],
+    }),
+    metric({
+      key: 'investing_cash_flow',
+      label: `Investing Cash Flow, ${reportMonth}`,
+      section: 'cash',
+      // Negative: money going out. Land and capital purchases only —
+      // construction of units held for sale is operating, because building
+      // what the business sells is what the business does.
+      value: round2(-investingOut.value),
+      formula: `−(payments in ${reportMonth} against ${POLICY.capitalCategories.join(' and ')} categories)`,
+      inputs: [input('Capital spend', investingOut)],
+      refIndexes: investingOut.refIndexes,
+    }),
+    metric({
+      key: 'financing_cash_flow',
+      label: `Financing Cash Flow, ${reportMonth}`,
+      section: 'cash',
+      // Null, not zero. The imports carry no loan drawdowns, repayments,
+      // dividends or capital injections, so this is not a movement of nothing
+      // — it is a movement nobody has told the system about, and reporting
+      // zero would say the company neither borrowed nor repaid.
+      value: null,
+      formula:
+        'Not calculable — no loan, dividend or capital record is imported, so financing movements are unknown',
+      inputs: [],
+      refIndexes: [],
+    }),
+  );
+
+  // ---------------------------------------------------------- balance sheet
+  //
+  // Not a statutory balance sheet: the imports carry no share capital, no
+  // long-term borrowing and no accumulated profit, so equity cannot be read.
+  // What they do carry is enough for the working-capital half of one, and
+  // stating it as a balance makes the arithmetic checkable — the assets and
+  // liabilities below are the same figures the ratios divide, arranged so the
+  // difference between them has a name.
+  const currentAssets = round2(
+    bankCurrent.value + totalReceivableOutstanding + advanceOutstanding.value + wipYtd.value,
+  );
+  const currentLiabilities = round2(
+    payableOutstanding + boqOutstanding + pendingExpense.value,
+  );
+  const workingCapital = round2(currentAssets - currentLiabilities);
+
+  metrics.push(
+    metric({
+      key: 'current_assets',
+      label: 'Current Assets',
+      section: 'position',
+      value: currentAssets,
+      formula: 'Bank + Receivable Outstanding + Advances & Deposits + Work In Progress',
+      inputs: [
+        input('Bank', bankCurrent),
+        plain('Receivable outstanding', totalReceivableOutstanding),
+        input('Advances & deposits', advanceOutstanding),
+        input('Work in progress', wipYtd),
+      ],
+      refIndexes: [
+        ...bankCurrent.refIndexes,
+        ...receivableContractual.refIndexes,
+        ...advanceOutstanding.refIndexes,
+        ...wipYtd.refIndexes,
+      ],
+    }),
+    metric({
+      key: 'current_liabilities',
+      label: 'Current Liabilities',
+      section: 'position',
+      value: currentLiabilities,
+      formula: 'Accounts Payable + BOQ Outstanding + Pending Expense',
+      inputs: [
+        plain('Accounts payable', payableOutstanding),
+        plain('BOQ outstanding', boqOutstanding),
+        input('Pending expense', pendingExpense),
+      ],
+      refIndexes: [
+        ...payableInvoiced.refIndexes,
+        ...boqToDate.refIndexes,
+        ...pendingExpense.refIndexes,
+      ],
+    }),
+    metric({
+      key: 'working_capital',
+      label: 'Working Capital',
+      section: 'position',
+      value: workingCapital,
+      // The headroom the business has to fund itself before it needs a
+      // facility. Negative means today's obligations exceed today's assets.
+      formula: 'Current Assets − Current Liabilities',
+      inputs: [
+        plain('Current assets', currentAssets),
+        plain('Current liabilities', currentLiabilities),
+      ],
+      refIndexes: [...bankCurrent.refIndexes, ...boqToDate.refIndexes],
+    }),
+  );
+
   // ------------------------------------------------------------ liquidity
   //
   // The denominator is what the company owes: vendor invoices unpaid, plus
@@ -926,9 +1059,14 @@ export function calculateMetrics(
   //
   // Both ratios are undefined without payables to divide by, so they report
   // null rather than infinity.
-  const payables = round2(payableOutstanding + outstandingExpense);
-  const quickAssets = round2(availableCash + totalReceivableOutstanding);
-  const currentAssets = round2(quickAssets + advanceOutstanding.value + wipYtd.value);
+  //
+  // They run on the balance-sheet figures above rather than on Available Cash,
+  // which double-counted: Available Cash is bank less pending, and pending is
+  // also part of what is owed, so a committed payment was reducing the
+  // numerator and increasing the denominator at the same time. It belongs in
+  // one place, and on a balance sheet that place is liabilities.
+  const payables = currentLiabilities;
+  const quickAssets = round2(bankCurrent.value + totalReceivableOutstanding);
 
   metrics.push(
     metric({
@@ -952,13 +1090,11 @@ export function calculateMetrics(
       formula:
         payables === 0
           ? 'Not calculable — there are no payables to divide by'
-          : '(Available Cash + Accounts Receivable) ÷ (Accounts Payable + certified construction unpaid + pending payments)',
+          : '(Bank + Accounts Receivable) ÷ Current Liabilities',
       inputs: [
-        plain('Available Cash', availableCash),
+        input('Bank', bankCurrent),
         plain('Accounts Receivable', totalReceivableOutstanding),
-        plain('Accounts Payable', payableOutstanding),
-        plain('Certified construction unpaid + pending', outstandingExpense),
-        plain('Total owed', payables),
+        plain('Current Liabilities', currentLiabilities),
       ],
       refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
     }),
@@ -971,15 +1107,10 @@ export function calculateMetrics(
       formula:
         payables === 0
           ? 'Not calculable — there are no payables to divide by'
-          : '(Available Cash + Accounts Receivable + Advances + Work In Progress) ÷ (Accounts Payable + certified construction unpaid + pending payments)',
+          : 'Current Assets ÷ Current Liabilities',
       inputs: [
-        plain('Available Cash', availableCash),
-        plain('Accounts Receivable', totalReceivableOutstanding),
-        plain('Advances & Deposits', advanceOutstanding.value),
-        plain('Work In Progress', wipYtd.value),
-        plain('Accounts Payable', payableOutstanding),
-        plain('Certified construction unpaid + pending', outstandingExpense),
-        plain('Total owed', payables),
+        plain('Current Assets', currentAssets),
+        plain('Current Liabilities', currentLiabilities),
       ],
       refIndexes: [...bankCurrent.refIndexes, ...receivableContractual.refIndexes],
     }),

@@ -1297,6 +1297,28 @@ async function audit() {
       'contracted_sale_value',
     ];
 
+    // The balance sheet has to be the arithmetic it claims to be.
+    const balance = (key) => stored(key) ?? 0;
+    check('working capital is current assets less current liabilities',
+      near(stored('working_capital'), round2(balance('current_assets') - balance('current_liabilities'))),
+      `${stored('working_capital')} vs ${round2(balance('current_assets') - balance('current_liabilities'))}`,
+      'Critical');
+    check('the current ratio is the balance sheet divided',
+      balance('current_liabilities') === 0
+        || near(stored('current_ratio'), round2(balance('current_assets') / balance('current_liabilities'))),
+      `${stored('current_ratio')} vs ${round2(balance('current_assets') / balance('current_liabilities'))}`,
+      'Critical');
+    check('a committed payment is counted as a liability and not also netted off cash',
+      near(stored('current_liabilities'),
+        round2(balance('accounts_payable') + balance('boq_outstanding') + balance('pending_expense'))),
+      `liabilities ${stored('current_liabilities')} against payable ${stored('accounts_payable')} `
+      + `+ certified unpaid ${stored('boq_outstanding')} + pending ${stored('pending_expense')}`,
+      'Critical');
+    check('financing cash flow says it is unknown rather than reporting zero',
+      stored('financing_cash_flow') === null,
+      `it reports ${stored('financing_cash_flow')}, which would claim the company neither borrowed nor repaid`,
+      'High');
+
     for (const key of OFFERED) {
       const kpi = stored(key);
       const opened = await drill(key);

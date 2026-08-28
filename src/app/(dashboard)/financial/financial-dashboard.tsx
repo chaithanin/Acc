@@ -230,6 +230,68 @@ export function FinancialDashboard({
         </Card>
       </section>
 
+      <section className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Working capital"
+            subtitle="What is held against what is owed. Not a statutory balance sheet — the imports carry no capital, borrowing or accumulated profit."
+          />
+          <dl className="space-y-2 text-sm">
+            {[
+              ['Current assets', m('current_assets')?.current ?? null],
+              ['Current liabilities', negate(m('current_liabilities')?.current)],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
+                <dt className="text-ink-secondary">{label}</dt>
+                <dd className="tabular-nums text-ink">{formatTHB(value as number | null)}</dd>
+              </div>
+            ))}
+            <div className="flex items-baseline justify-between gap-4 pt-1">
+              <dt className="font-medium text-ink">Working capital</dt>
+              <dd className={`font-semibold tabular-nums ${(m('working_capital')?.current ?? 0) < 0 ? 'text-critical' : 'text-ink'}`}>
+                {formatTHB(m('working_capital')?.current ?? null)}
+              </dd>
+            </div>
+          </dl>
+          {(m('working_capital')?.current ?? 0) < 0 ? (
+            <p className="mt-3 text-sm text-critical">
+              Today&rsquo;s obligations exceed today&rsquo;s assets. The business needs a facility or
+              a collection before the next round of payments falls due.
+            </p>
+          ) : null}
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Cash flow by kind"
+            subtitle={`Movements the records account for in ${formatMonth(month)} — what a treasurer reconciles against the bank statement.`}
+          />
+          <dl className="space-y-2 text-sm">
+            {([
+              { label: 'Operating', key: 'operating_cash_flow' },
+              { label: 'Investing', key: 'investing_cash_flow' },
+              { label: 'Financing', key: 'financing_cash_flow' },
+            ] as const).map(({ label, key }) => {
+              const value = m(key)?.current ?? null;
+              return (
+                <div key={label} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
+                  <dt className="text-ink-secondary">{label}</dt>
+                  <dd className={`tabular-nums ${value === null ? 'text-ink-muted' : value < 0 ? 'text-critical' : 'text-ink'}`}>
+                    {value === null ? 'not calculable' : formatTHB(value)}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+          <p className="mt-3 text-xs text-ink-muted">
+            Construction of units held for sale is operating, not investing: building what the
+            business sells is what the business does, and the units are inventory rather than fixed
+            assets. Financing is unknown rather than zero — no loan, dividend or capital record is
+            imported, and reporting zero would claim the company neither borrowed nor repaid.
+          </p>
+        </Card>
+      </section>
+
       <Modal
         open={drilldown !== null}
         onClose={() => setDrilldown(null)}
