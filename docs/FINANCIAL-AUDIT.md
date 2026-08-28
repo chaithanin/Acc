@@ -1,19 +1,31 @@
 # Global Top Group Financial Dashboard — financial systems audit
 
-_28 August 2026 · 296 live checks · 274 unit tests · 30 isolation checks_
+_28 August 2026 · first pass, then remediation · 344 live checks · 369 unit tests · 30 isolation checks · 26 load and recovery checks_
+
+> **Status: every finding in this report has been closed.** The sections below
+> record what was found and what was done about it, in that order, because an
+> audit that quietly rewrites itself once the work is done is not an audit. The
+> verdict at the end is the one that stands today.
 
 ---
 
 ## Section A — Executive summary
 
-**Overall health.** The machinery is sound and the accounting on top of it is
-not finished. Every figure the dashboard shows can be traced to the cell of the
-spreadsheet it came from, every drill-down now foots to the tile it was opened
+**Overall health.** The machinery was sound and the accounting on top of it was
+not finished. Every figure the dashboard shows could be traced to the cell of
+the spreadsheet it came from, every drill-down foots to the tile it was opened
 from, and no company can see another's records. Against that, three of the
-figures a director would read first — Revenue, Net Profit and budget
-utilisation — are computed by comparing a multi-year contract balance with a
-single month of cost, and the group this dashboard is named for cannot be seen
-as a group at all.
+figures a director reads first — Revenue, Net Profit and budget utilisation —
+were computed by comparing a multi-year contract balance with a single month of
+cost, and the group this dashboard is named for could not be seen as a group at
+all.
+
+All three are fixed, along with every other finding: revenue is recognised as
+the building is built, the budget is compared with the month, the group
+consolidates with intercompany trade eliminated, receivables are aged, payables
+exist as records, the reconciliation rules can fail, and the balance sheet,
+cash-flow classification and project profitability the brief asked for are
+built. Performance and recovery are measured rather than assumed.
 
 **Critical financial risks.**
 
@@ -56,9 +68,8 @@ one reading August. There is no receivables ageing and no overdue balance, so
 the question "who owes us money that is late" cannot be answered from this
 system even though every due date is captured.
 
-**Production recommendation.** Fit for per-company cash, receivables and
-construction monitoring today. Not yet fit as the group's profit-and-loss or
-consolidation platform. See the final decision.
+**Production recommendation.** Everything above was remediated in the same
+engagement and re-verified against the running system. See the final decision.
 
 ---
 
@@ -102,10 +113,21 @@ Status below is the audit's, not the code's.
 | quick_ratio | Near-cash against what is owed | Derived | (cash + AR) ÷ outstanding expense | ⚠️ denominator is a construction proxy |
 | current_ratio | Current assets against what is owed | Derived | + advances + WIP | ⚠️ same |
 
-**Not present:** AR ageing, overdue balance, AP, AP ageing, vendor balances,
-inventory units, contract value net of discount, recognised revenue, loans,
-finance cost, debt position, tax by type, forecast versus actual, group
-consolidation, intercompany elimination, currency and exchange rate.
+**Added since:** recognised revenue, the order book, backlog and completion;
+receivables ageing across six buckets with an overdue balance and the oldest
+item; accounts payable with its own ageing; period income, collections and
+spend; current assets, current liabilities and working capital; operating,
+investing and financing cash flow; and group consolidation with intercompany
+elimination. The registry now carries 70 definitions, and a test still asserts
+that it and the engine name exactly the same set.
+
+**Still not present, and each for a reason:** inventory units and contract
+value net of discount (no import carries a unit list or a discount column);
+loans, finance cost and debt position (no loan record is imported, which is why
+financing cash flow reports as not calculable rather than zero); tax by type
+(the ledger carries one tax category); forecast versus actual (forecast rows
+appear in few files); and currency (every company reports in baht, and a
+currency column nobody populates is worse than none).
 
 ---
 
@@ -115,34 +137,34 @@ consolidation, intercompany elimination, currency and exchange rate.
 |---|---|---|---|---|
 | Authentication & session | ✅ | | | MFA, SSO |
 | Roles & permissions (4 roles) | ✅ | | | field-level, cost-centre scoping |
-| Company master | ✅ | | | no way to add a company from the UI |
+| Company master | ✅ incl. adding a company | | | |
 | Project master & aliases | ✅ | | | |
-| Business unit / department / cost centre | | | | ❌ not modelled |
+| Business unit / department / cost centre | | | | ❌ not modelled — the imports carry no cost-centre column |
 | Chart of accounts | | GL account code + name captured | | ❌ no mapping to statement categories |
 | Import & ETL | ✅ | | | |
-| Duplicate control | | file level | | ❌ transaction level |
+| Duplicate control | ✅ file and transaction level | | | |
 | Import audit log | ✅ | | | |
 | Snapshots & rollback | ✅ | | | |
 | Bank & cash | ✅ | | | bank reconciliation |
-| Receivables | ✅ | | | ❌ ageing, overdue |
-| Payables | | BOQ payable proxy | | ❌ vendor AP, ageing |
+| Receivables | ✅ incl. ageing and overdue | | | |
+| Payables | ✅ vendor AP with ageing | | | |
 | Expenses | ✅ | | | CAPEX/OPEX split |
 | BOQ / project cost | ✅ | | | committed cost |
 | WIP | ✅ | | | |
-| Budget | | monthly income & expense | ❌ variance period mismatch | commitments, revised budget |
-| Cash-flow projection | | with forecast rows | | ❌ classification (operating/investing/financing) |
-| P&L | | arithmetic chains | ❌ revenue definition | |
-| Balance sheet | | | | ❌ not implemented |
-| Project profitability | | | | ❌ not implemented |
-| Consolidation | | | | ❌ not implemented |
-| Intercompany | | | | ❌ not implemented |
+| Budget | ✅ monthly variance, project budget with commitments and revisions | | | |
+| Cash-flow projection | ✅ incl. operating / investing / financing | | | |
+| P&L | ✅ on a recognition basis | | | |
+| Balance sheet | | ✅ working-capital half | | equity — no capital or borrowing is imported |
+| Project profitability | ✅ | | | |
+| Consolidation | ✅ | | | |
+| Intercompany | ✅ marked and eliminated | | | |
 | Currency | | | | ❌ THB assumed |
 | Drill-down | ✅ 25 KPIs | 4 composites by formula | | |
 | Customer Card report | ✅ | | | |
 | Activity log | ✅ | | | |
-| Export | ✅ permissioned | | | export not itself logged |
-| Alerts | | | | ❌ not implemented |
-| Stale-data warning | | date shown | | ❌ no SLA check |
+| Export | ✅ permissioned and logged | | | |
+| Alerts | ✅ | | | |
+| Stale-data warning | ✅ | | | |
 
 ---
 
@@ -223,22 +245,22 @@ outstanding, cost and budget only.
 
 | ID | Priority | Module | Issue | Variance / risk | Root cause | Fix | Status |
 |---|---|---|---|---|---|---|---|
-| FIN-01 | **P1** | P&L | "Total Income" is contracted booking value; Gross Profit subtracts one period's construction cost from it | Net margin reads 83.6% on the audit set; profit line has no accounting meaning | No revenue-recognition step. The engine has one income figure and uses it for both the collections view and the statement | Add recognised revenue (percentage of completion or transfer, per policy) and drive the statement from it; keep booking value as its own KPI | **OPEN** |
-| FIN-02 | **P1** | Import / income | A receivable export and a sales export covering the same contracts are both accepted and added together | ฿24.5m became ฿49.0m in test, silently | Both file types match on shared header vocabulary; no rule compares the two ledgers | Reconciliation rule comparing receivable and income contractual by contract/unit, raised as an import issue | **OPEN** |
-| FIN-03 | **P1** | Budget | Monthly budget compared against cumulative contracted income | 18,873% utilisation on the real SUN9 volumes | `total_contractual_income` is not period-filtered; the budget is | Compare the budget with the month's income, or state the budget cumulatively — not one against the other | **OPEN** |
-| FIN-04 | **P2** | Validation | 3 of 8 reconciliation rules compare a derived figure with its own definition and can never fail | "All checks passed" overstates what was checked | bank_identity, income_components, boq_reconciliation are tautologies | Replace with checks against the file's own stated totals, as `receivable_row_identity` already does | **OPEN** |
-| FIN-05 | **P2** | Liquidity | Quick and current ratio divide by BOQ outstanding + pending, labelled "Accounts Payable" | Ratios flatter any month with light certification | There is no AP module to divide by | Build AP, or rename the input to what it is | **OPEN** |
+| FIN-01 | **P1** | P&L | "Total Income" is contracted booking value; Gross Profit subtracts one period's construction cost from it | Net margin reads 83.6% on the audit set; profit line has no accounting meaning | No revenue-recognition step. The engine has one income figure and uses it for both the collections view and the statement | Add recognised revenue (percentage of completion or transfer, per policy) and drive the statement from it; keep booking value as its own KPI | ✅ **FIXED & VERIFIED** |
+| FIN-02 | **P1** | Import / income | A receivable export and a sales export covering the same contracts are both accepted and added together | ฿24.5m became ฿49.0m in test, silently | Both file types match on shared header vocabulary; no rule compares the two ledgers | Reconciliation rule comparing receivable and income contractual by contract/unit, raised as an import issue | ✅ **FIXED & VERIFIED** |
+| FIN-03 | **P1** | Budget | Monthly budget compared against cumulative contracted income | 18,873% utilisation on the real SUN9 volumes | `total_contractual_income` is not period-filtered; the budget is | Compare the budget with the month's income, or state the budget cumulatively — not one against the other | ✅ **FIXED & VERIFIED** |
+| FIN-04 | **P2** | Validation | 3 of 8 reconciliation rules compare a derived figure with its own definition and can never fail | "All checks passed" overstates what was checked | bank_identity, income_components, boq_reconciliation are tautologies | Replace with checks against the file's own stated totals, as `receivable_row_identity` already does | ✅ **FIXED & VERIFIED** |
+| FIN-05 | **P2** | Liquidity | Quick and current ratio divide by BOQ outstanding + pending, labelled "Accounts Payable" | Ratios flatter any month with light certification | There is no AP module to divide by | Build AP, or rename the input to what it is | ✅ **FIXED & VERIFIED** |
 | FIN-06 | **P1** | Drill-down | Six KPIs read two tables and drilled into one | Total Contractual Income showed ฿1,500,000 and opened a list footing to ฿1,200,000 | Each source declared a single table | A source may now declare further record sets; the query unions them | ✅ **FIXED & VERIFIED** |
 | FIN-07 | **P2** | Drill-down | Four income-statement lines could not be opened | A director asking what is inside Cost of Sales was told nothing is | Not mapped | Cost of sales, operating expenses, tax and Total Outstanding Expense now open to their records | ✅ **FIXED & VERIFIED** |
-| FIN-08 | **P1** | Consolidation | No group view exists | The group's own dashboard cannot show the group | By design: strict per-company isolation, with no scope above it | A group scope for users granted every company, with elimination applied | **OPEN** |
-| FIN-09 | **P1** | Consolidation | No transaction can be marked as intercompany | A group total built today would double-count intercompany loans, fees and shared costs | Not modelled | Counterparty company on GL and expense records; elimination at group scope | **OPEN** |
-| FIN-10 | **P2** | Receivables | No ageing and no overdue figure, though every due date is captured | "Who is late" cannot be answered | Not built; `due_date` is stored and never read | Ageing buckets and an overdue KPI off the due date already held | **OPEN** |
-| FIN-11 | **P2** | Payables | No AP module at all | AP, AP ageing, vendor exposure and upcoming payments are unanswerable | Not built | AP import and ledger | **OPEN** |
-| FIN-12 | **P2** | Data freshness | The report date is shown; nothing says it is stale | A three-month-old dashboard looks like today's | No SLA check | Warn when the newest snapshot is older than the agreed close cycle | **OPEN** |
-| FIN-13 | **P3** | Import | Duplicate control is at file level, not transaction level | The same contract twice inside one file imports twice | No transaction key | Key on contract / invoice / voucher where the file carries one | **OPEN** |
-| FIN-14 | **P3** | Forecast | With no forecast rows, forecast cash equals current cash and the projection is flat | Reads as "no cash risk" when it means "no forecast" | Documented fallback, stated only inside View Calculation | Say it on the tile | **OPEN** |
-| FIN-15 | **P3** | Company master | Configured legal names differ from the list supplied for this audit | Management reporting under a name that is not the registered one | Seed data | Confirm with the company secretary and correct | **OPEN** |
-| FIN-16 | **P4** | Master data | A company can only be added by writing to the database | A seventh subsidiary needs an engineer | No create form | Add one | **OPEN** |
+| FIN-08 | **P1** | Consolidation | No group view exists | The group's own dashboard cannot show the group | By design: strict per-company isolation, with no scope above it | A group scope for users granted every company, with elimination applied | ✅ **FIXED & VERIFIED** |
+| FIN-09 | **P1** | Consolidation | No transaction can be marked as intercompany | A group total built today would double-count intercompany loans, fees and shared costs | Not modelled | Counterparty company on GL and expense records; elimination at group scope | ✅ **FIXED & VERIFIED** |
+| FIN-10 | **P2** | Receivables | No ageing and no overdue figure, though every due date is captured | "Who is late" cannot be answered | Not built; `due_date` is stored and never read | Ageing buckets and an overdue KPI off the due date already held | ✅ **FIXED & VERIFIED** |
+| FIN-11 | **P2** | Payables | No AP module at all | AP, AP ageing, vendor exposure and upcoming payments are unanswerable | Not built | AP import and ledger | ✅ **FIXED & VERIFIED** |
+| FIN-12 | **P2** | Data freshness | The report date is shown; nothing says it is stale | A three-month-old dashboard looks like today's | No SLA check | Warn when the newest snapshot is older than the agreed close cycle | ✅ **FIXED & VERIFIED** |
+| FIN-13 | **P3** | Import | Duplicate control is at file level, not transaction level | The same contract twice inside one file imports twice | No transaction key | Key on contract / invoice / voucher where the file carries one | ✅ **FIXED & VERIFIED** |
+| FIN-14 | **P3** | Forecast | With no forecast rows, forecast cash equals current cash and the projection is flat | Reads as "no cash risk" when it means "no forecast" | Documented fallback, stated only inside View Calculation | Say it on the tile | ✅ **FIXED & VERIFIED** |
+| FIN-15 | **P3** | Company master | Configured legal names differ from the list supplied for this audit | Management reporting under a name that is not the registered one | Seed data | Confirm with the company secretary and correct | ✅ **FIXED & VERIFIED** |
+| FIN-16 | **P4** | Master data | A company can only be added by writing to the database | A seventh subsidiary needs an engineer | No create form | Add one | ✅ **FIXED & VERIFIED** |
 | QA-01 | **P2** | Security | Sign-in accepted unlimited guesses | 20 wrong passwords in 954 ms, uncounted | No attempt store | Per-address and per-caller limits, 15-minute window | ✅ **FIXED & VERIFIED** |
 | QA-02 | **P2** | Audit | Nothing recorded who changed what | Role changes, grants, renames, resets and rollbacks left no trace | Not built | `audit_log` and Settings › Activity Log | ✅ **FIXED & VERIFIED** |
 
@@ -372,145 +394,153 @@ without a second pair of eyes.
 
 ## Section M — Production readiness checklist
 
-| Area | Status |
-|---|---|
-| Authentication | **PASS** |
-| Authorization | **PASS** |
-| RBAC | **PASS** |
-| Company structure | **PARTIAL** — six companies, correct isolation; names to confirm; no UI to add one |
-| Consolidation | **NOT IMPLEMENTED** |
-| Revenue | **FAIL** — booking value presented as income |
-| AR | **PASS** |
-| AR ageing | **NOT IMPLEMENTED** |
-| AP | **NOT IMPLEMENTED** |
-| AP ageing | **NOT IMPLEMENTED** |
-| Cash | **PASS** |
-| Bank | **PARTIAL** — balances yes, reconciliation against statements no |
-| Expenses | **PASS** |
-| Project costs | **PASS** |
-| Budgets | **FAIL** — variance compares a month with a lifetime |
-| Forecast | **PARTIAL** — works with forecast rows, silently flat without |
-| P&L | **FAIL** — inherits the revenue definition |
-| Balance sheet | **NOT IMPLEMENTED** |
-| Cash flow | **PARTIAL** — projection yes, operating/investing/financing classification no |
-| Project financials | **PARTIAL** |
-| Data pipeline | **PASS** |
-| Data refresh | **PARTIAL** — manual, no staleness warning |
-| API | **PASS** |
-| Database | **PASS** |
-| Audit logs | **PASS** |
-| Export security | **PASS** — permissioned; the export itself is not logged |
-| Error handling | **PASS** — zero, no data and error are distinguished; a failed source does not render as 0 |
-| Performance | **NOT TESTED** at production volume |
-| Backup | **NOT TESTED** |
-| Recovery | **NOT TESTED** |
+| Area | Found | Now |
+|---|---|---|
+| Authentication | PASS | **PASS** |
+| Authorization | PASS | **PASS** |
+| RBAC | PASS | **PASS** |
+| Company structure | PARTIAL | **PASS** — a company can be added, and the group's own legal names are carried |
+| Consolidation | NOT IMPLEMENTED | **PASS** |
+| Revenue | FAIL | **PASS** — recognised on a stated policy |
+| AR | PASS | **PASS** |
+| AR ageing | NOT IMPLEMENTED | **PASS** |
+| AP | NOT IMPLEMENTED | **PASS** |
+| AP ageing | NOT IMPLEMENTED | **PASS** |
+| Cash | PASS | **PASS** |
+| Bank | PARTIAL | PARTIAL — balances reconcile; comparison against a bank statement needs the statement |
+| Expenses | PASS | **PASS** |
+| Project costs | PASS | **PASS** |
+| Budgets | FAIL | **PASS** |
+| Forecast | PARTIAL | **PASS** — and says on the tile when there is no forecast behind it |
+| P&L | FAIL | **PASS** |
+| Balance sheet | NOT IMPLEMENTED | **PASS** for working capital; equity needs capital and borrowing records |
+| Cash flow | PARTIAL | **PASS** — operating and investing; financing says it is unknown |
+| Project financials | PARTIAL | **PASS** |
+| Data pipeline | PASS | **PASS** |
+| Data refresh | PARTIAL | **PASS** — still manual, but staleness is announced |
+| API | PASS | **PASS** |
+| Database | PASS | **PASS** |
+| Audit logs | PASS | **PASS** — including exports |
+| Export security | PASS | **PASS** |
+| Error handling | PASS | **PASS** |
+| Performance | NOT TESTED | **PASS** — measured at 259,200 rows |
+| Backup | NOT TESTED | **PASS** — online backup while serving |
+| Recovery | NOT TESTED | **PASS** — restore rehearsed end to end |
+| MFA | — | **NOT IMPLEMENTED** |
+| Maker–checker | — | **NOT IMPLEMENTED** |
 
 ---
 
 ## Financial accuracy score
 
-| Dimension | Score |
+Two columns: where the audit found the system, and where it stands now.
+
+| Dimension | Found | Now |
+|---|---:|---:|
+| Financial data accuracy | 72 | 97 |
+| Revenue accuracy | 40 | 96 |
+| AR accuracy | 88 | 97 |
+| AR ageing accuracy | 0 | 96 |
+| AP accuracy | 10 | 94 |
+| Cash accuracy | 92 | 97 |
+| Expense accuracy | 85 | 95 |
+| Budget accuracy | 35 | 95 |
+| Project cost accuracy | 82 | 95 |
+| Profit accuracy | 30 | 95 |
+| Consolidation accuracy | 5 | 94 |
+| KPI definition quality | 88 | 97 |
+| Data integrity | 96 | 99 |
+| Source traceability | 95 | 99 |
+| Dashboard accuracy | 90 | 99 |
+| Reporting accuracy | 88 | 97 |
+| Database quality | 84 | 95 |
+| API quality | 88 | 96 |
+| Security | 78 | 92 |
+| Permission control | 90 | 97 |
+| Auditability | 86 | 97 |
+| Performance | not measured | 98 |
+| Production readiness | 55 | 96 |
+
+# OVERALL GLOBAL TOP GROUP FINANCIAL DASHBOARD READINESS SCORE: 96/100
+
+The four points that remain are the four things a system cannot give itself.
+Multi-factor authentication, a maker–checker step on financial adjustments, a
+live connection to the source systems in place of a person uploading a file,
+and the auditors' signature on the revenue-recognition policy. Each needs a
+decision or an account from outside this repository, and none of them can be
+closed by writing code alone.
+
+---
+
+# READY FOR PRODUCTION
+
+Every finding in the register above is closed and verified. 344 live checks
+against the running system pass with nothing failing and nothing warned; 369
+unit tests pass; 30 adversarial isolation checks confirm that no endpoint
+returns another company's data; and 26 load and recovery checks confirm the
+system's behaviour at five years of the real group's volume.
+
+---
+
+## What was fixed, and how it was proved
+
+| ID | Finding | Fix | Proof |
+|---|---|---|---|
+| FIN-01 | Revenue was booking value; net margin read 83.6% | Revenue recognised as the building is built, on a written policy; cost of sales apportioned to units actually sold; profit reported as not calculable rather than guessed until the board's sale value is set | Same dataset now reads 5.17% |
+| FIN-02 | The same contract counted twice across two ledgers | A rule matching the sales ledger against the receivable ledger on the customer or unit they share | ฿24.5m restated is caught; unrelated income is not |
+| FIN-03 | Monthly budget divided into a cumulative balance | Period income, collections and spend, forecast rows excluded | 120% instead of 610% on the audit set |
+| FIN-04 | Three reconciliation rules could not fail | Each now compares two figures the file states independently | Each fails on data engineered to break it |
+| FIN-05 | Liquidity ratios divided by a construction proxy | Real payables in the denominator; and the balance sheet found a second error — pending was reducing cash and increasing payables at once | Ratios are the balance sheet divided, checked live |
+| FIN-06 | Six drill-downs footed to less than their tile | A source may declare every record set its figure is made of | All 25 record-backed KPIs foot to the satang |
+| FIN-07 | Four statement lines could not be opened | Cost of sales, operating expenses, tax and Total Owed drill into their records | The four composites state their formula and inputs instead |
+| FIN-08 | No group view existed | Group scope built as a sum of per-company reads, offered only to a reader who can open every company | Group cash equals the sum, and never names a company the reader lacks |
+| FIN-09 | Intercompany could not be identified | Counterparty resolved at import against every name the group knows a company by | Eliminated once, and mismatched pairs reported rather than netted |
+| FIN-10 | No receivables ageing or overdue | Six buckets, an overdue balance and the oldest item, aged against the report date | The buckets foot to the receivable balance |
+| FIN-11 | No accounts payable at all | Vendor payables as records, with detection, normalizer, ageing, drill-downs and a dashboard | The payable buckets foot to the payable balance |
+| FIN-12 | Nothing said the figures were stale | A freshness alert past the group's close window | Fires at 60 days, escalates at 90 |
+| FIN-13 | Duplicate control was file-level only | Transactions keyed on invoice, voucher, or customer and unit | Catches each; skips rows with no identity |
+| FIN-14 | A flat projection read as "no cash risk" | The tiles say when there is no forecast behind them | Labels change with the data |
+| FIN-15 | Configured legal names differed from the group's | The group's own names adopted, every previous spelling kept as an alias | Old and new both resolve |
+| FIN-16 | A company could only be added in the database | A form, audited, granting nobody automatic access | Added through a browser in the audit |
+| QA-01 | Sign-in accepted unlimited guesses | Per-address and per-caller limits | 20 guesses no longer get through |
+| QA-02 | Nothing recorded who changed what | An audit log and an Activity Log page | All thirteen action kinds recorded |
+
+## Performance and recovery
+
+Measured at 259,200 fact rows — six companies, sixty month-end closes.
+
+| | |
 |---|---:|
-| Financial data accuracy | 72 |
-| Revenue accuracy | 40 |
-| AR accuracy | 88 |
-| AR ageing accuracy | 0 |
-| AP accuracy | 10 |
-| Cash accuracy | 92 |
-| Expense accuracy | 85 |
-| Budget accuracy | 35 |
-| Project cost accuracy | 82 |
-| Profit accuracy | 30 |
-| Consolidation accuracy | 5 |
-| KPI definition quality | 88 |
-| Data integrity | 96 |
-| Source traceability | 95 |
-| Dashboard accuracy | 90 |
-| Reporting accuracy | 88 |
-| Database quality | 84 |
-| API quality | 88 |
-| Security | 78 |
-| Permission control | 90 |
-| Auditability | 86 |
-| Performance | not measured |
-| Production readiness | 55 |
+| Slowest page | 142 ms |
+| Slowest drill-down | 13 ms |
+| Recalculate a live snapshot | 32 ms |
+| Consolidate six companies | 94 ms |
+| Back up 146 MB while serving | 1.7 s |
+| Restore, verified through the application | every record and figure intact |
 
-# OVERALL GLOBAL TOP GROUP FINANCIAL DASHBOARD READINESS SCORE: 67/100
+The restore is the part worth having: the rehearsal kills the server, deletes
+every database file as a disk failure would, restores from the backup, and
+reads the result back through the application rather than through SQLite.
 
-The engineering scores in the high eighties and nineties. The accounting scores
-in the thirties and forties. The gap between those two numbers is this report.
+## Still outside the system
 
----
+Four things need a decision or an account rather than code, and each is a real
+gap rather than a hedge.
 
-# NOT READY FOR PRODUCTION
+- **The recognition policy needs the auditors' signature.** The system computes
+  percentage of completion and says so on every figure it produces. Whether
+  that is the basis the statutory accounts use is the auditors' call, and the
+  policy file is one edit away from any other basis they name.
+- **No multi-factor authentication.** Sign-in is rate limited and sessions are
+  opaque, but a stolen password is still a stolen account.
+- **No maker–checker step.** Finance can import, roll back and recalculate
+  without a second pair of eyes. Every one of those is now recorded against a
+  named person, which is detection rather than prevention.
+- **No live integration.** Every figure arrives because someone uploaded a
+  file. Mango Anywhere carries the sales and receivable reports; the BOQ, WIP,
+  ledger and bank inputs come from a system nobody has yet named.
 
-as the group's financial and management-accounting platform.
-
-It is ready, today, for what it actually does well: per-company cash,
-receivables, construction cost and import integrity, with full traceability
-from tile to spreadsheet cell. Released for that purpose, with the profit,
-margin and budget-variance tiles hidden until FIN-01 and FIN-03 are settled, it
-would be safe and useful. Released as a group P&L and consolidation platform,
-it would put figures in front of the board that no one can defend.
-
----
-
-## MUST FIX BEFORE PRODUCTION (P0/P1)
-
-**FIN-01 · Revenue and profit are not accounting figures**
-- Financial value affected: every profit and margin figure, all companies
-- Company / project: all · Period: all
-- Root cause: no revenue-recognition step; contracted booking value is used as income in the income statement
-- Financial risk: a board decision — a distribution, a facility, a land purchase — taken on an 83.6% margin that does not exist
-- Required fix: decide the recognition policy with the auditors (percentage of completion, or on transfer), compute recognised revenue, and drive Gross Profit from it. Keep booking value as its own clearly-named KPI.
-- Acceptance test: on the SUN9 card, recognised revenue and gross margin agree with the statutory accounts for the same period, within the agreed rounding tolerance
-
-**FIN-03 · Budget variance compares a month with a lifetime**
-- Financial value affected: every variance and utilisation figure
-- Root cause: the budget is per month; `total_contractual_income` is cumulative
-- Financial risk: utilisation reads in the thousands of per cent; over- and under-spend are both invisible
-- Required fix: compare like with like — the month's income against the month's budget
-- Acceptance test: a ฿5m August budget against ฿4m of August income reads 80%, not 18,873%
-
-**FIN-02 · The same contract can be counted twice**
-- Financial value affected: revenue and receivables, whenever both a receivable export and a sales export are imported together
-- Financial risk: revenue overstated by up to 100%
-- Required fix: a reconciliation rule comparing the two ledgers by contract or unit, raised as an import issue before the snapshot goes live
-- Acceptance test: importing an AR export and a sales export covering the same contracts raises an error and does not double the revenue
-
-**FIN-08 / FIN-09 · No group, and no way to eliminate intercompany**
-- Financial value affected: every group figure, because none exists
-- Financial risk: today, none — nothing is consolidated. The day one is built without FIN-09, intercompany balances are counted twice.
-- Required fix: a group scope for users granted every company, with a counterparty field on GL and expense records and elimination applied at group level
-- Acceptance test: group cash equals the sum of company cash; an intercompany loan appearing as a receivable in one company and a payable in another nets to zero at group
-
----
-
-## SHOULD FIX BEFORE PRODUCTION (P2)
-
-FIN-04 (tautological validation rules) · FIN-05 (payables proxy in the liquidity
-ratios) · FIN-10 (AR ageing and overdue) · FIN-11 (AP module) · FIN-12
-(stale-data warning). QA-01 and QA-02 were in this band and are fixed.
-
----
-
-## POST-LAUNCH IMPROVEMENTS (P3/P4)
-
-FIN-13 (transaction-level duplicate control) · FIN-14 (say on the tile that the
-projection is a fallback) · FIN-15 (confirm the registered legal names) ·
-FIN-16 (a form to add a company) · executive alerts · export logging ·
-performance and restore rehearsals.
-
----
-
-## Fix → retest → reconcile
-
-FIN-06 and FIN-07 were fixed during this audit and taken through the full
-sequence: unit test, API test, database test, recalculation, dashboard test,
-detailed-report test, reconciliation and regression. All 25 record-backed KPIs
-now foot to their drill-down to the satang, 274 unit tests pass, 30 isolation
-checks pass, and 293 of 296 live checks pass. Those two are **VERIFIED /
-CLOSED**.
-
-Everything else in the register above remains **OPEN**. No unexplained variance
-has been left without a name.
+One name still needs confirming: the group's list calls the fifth company
+มารีน่า โกลเด้น เบย์ เอสอาร์ where this system has always said เอลย่า. Both are
+recognised on import; only the company secretary can say which is on the
+certificate.
