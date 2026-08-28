@@ -110,6 +110,20 @@ const EXPECTED: Record<string, number | null> = {
   transfer_outstanding: 500_000,
   total_receivable_outstanding: 5_100_000,
 
+  // Ageing. This workbook's receivable sheet carries no due-date column, so
+  // nothing can be aged and every bucket is empty — the whole 5,100,000 is
+  // reported as undated rather than quietly placed in Current, which would
+  // read as a balance that is not yet due when nobody knows whether it is.
+  receivable_aged_current: 0,
+  receivable_aged_1_30: 0,
+  receivable_aged_31_60: 0,
+  receivable_aged_61_90: 0,
+  receivable_aged_91_120: 0,
+  receivable_aged_120_plus: 0,
+  receivable_overdue: 0,
+  receivable_undated: 5_100_000,
+  receivable_oldest_days: null,
+
   // BOQ: 40M + 20M contracted, 30M + 8M certified, 25M + 6M paid.
   boq_total: 60_000_000,
   boq_to_date: 38_000_000,

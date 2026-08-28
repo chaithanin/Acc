@@ -109,12 +109,10 @@ describe('receivables', () => {
     assert.equal(parts.reduce((a, b) => a + b, 0), v(calc, 'total_receivable_outstanding'));
   });
 
-  it('there is no ageing and no overdue figure, though due dates are captured', () => {
-    // Three of the four rows above are past due on the report date. Nothing in
-    // the engine reads dueDate, so an overdue balance cannot be reported and
-    // the ageing buckets a credit controller works from do not exist.
+  it('is aged and has an overdue balance, off the due dates the file carries', () => {
     const keys = [...calc.byKey.keys()];
-    assert.deepEqual(keys.filter((k) => /aging|ageing|overdue|due/i.test(k)), []);
+    assert.ok(keys.filter((k) => /aged|overdue/.test(k)).length >= 7);
+    assert.equal(v(calc, 'receivable_overdue'), 14_000_000);
   });
 });
 
@@ -401,5 +399,88 @@ describe('the period, as distinct from the balance', () => {
     assert.equal(Number(((monthIncome / budget) * 100).toFixed(1)), 120);
     // What the dial used to show.
     assert.equal(Number(((balance / budget) * 100).toFixed(1)), 610);
+  });
+});
+
+/**
+ * FIN-10, as fixed.
+ *
+ * Every receivable row has carried a due date since the first import and
+ * nothing read it. The dashboard could say how much was owed and not how much
+ * was late, which is the only version of the question a credit controller can
+ * act on.
+ */
+describe('receivables ageing', () => {
+  // The audit dataset's due dates against a report date of 2026-08-31:
+  //   contract      20,000,000 due 2026-06-30 — 62 days late, 12,000,000 owed
+  //   reservation    1,000,000 due 2026-05-31 — paid in full, does not age
+  //   down payment   3,000,000 due 2026-07-31 — 31 days late,  2,000,000 owed
+  //   transfer fee     500,000 due 2027-01-31 — not yet due,     500,000 owed
+  const calc = run(auditDataset());
+  const bucket = (label: string) => v(calc, `receivable_aged_${label}`);
+
+  it('places each row in the bucket its due date puts it in', () => {
+    assert.equal(bucket('current'), 500_000);
+    assert.equal(bucket('1_30'), 0);
+    assert.equal(bucket('31_60'), 2_000_000);
+    assert.equal(bucket('61_90'), 12_000_000);
+    assert.equal(bucket('91_120'), 0);
+    assert.equal(bucket('120_plus'), 0);
+  });
+
+  /**
+   * The identity an ageing report has to satisfy. A bucket set that does not
+   * foot to the receivable balance is worse than no ageing at all.
+   */
+  it('foots to the receivable balance', () => {
+    const buckets = ['current', '1_30', '31_60', '61_90', '91_120', '120_plus']
+      .reduce((sum, k) => sum + (bucket(k) ?? 0), 0);
+
+    assert.equal(buckets + (v(calc, 'receivable_undated') ?? 0), 14_500_000);
+    assert.equal(v(calc, 'total_receivable_outstanding'), 14_500_000);
+  });
+
+  it('reports the overdue balance and how old the oldest is', () => {
+    assert.equal(v(calc, 'receivable_overdue'), 14_000_000);
+    assert.equal(v(calc, 'receivable_oldest_days'), 62);
+  });
+
+  it('does not age a row that has been collected in full', () => {
+    // The reservation was paid, so it appears in no bucket.
+    assert.equal(bucket('91_120'), 0);
+    assert.equal(v(calc, 'receivable_undated'), 0);
+  });
+
+  it('reports what it cannot age rather than dropping it', () => {
+    const data = auditDataset();
+    data.receivable = data.receivable.map((r) => ({ ...r, dueDate: null }));
+
+    const undated = run(data);
+    assert.equal(undated.byKey.get('receivable_undated')?.value, 14_500_000);
+    assert.equal(undated.byKey.get('receivable_overdue')?.value, 0);
+    assert.equal(undated.byKey.get('receivable_oldest_days')?.value, null);
+    // And it still foots.
+    assert.equal(
+      (undated.byKey.get('receivable_undated')?.value ?? 0),
+      undated.byKey.get('total_receivable_outstanding')?.value,
+    );
+  });
+
+  /**
+   * Ageing is measured against the report date, not against today. Otherwise
+   * the same import shows a different overdue balance every morning and no two
+   * readings of an August snapshot ever agree.
+   */
+  it('ages against the report date, so a snapshot reads the same tomorrow', () => {
+    const later = calculateMetrics(auditDataset(), '2026-12-31');
+    assert.equal(later.byKey.get('receivable_oldest_days')?.value, 184);
+    // The transfer fee is due 2027-01-31, so it is still not due in December.
+    assert.equal(later.byKey.get('receivable_overdue')?.value, 14_000_000);
+    // By December both the June instalment (184 days) and the July down
+    // payment (153 days) have aged past 120.
+    assert.equal(later.byKey.get('receivable_aged_120_plus')?.value, 14_000_000);
+
+    // The August reading is unchanged by the December one existing.
+    assert.equal(v(calc, 'receivable_oldest_days'), 62);
   });
 });

@@ -169,6 +169,43 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     meaning: 'Transfer fees due but not collected.',
     readsFrom: 'Receivable records in the transfer-fee category.',
   },
+  receivable_aged_current: {
+    meaning: 'Owed but not yet due on the report date.',
+    readsFrom: 'Receivable rows whose due date is on or after the report date.',
+  },
+  receivable_aged_1_30: {
+    meaning: 'Between one and thirty days late.',
+    readsFrom: 'Receivable rows aged against the report date, not against today.',
+  },
+  receivable_aged_31_60: {
+    meaning: 'Between thirty-one and sixty days late.',
+    readsFrom: 'Receivable rows aged against the report date.',
+  },
+  receivable_aged_61_90: {
+    meaning: 'Between sixty-one and ninety days late.',
+    readsFrom: 'Receivable rows aged against the report date.',
+  },
+  receivable_aged_91_120: {
+    meaning: 'Between ninety-one and a hundred and twenty days late.',
+    readsFrom: 'Receivable rows aged against the report date.',
+  },
+  receivable_aged_120_plus: {
+    meaning: 'More than a hundred and twenty days late — the balance least likely to be collected.',
+    readsFrom: 'Receivable rows aged against the report date.',
+  },
+  receivable_overdue: {
+    meaning: 'Everything past its due date and still unpaid.',
+    readsFrom: 'The sum of every bucket except Current.',
+    excludes: 'Rows the file gives no due date for, which are reported on their own.',
+  },
+  receivable_undated: {
+    meaning: 'Owed, but with no due date in the file, so nobody can say whether it is late.',
+    readsFrom: 'Receivable rows with no due date. Reported rather than hidden: an amount that cannot be aged is an amount nobody is chasing.',
+  },
+  receivable_oldest_days: {
+    meaning: 'How old the oldest unpaid instalment is, in days.',
+    readsFrom: 'The earliest unpaid due date, measured to the report date.',
+  },
   total_receivable_outstanding: {
     meaning: 'Everything sold and not yet collected, across all categories.',
     readsFrom: 'Derived: contractual less received across every receivable record.',

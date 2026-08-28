@@ -252,7 +252,63 @@ const RECEIVABLE_CATEGORY_METRICS: Record<string, string> = {
   transfer_outstanding: 'transfer_fee',
 };
 
+/**
+ * Ageing buckets, as a drill-down.
+ *
+ * The bucket a row falls in depends on the snapshot's report date, which the
+ * scope does not carry — so the predicate is written against the report date
+ * stored on the record itself. Every fact row has one.
+ */
+const AGEING_METRICS: Record<string, { label: string; where: string }> = {
+  receivable_aged_current: {
+    label: 'Not yet due',
+    where: "t.due_date IS NOT NULL AND julianday(t.due_date) >= julianday(t.report_date)",
+  },
+  receivable_aged_1_30: {
+    label: '1–30 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 1 AND 30",
+  },
+  receivable_aged_31_60: {
+    label: '31–60 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 31 AND 60",
+  },
+  receivable_aged_61_90: {
+    label: '61–90 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 61 AND 90",
+  },
+  receivable_aged_91_120: {
+    label: '91–120 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) BETWEEN 91 AND 120",
+  },
+  receivable_aged_120_plus: {
+    label: 'More than 120 days overdue',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) - julianday(t.due_date) > 120",
+  },
+  receivable_overdue: {
+    label: 'Overdue receivable',
+    where: "t.due_date IS NOT NULL AND julianday(t.report_date) > julianday(t.due_date)",
+  },
+  receivable_undated: {
+    label: 'Owed with no due date',
+    where: 't.due_date IS NULL',
+  },
+};
+
 function sourceFor(metricKey: string): DrilldownSource | null {
+  const aged = AGEING_METRICS[metricKey];
+  if (aged) {
+    return {
+      label: aged.label,
+      table: 'receivable_records',
+      amount: RECEIVABLE_OUTSTANDING,
+      category: "COALESCE(t.due_date, 'no due date')",
+      description: RECEIVABLE_DESCRIPTION,
+      // Only what is still owed ages. A row collected in full is not a
+      // receivable, and a negative balance is an overpayment.
+      where: `${aged.where} AND ${RECEIVABLE_OUTSTANDING} > 0`,
+    };
+  }
+
   const category = RECEIVABLE_CATEGORY_METRICS[metricKey];
   if (category) {
     return {

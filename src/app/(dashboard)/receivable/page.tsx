@@ -2,6 +2,7 @@ import { DashboardPage } from '@/components/dashboard-page';
 import { KpiCard, KpiGrid } from '@/components/kpi-card';
 import { loadDashboard, pickMetrics } from '@/lib/dashboard/context';
 import { getReceivableRows, loadDatasetSummary } from '@/lib/dashboard/queries';
+import { ReceivableAgeing } from './receivable-ageing';
 import { ReceivableView } from './receivable-view';
 
 /** Receivable Dashboard (requirement 12.3). */
@@ -21,6 +22,23 @@ export default async function ReceivablePage({
     'contract_outstanding',
     'down_payment_outstanding',
     'transfer_outstanding',
+  ]);
+
+  // Ageing is its own read: it answers a different question from "how much is
+  // owed" — namely which of it a credit controller should be chasing today.
+  const ageing = pickMetrics(context, [
+    'receivable_aged_current',
+    'receivable_aged_1_30',
+    'receivable_aged_31_60',
+    'receivable_aged_61_90',
+    'receivable_aged_91_120',
+    'receivable_aged_120_plus',
+  ]);
+
+  const [overdue, undated, oldest] = pickMetrics(context, [
+    'receivable_overdue',
+    'receivable_undated',
+    'receivable_oldest_days',
   ]);
 
   const data = context.scope
@@ -46,6 +64,17 @@ export default async function ReceivablePage({
           />
         ))}
       </KpiGrid>
+
+      <ReceivableAgeing
+        buckets={ageing}
+        overdue={overdue ?? null}
+        undated={undated ?? null}
+        oldest={oldest ?? null}
+        outstanding={metrics.find((m) => m.key === 'total_receivable_outstanding')?.current ?? null}
+        reportDate={context.snapshot?.reportDate ?? ''}
+        snapshotId={context.snapshot?.id ?? ''}
+        projectId={context.projectId}
+      />
 
       {data ? <ReceivableView rows={data.rows} summary={data.summary} /> : null}
     </DashboardPage>

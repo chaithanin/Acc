@@ -3,6 +3,7 @@ import type { IncomeCategory } from '@/config/field-synonyms';
 import { formatTHB } from '@/lib/format/number';
 import type { Metric, MetricInput, MetricSection, NormalizedDataset } from '@/lib/types';
 import { addSums, dedupe, round2, sumBy, type Sum } from './aggregate';
+import { ageReceivables, bucketKey } from './ageing';
 import {
   projectCashflow,
   projectionRefIndexes,
@@ -452,6 +453,72 @@ export function calculateMetrics(
         input('Received', receivableReceived),
       ],
       refIndexes: [...receivableContractual.refIndexes, ...receivableReceived.refIndexes],
+    }),
+  );
+
+  // --------------------------------------------------------------- ageing
+  //
+  // Aged against the report date rather than today, so an August snapshot
+  // shows August's overdue balance whenever it is opened.
+  const ageing = ageReceivables(data.receivable, reportDate);
+
+  for (const bucket of ageing.buckets) {
+    metrics.push(
+      metric({
+        key: `receivable_aged_${bucketKey(bucket.label)}`,
+        label: `Receivable ${bucket.label}`,
+        section: 'receivable',
+        value: bucket.amount,
+        formula:
+          bucket.to === null
+            ? `SUM(Contractual − Received) where the due date is more than ${bucket.from - 1} days before ${reportDate}`
+            : bucket.from <= 0
+              ? `SUM(Contractual − Received) where the due date is on or after ${reportDate}`
+              : `SUM(Contractual − Received) where the due date is ${bucket.from}–${bucket.to} days before ${reportDate}`,
+        inputs: [plain('Records', bucket.count), plain('Amount', bucket.amount)],
+        refIndexes: bucket.refIndexes,
+      }),
+    );
+  }
+
+  metrics.push(
+    metric({
+      key: 'receivable_overdue',
+      label: 'Overdue Receivable',
+      section: 'receivable',
+      value: ageing.overdue,
+      formula: `SUM(Contractual − Received) where the due date is before ${reportDate}`,
+      inputs: [
+        plain('Overdue', ageing.overdue),
+        plain('Total outstanding', ageing.total),
+        ...(ageing.oldestDays === null ? [] : [plain('Oldest, in days', ageing.oldestDays)]),
+      ],
+      refIndexes: ageing.buckets.flatMap((b) => (b.from > 0 ? b.refIndexes : [])),
+    }),
+    metric({
+      key: 'receivable_undated',
+      label: 'Receivable With No Due Date',
+      section: 'receivable',
+      value: ageing.undated,
+      // Reported rather than hidden: an amount that cannot be aged is an
+      // amount nobody is chasing, and a bucket set that quietly drops it does
+      // not foot to the receivable balance.
+      formula: 'SUM(Contractual − Received) on rows whose file carries no due date',
+      inputs: [plain('Records', ageing.undatedCount), plain('Amount', ageing.undated)],
+      refIndexes: [],
+    }),
+    metric({
+      key: 'receivable_oldest_days',
+      label: 'Oldest Overdue',
+      section: 'receivable',
+      value: ageing.oldestDays,
+      unit: 'COUNT',
+      formula:
+        ageing.oldestDays === null
+          ? 'Nothing is overdue'
+          : `Days between the earliest unpaid due date and ${reportDate}`,
+      inputs: [plain('Days', ageing.oldestDays ?? 0)],
+      refIndexes: [],
     }),
   );
 
