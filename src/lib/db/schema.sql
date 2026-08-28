@@ -596,6 +596,34 @@ CREATE INDEX IF NOT EXISTS idx_previews_expiry ON import_previews(expires_at);
 -- Budget figures entered by Finance. There is no budget in the source
 -- workbooks, so the budget-utilisation dials read from here; without a row the
 -- dials say so rather than inventing a denominator.
+-- The two figures a percentage-of-completion calculation needs and no
+-- spreadsheet export carries: what the whole project is expected to sell for,
+-- and what it is expected to cost.
+--
+-- Revenue recognised is contracted sales times completion. The cost recognised
+-- against it is only the cost of the units actually sold, and the share of the
+-- project that has been sold cannot be worked out from the sales ledger alone
+-- — it needs the project's total sale value to divide by. Without these the
+-- system reports recognised revenue and says gross profit is not calculable,
+-- rather than reporting a margin it cannot support.
+CREATE TABLE IF NOT EXISTS project_financials (
+  id                 TEXT PRIMARY KEY,
+  company_id         TEXT NOT NULL REFERENCES companies(id),
+  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  /* Expected sale value of every unit in the project, sold or not. */
+  total_sale_value   NUMERIC,
+  /* Approved cost budget for the whole project, and the current revision. */
+  cost_budget        NUMERIC,
+  revised_cost_budget NUMERIC,
+  /* Cost committed by signed contract but not yet incurred. */
+  committed_cost     NUMERIC,
+  updated_by         TEXT REFERENCES users(id),
+  created_at         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_financials
+  ON project_financials(company_id, project_id);
+
 CREATE TABLE IF NOT EXISTS budgets (
   id             TEXT PRIMARY KEY,
   /* YYYY-MM. A NULL project_id means every project OF THIS COMPANY — the

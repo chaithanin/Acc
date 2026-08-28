@@ -1,5 +1,10 @@
 import { Badge, Card, CardHeader } from '@/components/ui/primitives';
+import { REVENUE_BASIS_LABELS, REVENUE_BASIS_NOTES, POLICY } from '@/config/accounting-policy';
+import type { ProjectFinancials } from '@/lib/db/repositories/project-financials';
 import type { Project } from '@/lib/types';
+
+const money = 'w-40 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink tabular-nums';
+const fieldLabel = 'text-[11px] font-medium uppercase tracking-wide text-ink-muted';
 
 /**
  * Alias management.
@@ -15,6 +20,9 @@ export function ProjectSettings({
   removeAliasAction,
   createProjectAction,
   toggleActiveAction,
+  financials,
+  setFinancialsAction,
+  canEdit,
 }: {
   projects: Project[];
   error: string | null;
@@ -22,6 +30,9 @@ export function ProjectSettings({
   removeAliasAction: (formData: FormData) => Promise<void>;
   createProjectAction: (formData: FormData) => Promise<void>;
   toggleActiveAction: (formData: FormData) => Promise<void>;
+  financials: Map<string, ProjectFinancials>;
+  setFinancialsAction: (formData: FormData) => Promise<void>;
+  canEdit: boolean;
 }) {
   return (
     <>
@@ -134,6 +145,105 @@ export function ProjectSettings({
             Create project
           </button>
         </form>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader
+          title="What each project is expected to sell for, and to cost"
+          subtitle="The board's own figures. No export carries them, and revenue cannot be recognised without the first."
+        />
+
+        <p className="mb-4 max-w-prose text-sm text-ink-secondary">
+          Revenue is recognised on the basis of{' '}
+          <span className="font-medium text-ink">
+            {REVENUE_BASIS_LABELS[POLICY.revenueBasis].toLowerCase()}
+          </span>
+          . {REVENUE_BASIS_NOTES[POLICY.revenueBasis]} The cost charged against that revenue is the
+          certified construction of the units actually sold — which needs the total sale value below
+          to separate from the construction still sitting in inventory. Until it is set, the
+          dashboard reports revenue earned and says gross profit is not calculable, rather than
+          reporting a margin it cannot support.
+        </p>
+
+        <div className="space-y-3">
+          {projects.map((project) => {
+            const held = financials.get(project.id);
+            return (
+              <form
+                key={project.id}
+                action={setFinancialsAction}
+                className="flex flex-wrap items-end gap-3 border-t border-border pt-3"
+              >
+                <input type="hidden" name="projectId" value={project.id} />
+
+                <div className="min-w-40 flex-1">
+                  <div className="text-sm font-medium text-ink">{project.name}</div>
+                  <div className="text-xs text-ink-muted">{project.code}</div>
+                </div>
+
+                <label className="flex flex-col gap-1">
+                  <span className={fieldLabel}>Total sale value</span>
+                  <input
+                    name="totalSaleValue"
+                    defaultValue={held?.totalSaleValue ?? ''}
+                    placeholder="e.g. 1200000000"
+                    inputMode="decimal"
+                    disabled={!canEdit}
+                    className={money}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className={fieldLabel}>Approved cost budget</span>
+                  <input
+                    name="costBudget"
+                    defaultValue={held?.costBudget ?? ''}
+                    inputMode="decimal"
+                    disabled={!canEdit}
+                    className={money}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className={fieldLabel}>Revised budget</span>
+                  <input
+                    name="revisedCostBudget"
+                    defaultValue={held?.revisedCostBudget ?? ''}
+                    inputMode="decimal"
+                    disabled={!canEdit}
+                    className={money}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className={fieldLabel}>Committed cost</span>
+                  <input
+                    name="committedCost"
+                    defaultValue={held?.committedCost ?? ''}
+                    inputMode="decimal"
+                    disabled={!canEdit}
+                    className={money}
+                  />
+                </label>
+
+                {canEdit ? (
+                  <button
+                    type="submit"
+                    className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                  >
+                    Save
+                  </button>
+                ) : null}
+              </form>
+            );
+          })}
+        </div>
+
+        <p className="mt-4 border-t border-border pt-3 text-xs text-ink-muted">
+          Committed cost is money promised by signed contract and not yet spent. It is deducted from
+          the remaining budget alongside actual cost, because a budget that looks healthy until the
+          commitments land is how an overrun is found too late to do anything about it.
+        </p>
       </Card>
     </>
   );

@@ -50,7 +50,10 @@ before(async () => {
   );
 
   indexSourceRefs(parsed.data);
-  const calc = calculateMetrics(parsed.data, GOLDEN_REPORT_DATE);
+  // Half the project is under contract: 7,000,000 of a 14,000,000 scheme. The
+  // figure is the board's and arrives from project settings, not from the
+  // workbook, so the golden run supplies it the same way the app does.
+  const calc = calculateMetrics(parsed.data, GOLDEN_REPORT_DATE, { totalSaleValue: 14_000_000 });
   metrics = new Map(calc.metrics.map((m) => [m.key, m.value]));
 });
 
@@ -119,18 +122,32 @@ const EXPECTED: Record<string, number | null> = {
   // Expense: 25,000,000 construction + 1,200,000 marketing + 2,400,000 salary
   // + 600,000 tax.
   total_expense: 29_200_000,
-  cost_of_goods_sold: 25_000_000,
+  // Not the 25,000,000 of construction spend: the certified work attributable
+  // to the units actually sold. The rest is inventory.
+  cost_of_goods_sold: 19_000_000,
   taxes: 600_000,
   // Total less construction: 1.2M + 2.4M + 0.6M.
   other_expense: 4_200_000,
   // Total less construction less tax — tax is deducted once, at the bottom.
   operating_expenses: 3_600_000,
 
-  // Income statement: 8.5M income, 25M direct cost, 3.6M operating, 0.6M tax.
-  gross_profit: -16_500_000,
-  operating_profit: -20_100_000,
-  net_profit: -20_700_000,
-  net_profit_margin: -243.53,
+  // Revenue is recognised, not booked. The order book is the instalment and
+  // down-payment rows only — 5,000,000 + 2,000,000 — because a reservation fee
+  // and a transfer fee are consideration for something other than the unit.
+  contracted_sale_value: 7_000_000,
+  // 38,000,000 certified of a 60,000,000 construction contract.
+  completion_percent: 63.33,
+  // 7,000,000 × 38/60.
+  recognised_revenue: 4_433_333.33,
+  revenue_backlog: 2_566_666.67,
+
+  // Income statement: 4.43M earned, 19M cost of sales (38M certified × 50% of
+  // the project sold), 3.6M operating, 0.6M tax. An early-stage development
+  // building far ahead of its sales, which is what this workbook describes.
+  gross_profit: -14_566_666.67,
+  operating_profit: -18_166_666.67,
+  net_profit: -18_766_666.67,
+  net_profit_margin: -423.31,
 
   // Position: 7M certified-unpaid + 2.2M pending.
   total_outstanding_expense: 9_200_000,
@@ -167,11 +184,22 @@ describe('every KPI, at an exact figure', () => {
     assert.deepEqual(missing, [], 'these KPIs have no expected figure');
   });
 
-  it('reconciles: net profit equals income less every cost', () => {
-    assert.equal(
-      metrics.get('net_profit'),
-      (metrics.get('total_contractual_income') ?? 0) - (metrics.get('total_expense') ?? 0),
-    );
+  it('reconciles: net profit equals revenue earned less every cost charged', () => {
+    const revenue = metrics.get('recognised_revenue') ?? 0;
+    const cost = metrics.get('cost_of_goods_sold') ?? 0;
+    const opex = metrics.get('operating_expenses') ?? 0;
+    const tax = metrics.get('taxes') ?? 0;
+
+    assert.equal(metrics.get('net_profit'), Math.round((revenue - cost - opex - tax) * 100) / 100);
+  });
+
+  it('the order book is what is signed, and revenue is what is earned', () => {
+    const book = metrics.get('contracted_sale_value') ?? 0;
+    const earned = metrics.get('recognised_revenue') ?? 0;
+    const backlog = metrics.get('revenue_backlog') ?? 0;
+
+    assert.ok(earned < book, 'a part-built project cannot have earned its whole order book');
+    assert.equal(Math.round((earned + backlog) * 100) / 100, book);
   });
 });
 

@@ -1,4 +1,5 @@
 import { calculateMetrics } from '@/lib/calc/kpi';
+import { listProjectFinancials } from './project-financials';
 import { filterByProject, indexSourceRefs, projectIdsIn } from '@/lib/calc/aggregate';
 import type { CashflowProjection } from '@/lib/calc/cashflow';
 import { runValidations } from '@/lib/validate/rules';
@@ -493,9 +494,35 @@ export function recalculateSnapshot(
     const companyOf = (projectId: string | null) =>
       (projectId ? projectCompany.get(projectId) : null) ?? snapshotCompany;
 
+    // The board's own figures for each project — total sale value and cost
+    // budget — which revenue recognition needs and no export carries. Read
+    // once here rather than per project, and rolled up for the company line:
+    // recognition at company level is recognition across the projects in it.
+    const expectedByProject = new Map(
+      listProjectFinancials(companyId).map((f) => [f.projectId, f]),
+    );
+    const sumExpected = (key: 'totalSaleValue' | 'costBudget') => {
+      let total = 0;
+      let any = false;
+      for (const f of expectedByProject.values()) {
+        if (f[key] !== null) { total += f[key] as number; any = true; }
+      }
+      return any ? total : null;
+    };
+    const companyExpected = {
+      totalSaleValue: sumExpected('totalSaleValue'),
+      costBudget: sumExpected('costBudget'),
+    };
+
     for (const projectId of [null, ...projectIdsIn(data)]) {
       const scoped = filterByProject(data, projectId);
-      const calc = calculateMetrics(scoped, snapshot.reportDate);
+      const expected = projectId
+        ? {
+            totalSaleValue: expectedByProject.get(projectId)?.totalSaleValue ?? null,
+            costBudget: expectedByProject.get(projectId)?.costBudget ?? null,
+          }
+        : companyExpected;
+      const calc = calculateMetrics(scoped, snapshot.reportDate, expected);
 
       for (const metric of calc.metrics) {
         const ids = metric.sourceRefIndexes

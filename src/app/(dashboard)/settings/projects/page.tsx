@@ -4,6 +4,10 @@ import { PageHeader } from '@/components/ui/primitives';
 import { activeCompany, can, currentUser } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import {
+  listProjectFinancials,
+  setProjectFinancials,
+} from '@/lib/db/repositories/project-financials';
+import {
   AliasConflictError,
   addAlias,
   createProject,
@@ -75,6 +79,7 @@ export default async function ProjectSettingsPage({
 
   const { error } = await searchParams;
   const projects = listProjects(true).filter((p) => p.companyId === company.id);
+  const financials = new Map(listProjectFinancials(company.id).map((f) => [f.projectId, f]));
 
   async function addAliasAction(formData: FormData) {
     'use server';
@@ -156,6 +161,60 @@ export default async function ProjectSettingsPage({
     revalidatePath('/settings/projects');
   }
 
+  async function setFinancialsAction(formData: FormData) {
+    'use server';
+    const actor = await currentUser();
+    if (!actor || !can(actor, 'projects:edit')) redirect('/');
+
+    const actorCompany = await activeCompany();
+    if (!actorCompany) redirect('/companies');
+
+    const projectId = String(formData.get('projectId') ?? '');
+    if (!projectId) return;
+
+    // A blank field means "not set", which is different from zero: zero is a
+    // project expected to sell for nothing, and the two must not be confused.
+    const amount = (name: string) => {
+      const raw = String(formData.get(name) ?? '').replace(/[,\s฿]/g, '');
+      if (raw === '') return null;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    };
+
+    const written = setProjectFinancials({
+      companyId: actorCompany.id,
+      projectId,
+      totalSaleValue: amount('totalSaleValue'),
+      costBudget: amount('costBudget'),
+      revisedCostBudget: amount('revisedCostBudget'),
+      committedCost: amount('committedCost'),
+      userId: actor.id,
+    });
+    if (!written) return;
+
+    // These figures change what every profit line reports, so a change to one
+    // is worth as much of a record as a change to an account.
+    await audit({
+      action: 'project.financials',
+      entity: 'project',
+      entityId: projectId,
+      summary: `Set the expected sale value and cost budget for ${projectName(projectId)}`,
+      detail: {
+        totalSaleValue: amount('totalSaleValue'),
+        costBudget: amount('costBudget'),
+        revisedCostBudget: amount('revisedCostBudget'),
+        committedCost: amount('committedCost'),
+      },
+      companyId: actorCompany.id,
+    });
+
+    // Every stored profit figure was computed from the old numbers.
+    revalidatePath('/settings/projects');
+    revalidatePath('/financial');
+    revalidatePath('/projects');
+    revalidatePath('/');
+  }
+
   async function toggleActiveAction(formData: FormData) {
     'use server';
     const actor = await currentUser();
@@ -190,6 +249,9 @@ export default async function ProjectSettingsPage({
         removeAliasAction={removeAliasAction}
         createProjectAction={createProjectAction}
         toggleActiveAction={toggleActiveAction}
+        financials={financials}
+        setFinancialsAction={setFinancialsAction}
+        canEdit={can(user, 'projects:edit')}
       />
     </>
   );

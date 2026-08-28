@@ -254,31 +254,28 @@ describe('income statement and liquidity', () => {
 
   const { byKey } = calculateMetrics(data, REPORT_DATE);
 
-  it('treats construction, contractor and material as cost of goods sold', () => {
-    assert.equal(byKey.get('cost_of_goods_sold')?.value, 4_000_000);
-  });
-
-  it('computes gross profit as income less direct cost', () => {
-    assert.equal(byKey.get('gross_profit')?.value, 6_000_000);
-  });
-
   it('excludes tax from operating expenses so it is deducted only once', () => {
-    // 5.5M total expense − 4M COGS − 0.5M tax
+    // 5.5M total expense − 4M direct cost − 0.5M tax
     assert.equal(byKey.get('operating_expenses')?.value, 1_000_000);
     assert.equal(byKey.get('taxes')?.value, 500_000);
   });
 
-  it('reconciles the statement: net profit equals income minus total expense', () => {
-    const income = byKey.get('total_contractual_income')!.value!;
-    const totalExpense = byKey.get('total_expense')!.value!;
-    assert.equal(byKey.get('operating_profit')?.value, 5_000_000);
-    assert.equal(byKey.get('net_profit')?.value, 4_500_000);
-    assert.equal(byKey.get('net_profit')?.value, income - totalExpense);
+  /**
+   * With no construction contract there is nothing to measure completion
+   * against, so revenue cannot be recognised. Saying so is the whole point:
+   * the alternative is to treat the order book as earned, which is where the
+   * 83% margin came from.
+   */
+  it('will not recognise revenue with no BOQ to measure completion against', () => {
+    assert.equal(byKey.get('completion_percent')?.value, null);
+    assert.equal(byKey.get('recognised_revenue')?.value, null);
+    assert.equal(byKey.get('gross_profit')?.value, null);
+    assert.equal(byKey.get('net_profit_margin')?.value, null);
+    assert.match(byKey.get('recognised_revenue')!.formula, /Not calculable/);
   });
 
-  it('expresses net profit margin as a percentage of income', () => {
-    assert.equal(byKey.get('net_profit_margin')?.value, 45);
-    assert.equal(byKey.get('net_profit_margin')?.unit, 'PERCENT');
+  it('still shows the order book, which is a real figure', () => {
+    assert.equal(byKey.get('contracted_sale_value')?.value, 10_000_000);
   });
 
   it('computes the liquidity ratios against payables', () => {
@@ -308,6 +305,65 @@ describe('income statement and liquidity', () => {
         amount: 1_000, paidAmount: 1_000, pendingAmount: 0, isForecast: false }],
     });
     assert.equal(calculateMetrics(noIncome, REPORT_DATE).byKey.get('net_profit_margin')?.value, null);
+  });
+});
+
+/**
+ * The same statement, with the two things recognition needs: a construction
+ * contract to measure completion against, and the project's total sale value
+ * to separate the cost of sold units from inventory.
+ */
+describe('income statement on a recognition basis', () => {
+  const data = dataset({
+    receivable: [
+      { kind: 'receivable', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'contract', customer: 'A', unit: null,
+        contractualAmount: 10_000_000, receiveAmount: 6_000_000, accrueAmount: 4_000_000, dueDate: null },
+    ],
+    boq: [
+      { kind: 'boq', sourceRef: REF, projectId: null, projectLabel: null,
+        accountCode: '5100', description: 'Structure', contractor: null,
+        costCategory: 'construction', month: '2026-08',
+        boqAmount: 20_000_000, boqToDate: 5_000_000, paidAmount: 4_000_000, pendingAmount: 1_000_000 },
+    ],
+    expense: [
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'construction', description: 'Structure', month: '2026-08',
+        amount: 4_000_000, paidAmount: 4_000_000, pendingAmount: 0, isForecast: false },
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'marketing', description: 'Launch', month: '2026-08',
+        amount: 1_000_000, paidAmount: 1_000_000, pendingAmount: 0, isForecast: false },
+      { kind: 'expense', sourceRef: REF, projectId: null, projectLabel: null,
+        category: 'tax', description: 'SBT', month: '2026-08',
+        amount: 500_000, paidAmount: 500_000, pendingAmount: 0, isForecast: false },
+    ],
+  });
+
+  // A quarter built, and 10M of a 25M project under contract.
+  const { byKey } = calculateMetrics(data, REPORT_DATE, { totalSaleValue: 25_000_000 });
+
+  it('measures completion from the construction contract', () => {
+    assert.equal(byKey.get('completion_percent')?.value, 25);
+  });
+
+  it('recognises a quarter of the order book', () => {
+    assert.equal(byKey.get('recognised_revenue')?.value, 2_500_000);
+    assert.equal(byKey.get('revenue_backlog')?.value, 7_500_000);
+  });
+
+  it('charges only the sold units’ share of certified construction', () => {
+    // 5,000,000 certified × 40% of the project sold.
+    assert.equal(byKey.get('cost_of_goods_sold')?.value, 2_000_000);
+  });
+
+  it('chains the statement from recognised revenue', () => {
+    assert.equal(byKey.get('gross_profit')?.value, 500_000);
+    assert.equal(byKey.get('operating_profit')?.value, -500_000);
+    assert.equal(byKey.get('net_profit')?.value, -1_000_000);
+  });
+
+  it('shows an early-stage development running at a loss, which it is', () => {
+    assert.equal(byKey.get('net_profit_margin')?.value, -40);
   });
 });
 

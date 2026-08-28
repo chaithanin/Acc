@@ -1,3 +1,4 @@
+import { POLICY, REVENUE_BASIS_NOTES } from '@/config/accounting-policy';
 import type { IncomeCategory } from '@/config/field-synonyms';
 import { formatTHB } from '@/lib/format/number';
 import type { Metric, MetricInput, MetricSection, NormalizedDataset } from '@/lib/types';
@@ -70,7 +71,17 @@ const RECEIVABLE_CATEGORIES: { category: IncomeCategory; label: string; key: str
  * Computes every KPI for a dataset. Call once per project and once for the
  * group-wide roll-up.
  */
-export function calculateMetrics(data: NormalizedDataset, reportDate: string): CalculationResult {
+export function calculateMetrics(
+  data: NormalizedDataset,
+  reportDate: string,
+  /**
+   * What the project is expected to sell for and to cost, where anyone has
+   * said. Revenue recognition needs the first; without it the engine reports
+   * recognised revenue and refuses to report a margin, rather than reporting
+   * one it cannot support.
+   */
+  expected: { totalSaleValue?: number | null; costBudget?: number | null } = {},
+): CalculationResult {
   const metrics: Metric[] = [];
 
   // ------------------------------------------------------------------ bank
@@ -463,6 +474,16 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
   );
 
   // ------------------------------------------------- income statement (P&L)
+  //
+  // Revenue is recognised, not booked. Subtracting one period's construction
+  // cost from the contracted value of several years of sales produced an 83%
+  // net margin on a property development, which is not a margin — it is the
+  // shape of comparing a lifetime figure with a period one.
+  //
+  // The basis is stated in src/config/accounting-policy.ts and the metrics
+  // below carry it in their formula text, so the reader of any figure can see
+  // which rule produced it.
+
   // Direct costs. For a developer these are the construction inputs; anything
   // else is an operating cost.
   const directCost = sumBy(
@@ -471,44 +492,181 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
   );
   const taxes = sumBy(data.expense.filter((r) => r.category === 'tax'), (r) => r.amount);
 
-  const totalIncome = totalContractual.value;
-  const cogs = directCost.value;
-  const grossProfit = round2(totalIncome - cogs);
+  // What has been sold: instalments and down payments against the unit itself.
+  // A reservation fee and a transfer fee are consideration for something else
+  // and are not part of the price revenue is recognised against.
+  const salePriceRows = data.receivable.filter((r) =>
+    (POLICY.salePriceCategories as readonly string[]).includes(r.category));
+  const contractedSale = addSums(
+    sumBy(salePriceRows, (r) => r.contractualAmount),
+    incomeContractual,
+  );
+
+  // How much of the building is built, measured by the construction contract
+  // certified complete — an input the BOQ sheets already carry, rather than an
+  // estimate someone types in.
+  const completionRatio =
+    boqTotal.value > 0 ? Math.min(1, boqToDate.value / boqTotal.value) : null;
+  const completionPercent = completionRatio === null ? null : round2(completionRatio * 100);
+
+  const basis = POLICY.revenueBasis;
+  const totalSaleValue = expected.totalSaleValue ?? null;
+
+  /**
+   * Revenue earned so far.
+   *
+   * Under percentage of completion that is the contracted sale value times the
+   * share of the building that is built. Under booking value it is the whole
+   * contracted amount, which the policy file says plainly is not a recognition
+   * basis. Under on-transfer it is nothing yet, because the imports carry no
+   * transferred flag — reported as not calculable rather than as zero, which
+   * would read as a project that has sold nothing.
+   */
+  let recognisedRevenue: number | null;
+  let revenueFormula: string;
+  if (basis === 'booking_value') {
+    recognisedRevenue = contractedSale.value;
+    revenueFormula = 'Contracted sale value, recognised in full on signature';
+  } else if (basis === 'on_transfer') {
+    recognisedRevenue = null;
+    revenueFormula = 'Not calculable — the imports carry no transferred flag per unit';
+  } else if (completionRatio === null) {
+    recognisedRevenue = null;
+    revenueFormula = 'Not calculable — no BOQ contract value, so completion cannot be measured';
+  } else {
+    recognisedRevenue = round2(contractedSale.value * completionRatio);
+    revenueFormula = 'Contracted sale value × (BOQ certified to date ÷ total BOQ)';
+  }
+
+  /**
+   * The cost of the revenue above.
+   *
+   * Only the cost of the units actually sold belongs here; the construction
+   * cost of unsold units is inventory. The sold share is the contracted sale
+   * value over the project's total sale value, which is a board figure and
+   * arrives from the project settings rather than from any export. Without it
+   * the split cannot be made, and cost of sales — and therefore every profit
+   * line — is reported as not calculable rather than guessed.
+   */
+  const soldShare =
+    totalSaleValue && totalSaleValue > 0
+      ? Math.min(1, contractedSale.value / totalSaleValue)
+      : null;
+
+  let costOfSales: number | null;
+  let costFormula: string;
+  if (basis === 'booking_value') {
+    costOfSales = directCost.value;
+    costFormula = 'SUM(construction, contractor and material expense)';
+  } else if (soldShare === null) {
+    costOfSales = null;
+    costFormula =
+      'Not calculable — the project’s total sale value is not set, so the construction cost of sold units cannot be separated from inventory';
+  } else {
+    costOfSales = round2(boqToDate.value * soldShare);
+    costFormula = 'BOQ certified to date × (contracted sale value ÷ total project sale value)';
+  }
+
   // Taxes are excluded here so they are not counted twice: the statement
   // subtracts them once, below operating profit.
-  const operatingExpenses = round2(expenseTotal.value - cogs - taxes.value);
-  const operatingProfit = round2(grossProfit - operatingExpenses);
-  const netProfit = round2(operatingProfit - taxes.value);
-  const netProfitMargin = totalIncome === 0 ? null : round2((netProfit / totalIncome) * 100);
+  const operatingExpenses = round2(expenseTotal.value - directCost.value - taxes.value);
+
+  const grossProfit =
+    recognisedRevenue === null || costOfSales === null
+      ? null
+      : round2(recognisedRevenue - costOfSales);
+  const operatingProfit = grossProfit === null ? null : round2(grossProfit - operatingExpenses);
+  const netProfit = operatingProfit === null ? null : round2(operatingProfit - taxes.value);
+  const netProfitMargin =
+    netProfit === null || !recognisedRevenue ? null : round2((netProfit / recognisedRevenue) * 100);
+
+  const backlog =
+    recognisedRevenue === null ? null : round2(contractedSale.value - recognisedRevenue);
 
   metrics.push(
     metric({
+      key: 'contracted_sale_value',
+      label: 'Contracted Sale Value',
+      section: 'income',
+      value: contractedSale.value,
+      formula: `SUM(Contractual Amount) for ${POLICY.salePriceCategories.join(' and ')} receivables, plus the sales ledger`,
+      inputs: [input('Sale-price receivables', contractedSale)],
+      refIndexes: contractedSale.refIndexes,
+    }),
+    metric({
+      key: 'completion_percent',
+      label: 'Completion',
+      section: 'boq',
+      value: completionPercent,
+      unit: 'PERCENT',
+      formula:
+        completionRatio === null
+          ? 'Not calculable — no BOQ contract value to measure against'
+          : '(BOQ Certified To Date ÷ Total BOQ) × 100',
+      inputs: [input('BOQ To Date', boqToDate), input('BOQ Total', boqTotal)],
+      refIndexes: [...boqToDate.refIndexes, ...boqTotal.refIndexes],
+    }),
+    metric({
+      key: 'recognised_revenue',
+      label: 'Recognised Revenue',
+      section: 'income',
+      value: recognisedRevenue,
+      formula: `${revenueFormula}. ${REVENUE_BASIS_NOTES[basis]}`,
+      inputs: [
+        plain('Contracted sale value', contractedSale.value),
+        ...(completionPercent === null ? [] : [plain('Completion %', completionPercent)]),
+      ],
+      refIndexes: [...contractedSale.refIndexes, ...boqToDate.refIndexes],
+    }),
+    metric({
+      key: 'revenue_backlog',
+      label: 'Contracted, Not Yet Earned',
+      section: 'income',
+      value: backlog,
+      formula: 'Contracted Sale Value − Recognised Revenue',
+      inputs: [
+        plain('Contracted sale value', contractedSale.value),
+        plain('Recognised revenue', recognisedRevenue ?? 0),
+      ],
+      refIndexes: contractedSale.refIndexes,
+    }),
+    metric({
       key: 'cost_of_goods_sold',
-      label: 'Cost of Goods Sold',
+      label: 'Cost of Sales',
       section: 'expense',
-      value: cogs,
-      formula: 'SUM(construction, contractor and material expense)',
-      inputs: [input('Direct cost', directCost)],
-      refIndexes: directCost.refIndexes,
+      value: costOfSales,
+      formula: costFormula,
+      inputs: [
+        input('Direct cost incurred', directCost),
+        plain('BOQ certified to date', boqToDate.value),
+        ...(soldShare === null ? [] : [plain('Sold share %', round2(soldShare * 100))]),
+      ],
+      refIndexes: [...directCost.refIndexes, ...boqToDate.refIndexes],
     }),
     metric({
       key: 'gross_profit',
       label: 'Gross Profit',
       section: 'position',
       value: grossProfit,
-      formula: 'Total Income − Cost of Goods Sold',
-      inputs: [plain('Total Income', totalIncome), plain('Cost of Goods Sold', cogs)],
-      refIndexes: [...totalContractual.refIndexes, ...directCost.refIndexes],
+      formula:
+        grossProfit === null
+          ? `Not calculable — ${recognisedRevenue === null ? 'revenue cannot be recognised' : 'cost of sales cannot be separated from inventory'}`
+          : 'Recognised Revenue − Cost of Sales',
+      inputs: [
+        plain('Recognised Revenue', recognisedRevenue ?? 0),
+        plain('Cost of Sales', costOfSales ?? 0),
+      ],
+      refIndexes: [...contractedSale.refIndexes, ...directCost.refIndexes],
     }),
     metric({
       key: 'operating_expenses',
       label: 'Total Operating Expenses',
       section: 'expense',
       value: operatingExpenses,
-      formula: 'Total Expense − Cost of Goods Sold − Taxes',
+      formula: 'Total Expense − direct cost incurred − Taxes',
       inputs: [
         input('Total Expense', expenseTotal),
-        plain('Cost of Goods Sold', cogs),
+        input('Direct cost incurred', directCost),
         input('Taxes', taxes),
       ],
       refIndexes: expenseTotal.refIndexes,
@@ -518,8 +676,11 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
       label: 'Operating Profit (EBIT)',
       section: 'position',
       value: operatingProfit,
-      formula: 'Gross Profit − Total Operating Expenses',
-      inputs: [plain('Gross Profit', grossProfit), plain('Operating Expenses', operatingExpenses)],
+      formula:
+        operatingProfit === null
+          ? 'Not calculable — gross profit is not calculable'
+          : 'Gross Profit − Total Operating Expenses',
+      inputs: [plain('Gross Profit', grossProfit ?? 0), plain('Operating Expenses', operatingExpenses)],
       refIndexes: [...totalContractual.refIndexes, ...expenseTotal.refIndexes],
     }),
     metric({
@@ -536,8 +697,11 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
       label: 'Net Profit',
       section: 'position',
       value: netProfit,
-      formula: 'Operating Profit (EBIT) − Taxes',
-      inputs: [plain('Operating Profit', operatingProfit), input('Taxes', taxes)],
+      formula:
+        netProfit === null
+          ? 'Not calculable — operating profit is not calculable'
+          : 'Operating Profit (EBIT) − Taxes',
+      inputs: [plain('Operating Profit', operatingProfit ?? 0), input('Taxes', taxes)],
       refIndexes: [...totalContractual.refIndexes, ...expenseTotal.refIndexes],
     }),
     metric({
@@ -547,11 +711,11 @@ export function calculateMetrics(data: NormalizedDataset, reportDate: string): C
       value: netProfitMargin,
       unit: 'PERCENT',
       formula:
-        totalIncome === 0
-          ? 'Not calculable — total income is zero'
-          : '(Net Profit ÷ Total Income) × 100',
-      inputs: [plain('Net Profit', netProfit), plain('Total Income', totalIncome)],
-      refIndexes: totalContractual.refIndexes,
+        netProfitMargin === null
+          ? 'Not calculable — there is no recognised revenue to divide by'
+          : '(Net Profit ÷ Recognised Revenue) × 100',
+      inputs: [plain('Net Profit', netProfit ?? 0), plain('Recognised Revenue', recognisedRevenue ?? 0)],
+      refIndexes: contractedSale.refIndexes,
     }),
   );
 

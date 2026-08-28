@@ -96,8 +96,10 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     readsFrom: 'Derived: total expense less the construction and BOQ categories.',
   },
   cost_of_goods_sold: {
-    meaning: 'The direct cost of what was sold: building it.',
-    readsFrom: 'Expense records in the construction, contractor and material categories.',
+    meaning: 'The construction cost of the units revenue has been recognised on.',
+    readsFrom:
+      'BOQ certified to date, apportioned by the share of the project that is under contract. The construction cost of unsold units is inventory and is not charged here.',
+    excludes: 'Overheads, marketing and administration, which are operating costs.',
   },
   operating_expenses: {
     meaning: 'Running the business, as distinct from building the product.',
@@ -176,9 +178,31 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     meaning: 'How many ledger postings the import read — a completeness check, not a financial figure.',
     readsFrom: 'A count of general-ledger records in the snapshot.',
   },
+  contracted_sale_value: {
+    meaning: 'What buyers have committed to pay for their units — the order book.',
+    readsFrom:
+      'Instalment and down-payment receivables plus the sales ledger. Reservation and transfer fees are consideration for something other than the unit and are left out.',
+    excludes: 'Units not yet under contract, and any part of the price not yet earned.',
+  },
+  completion_percent: {
+    meaning: 'How much of the building is built, as the construction contract measures it.',
+    readsFrom: 'BOQ certified to date over the total BOQ contract value.',
+  },
+  recognised_revenue: {
+    meaning:
+      'Revenue actually earned, on the basis stated in the accounting policy — not the value of what has been signed.',
+    readsFrom:
+      'Contracted sale value multiplied by completion. Reported as not calculable, never as zero, when completion cannot be measured.',
+    excludes: 'The part of the order book still to be earned, which is reported on its own.',
+  },
+  revenue_backlog: {
+    meaning: 'Signed but not yet earned — the revenue still to come from work still to do.',
+    readsFrom: 'Derived: contracted sale value less recognised revenue.',
+  },
   gross_profit: {
-    meaning: 'Income less the direct cost of producing it.',
-    readsFrom: 'Derived: total contractual income less cost of goods sold.',
+    meaning: 'Recognised revenue less the cost of the units that revenue was earned on.',
+    readsFrom:
+      'Derived: recognised revenue less cost of sales. Not calculable until the project’s total sale value is set, because until then the construction cost of sold units cannot be separated from inventory.',
   },
   operating_profit: {
     meaning: 'Profit from operations, before tax (EBIT).',
@@ -189,8 +213,9 @@ export const KPI_DEFINITIONS: Record<string, KpiDefinition> = {
     readsFrom: 'Derived: operating profit less tax.',
   },
   net_profit_margin: {
-    meaning: 'Net profit as a share of income — how much of each baht sold is kept.',
-    readsFrom: 'Derived. Reported as not calculable when income is zero, never as 0%.',
+    meaning: 'Net profit as a share of revenue earned — how much of each baht earned is kept.',
+    readsFrom:
+      'Derived from recognised revenue, not from the order book. Reported as not calculable when there is no recognised revenue, never as 0%.',
   },
   quick_ratio: {
     meaning: 'Whether cash and near-cash alone cover what is owed.',

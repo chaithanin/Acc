@@ -121,46 +121,87 @@ describe('receivables', () => {
 describe('income and profit', () => {
   const calc = run(auditDataset());
 
-  it('income is the contracted value of receivables plus the income sheet', () => {
+  it('the collections view still shows everything contracted', () => {
     assert.equal(v(calc, 'total_contractual_income'), 30_500_000);
     assert.equal(v(calc, 'received_income'), 12_000_000);
     assert.equal(v(calc, 'accrued_income'), 18_500_000);
   });
 
-  it('cost of sales is the construction, contractor and material categories', () => {
-    assert.equal(v(calc, 'cost_of_goods_sold'), 4_000_000);
+  /**
+   * The order book is what buyers have committed to pay for their units.
+   * A reservation fee and a transfer fee are consideration for something other
+   * than the unit, so they are not part of the price revenue is earned against.
+   */
+  it('the order book is the sale-price categories, not every receivable', () => {
+    // 20,000,000 instalments + 3,000,000 down payment + 6,000,000 sales ledger.
+    // The 1,000,000 reservation and 500,000 transfer fee are excluded.
+    assert.equal(v(calc, 'contracted_sale_value'), 29_000_000);
   });
 
-  it('operating expenses exclude both cost of sales and tax', () => {
+  it('completion is measured by the construction contract, not estimated', () => {
+    // 20,000,000 certified of a 50,000,000 contract.
+    assert.equal(v(calc, 'completion_percent'), 40);
+  });
+
+  it('revenue is recognised as the building is built', () => {
+    assert.equal(v(calc, 'recognised_revenue'), 11_600_000);
+    assert.equal(v(calc, 'revenue_backlog'), 17_400_000);
+    assert.match(calc.byKey.get('recognised_revenue')!.formula, /Contracted sale value × /);
+  });
+
+  it('operating expenses exclude both direct cost and tax', () => {
     assert.equal(v(calc, 'operating_expenses'), 700_000);
     assert.equal(v(calc, 'taxes'), 300_000);
     assert.equal(v(calc, 'total_expense'), 5_000_000);
   });
 
-  it('the income statement chains correctly from its own inputs', () => {
-    assert.equal(v(calc, 'gross_profit'), 26_500_000);
-    assert.equal(v(calc, 'operating_profit'), 25_800_000);
-    assert.equal(v(calc, 'net_profit'), 25_500_000);
-  });
-
   /**
-   * FIN-01. The arithmetic above is internally consistent and the result is
-   * still not a profit figure anyone should act on.
+   * FIN-01, as fixed.
    *
-   * "Total Income" is the contracted value of everything sold — for a
-   * development that is several years of sales — while cost of sales is one
-   * month of construction spend. Subtracting the second from the first
-   * compares a lifetime figure with a period figure, and the margin it
-   * produces is meaningless. 83.6% is not a property developer's net margin;
-   * it is the shape of the error.
+   * The construction cost of unsold units is inventory, not cost of sales, and
+   * the sold share cannot be worked out from the sales ledger alone — it needs
+   * the project's total sale value, which is a board figure. Without it the
+   * engine says so instead of reporting a margin it cannot support.
    */
-  it('produces a net margin no property developer earns, which is the defect', () => {
-    assert.equal(v(calc, 'net_profit_margin'), 83.61);
+  it('refuses to report a margin until the project’s total sale value is known', () => {
+    assert.equal(v(calc, 'cost_of_goods_sold'), null);
+    assert.equal(v(calc, 'gross_profit'), null);
+    assert.equal(v(calc, 'operating_profit'), null);
+    assert.equal(v(calc, 'net_profit'), null);
+    assert.equal(v(calc, 'net_profit_margin'), null);
+    assert.match(calc.byKey.get('gross_profit')!.formula, /Not calculable/);
+    assert.match(calc.byKey.get('cost_of_goods_sold')!.formula, /inventory/);
   });
 
-  it('reports margin as not calculable rather than zero when there is no income', () => {
+  describe('with the project’s total sale value set', () => {
+    // Half the project is under contract: 29,000,000 of 58,000,000.
+    const full = calculateMetrics(auditDataset(), REPORT_DATE, { totalSaleValue: 58_000_000 });
+    const f = (key: string) => full.byKey.get(key)?.value ?? null;
+
+    it('charges only the sold units’ share of construction to cost of sales', () => {
+      // 20,000,000 certified × 50% sold.
+      assert.equal(f('cost_of_goods_sold'), 10_000_000);
+    });
+
+    it('the statement chains from recognised revenue', () => {
+      assert.equal(f('gross_profit'), 1_600_000);
+      assert.equal(f('operating_profit'), 900_000);
+      assert.equal(f('net_profit'), 600_000);
+    });
+
+    /**
+     * The figure this whole finding was about. It read 83.61% when revenue was
+     * the whole order book and cost was one month of building.
+     */
+    it('produces a margin a property developer would recognise', () => {
+      assert.equal(f('net_profit_margin'), 5.17);
+    });
+  });
+
+  it('reports margin as not calculable rather than zero when nothing is sold', () => {
     const empty = { ...auditDataset(), receivable: [], income: [] };
-    assert.equal(v(run(empty), 'net_profit_margin'), null);
+    const calc2 = calculateMetrics(empty, REPORT_DATE, { totalSaleValue: 58_000_000 });
+    assert.equal(calc2.byKey.get('net_profit_margin')?.value, null);
   });
 });
 
