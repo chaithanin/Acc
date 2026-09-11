@@ -246,6 +246,43 @@ worded the way it is — the login page is public, so a refusal *there*, before 
 credentials are sent, is something between the machine and Mango saying no, not a
 rejected sign-in and not a moved endpoint.
 
+## The other module
+
+`production.re` is the estate-sales module, and it is the one this pull reads.
+The same Mango also serves **`production.anywhere`** — a different module with
+its own screens, reached at `/production.anywhere/page/`.
+
+Nothing here reads it yet, and it is worth finding out what it holds, because
+the gap it might fill is a real one: the **cost budget, revised budget and
+committed cost** of every project are still typed in by hand in Settings. Both
+pulls deliberately leave those alone, because neither source knows them. If the
+other module holds budgets and commitments, that is the last hand-typed figure
+on the page.
+
+```bash
+npm run mango:probe
+```
+
+The probe surveys it and reports what it found, in a form that can be pasted
+back into a conversation. It keeps three rules:
+
+- **It discovers rather than guesses.** Mango's Vue pages name the endpoints
+  they call, so the pages are read and those names followed — including one
+  level down through the screens the root page links to, since a module root
+  loads a shell and the endpoints that matter belong to the screens underneath.
+  Inventing plausible URLs produces a wall of 404s and teaches nothing.
+- **It reads and never writes.** Anything whose name suggests it changes
+  something is skipped without being called, and listed at the end so the
+  skipping is visible rather than silent.
+- **It prints structure, not content** — column names and row counts, never the
+  values in them. The output is meant to be shared, and this is a live finance
+  system.
+
+It signs in exactly as the pull does, so the same service account and
+`MANGO_MAINCODE` apply, and the same audit log records it. Point it elsewhere
+with `MANGO_ANYWHERE_URL`, and start from a different page with
+`--entry <path>` if the root turns out to name nothing.
+
 ## Staying a guest
 
 Only read endpoints are called. Nothing in this client posts to a save or update

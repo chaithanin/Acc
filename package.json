@@ -16,7 +16,8 @@
     "test:e2e": "node --import ./scripts/register-ts.mjs scripts/e2e-audit.mjs",
     "test:load": "node --import ./scripts/register-ts.mjs scripts/load-test.mjs",
     "mango:pull": "node --import ./scripts/register-ts.mjs scripts/mango-pull.mjs",
-    "booking:pull": "node --import ./scripts/register-ts.mjs scripts/booking-pull.mjs"
+    "booking:pull": "node --import ./scripts/register-ts.mjs scripts/booking-pull.mjs",
+    "mango:probe": "node --import ./scripts/register-ts.mjs scripts/mango-anywhere-probe.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

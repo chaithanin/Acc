@@ -488,3 +488,54 @@ describe('the company the pull signs in to', () => {
     assert.equal(creds.maincode, 'MG3');
   });
 });
+
+/**
+ * Surveying a module nobody has mapped yet is the opposite job from reading
+ * one that is mapped: an HTML answer is a finding, not an exception.
+ */
+describe('reading raw, for a module with no contract yet', () => {
+  const serve = async (body: string, contentType: string) => {
+    const http = await import('node:http');
+    const server = http.createServer((req, res) => {
+      if (req.url?.includes('Login')) {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        return res.end('<script>new Vue({data:{formData:{userid:"",userpass:"",maincode:""}},'
+          + 'methods:{go(){$_post(f,"authentication/login_do")}}})</script>');
+      }
+      if (req.url?.includes('login_do')) {
+        res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'mg=1; Path=/' });
+        return res.end(JSON.stringify({ success: true }));
+      }
+      if (req.url?.includes('AuthStatus')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, data: { user: 'svc' } }));
+      }
+      res.writeHead(200, { 'content-type': contentType });
+      res.end(body);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    return { base: `http://127.0.0.1:${port}`, close: () => server.close() };
+  };
+
+  it('hands back an HTML answer instead of throwing on it', async () => {
+    const { base, close } = await serve('<html>signed out</html>', 'text/html');
+    try {
+      const { MangoClient } = await import('@/lib/sources/mango/client');
+      const client = await new MangoClient({
+        baseUrl: base, username: 'u', password: 'p', maincode: 'MG1',
+      }).login();
+
+      const answer = await client.raw('unknown_data/whatever');
+      assert.equal(answer.status, 200);
+      assert.match(answer.contentType, /text\/html/);
+      assert.match(answer.text, /signed out/);
+
+      // The mapped-endpoint reader still refuses it, which is the point of
+      // having both.
+      await assert.rejects(() => client.get('unknown_data/whatever'));
+    } finally {
+      close();
+    }
+  });
+});

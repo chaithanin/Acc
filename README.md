@@ -29,11 +29,12 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (440) |
+| `npm test` | unit and integration tests (441) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
 | `npm run booking:pull -- --dry-run` | read the unit inventory from the Booking API |
+| `npm run mango:probe` | survey Mango's other module, read-only, and report its shape |
 
 The database and uploaded originals live in `data/` and are git-ignored.
 Override the location with `GTG_DATA_DIR`.
@@ -234,7 +235,7 @@ Enforced server-side on every route; the navigation filter is convenience only.
 npm test
 ```
 
-440 tests covering text normalisation and alias resolution, header detection and
+441 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its

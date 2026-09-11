@@ -467,6 +467,28 @@ export class MangoClient {
     return body as T;
   }
 
+  /**
+   * A read that reports what came back instead of insisting it is JSON.
+   *
+   * `get()` is for endpoints whose contract is known: it unwraps the envelope
+   * and throws on anything else, which is right when a wrong answer should
+   * stop a pull. Surveying a module nobody has mapped yet is the opposite job
+   * — an HTML answer, a redirect and a 404 are each a finding worth reporting
+   * rather than an exception.
+   *
+   * Read-only, like everything else here.
+   */
+  async raw(path: string): Promise<{ status: number; contentType: string; text: string; url: string }> {
+    const url = this.url(path);
+    const response = await this.request(url, { headers: this.headers() });
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type') ?? '',
+      text: await response.text(),
+      url,
+    };
+  }
+
   /** Projects this account may see. The code in `pre_event2` filters everything else. */
   projects(take = 200, search = ''): Promise<MangoProject[]> {
     return this.get<MangoProject[]>('RE_Master_data/projectmodal3', {
