@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { checkBundleSchema, credentialsFromEnv, MangoError } from '@/lib/sources/mango/client';
+import { checkBundleSchema, companiesFrom, credentialsFromEnv, MangoError } from '@/lib/sources/mango/client';
 import { mangoDate, mapMangoBundle } from '@/lib/sources/mango/map';
 import { mangoFixture } from './fixtures/mango-bundle';
 import { calculateMetrics } from '@/lib/calc/kpi';
@@ -398,5 +398,93 @@ describe('failing usefully', () => {
     } as unknown as NodeJS.ProcessEnv);
 
     assert.equal(creds.username, 'svc.dashboard');
+  });
+});
+
+/**
+ * What the Booking team found when they connected to the same Mango, written
+ * down here as tests so this connector cannot drift back.
+ */
+describe('rows Mango has retired', () => {
+  const result = run();
+
+  it('does not count a superseded booking as a second contract', () => {
+    const v201 = result.data.receivable.filter((r) => r.unit === 'V-201');
+    assert.equal(v201.length, 1, 'the replaced booking was counted alongside the live one');
+    assert.equal(v201[0].contractualAmount, 5_000_000, 'the retired row won over the live one');
+  });
+
+  it('says how many it set aside rather than dropping them silently', () => {
+    assert.equal(result.counts.superseded, 1);
+  });
+
+  /**
+   * Deliberately not "keep only the rows marked active". A build that stops
+   * sending the column would then retire every row at once, and a whole
+   * company would read as zero with no error anywhere — the failure mode this
+   * connector exists to avoid.
+   */
+  it('keeps a row that carries no active flag at all', () => {
+    const bundle = mangoFixture();
+    for (const row of bundle.transaction ?? []) delete (row as Record<string, unknown>).active;
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    assert.ok(mapped.counts.contracts > 0, 'dropping the column emptied the pull');
+    assert.equal(mapped.counts.superseded, 0);
+  });
+
+  it('applies the same rule to the price list', () => {
+    const bundle = mangoFixture();
+    for (const row of bundle.pricelist ?? []) delete (row as Record<string, unknown>).active;
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    assert.ok((mapped.saleValueByProject.get('HAMONIA') ?? 0) > 0,
+      'a price list with no active column priced the project at nothing');
+  });
+});
+
+/**
+ * The company picker.
+ *
+ * Mango is multi-company and the login carries the company alongside the
+ * username. The list is printed into the login page, so a wrong one can be
+ * named rather than arriving as a sign-in failure that reads like a bad
+ * password.
+ */
+describe('reading the company list off the login page', () => {
+  it('reads the list the Vue page ships', () => {
+    const html = 'new Vue({ data: { compData: JSON.parse(`'
+      + JSON.stringify([
+        { maincode: 'MG1', compname: 'บริษัท ไชยธนินทร์ จำกัด' },
+        { maincode: 'MG2', compname: 'Second' },
+      ])
+      + '`) } })';
+
+    const companies = companiesFrom(html);
+    assert.deepEqual(companies.map((c) => c.code), ['MG1', 'MG2']);
+    assert.equal(companies[0].name, 'บริษัท ไชยธนินทร์ จำกัด');
+  });
+
+  it('gives up quietly on a page it cannot read, rather than refusing the login', () => {
+    assert.deepEqual(companiesFrom('<html><body>nothing here</body></html>'), []);
+    assert.deepEqual(companiesFrom('compData: JSON.parse(`not json`)'), []);
+  });
+});
+
+describe('the company the pull signs in to', () => {
+  it('defaults to MG1, which is Chaithanin', () => {
+    const creds = credentialsFromEnv({
+      MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',
+      MANGO_USER: 'svc.dashboard', MANGO_PASS: 'secret',
+    } as unknown as NodeJS.ProcessEnv);
+    assert.equal(creds.maincode, 'MG1');
+  });
+
+  it('takes another company from the environment, in upper case', () => {
+    const creds = credentialsFromEnv({
+      MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',
+      MANGO_USER: 'svc.dashboard', MANGO_PASS: 'secret', MANGO_MAINCODE: 'mg3',
+    } as unknown as NodeJS.ProcessEnv);
+    assert.equal(creds.maincode, 'MG3');
   });
 });

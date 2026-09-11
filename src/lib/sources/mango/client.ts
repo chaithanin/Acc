@@ -23,6 +23,13 @@ export interface MangoCredentials {
   baseUrl: string;
   username: string;
   password: string;
+  /**
+   * The company being signed in to — MG1 is Chaithanin Co., Ltd.
+   *
+   * Mango is multi-company and the login carries this alongside the username.
+   * Without it the sign-in fails exactly as a wrong password does.
+   */
+  maincode: string;
 }
 
 export class MangoError extends Error {
@@ -66,7 +73,49 @@ export function credentialsFromEnv(env: NodeJS.ProcessEnv = process.env): MangoC
     baseUrl: env.MANGO_BASE_URL!.trim().replace(/\/+$/, ''),
     username: env.MANGO_USER!.trim(),
     password: env.MANGO_PASS!,
+    maincode: (env.MANGO_MAINCODE?.trim() || 'MG1').toUpperCase(),
   };
+}
+
+export interface MangoCompany {
+  code: string;
+  name?: string;
+}
+
+/**
+ * The companies this Mango serves, read out of the login page.
+ *
+ * The page ships its own company list to populate the picker, which makes a
+ * wrong `maincode` catchable before any credentials are sent — and turns
+ * "sign-in failed" into "this Mango has no company MG9, it has MG1..MG6".
+ *
+ * The list is embedded as a JSON string inside a template literal, so this
+ * looks for that and gives up quietly rather than guessing: an unreadable
+ * list means the check is skipped, never that the login is refused.
+ */
+export function companiesFrom(html: string): MangoCompany[] {
+  const block = html.match(/compData\s*:\s*JSON\.parse\(\s*`([\s\S]*?)`\s*\)/)
+    ?? html.match(/compData\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
+  if (!block) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(block[1]!);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: MangoCompany[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const record = row as Record<string, unknown>;
+    const code = String(record.maincode ?? record.code ?? record.value ?? '').trim();
+    if (!code) continue;
+    const name = record.compname ?? record.name ?? record.text ?? record.description;
+    out.push({ code: code.toUpperCase(), name: name ? String(name).trim() : undefined });
+  }
+  return out;
 }
 
 /**
@@ -136,12 +185,24 @@ export class MangoClient {
   }
 
   /**
-   * Signs in through the same form a person uses.
+   * Signs in.
    *
-   * The field names are read from the form rather than hard-coded: Mango
-   * renames them between builds, and an anti-forgery token has to be echoed
-   * back. Hard-coding them is how this breaks on an upgrade with a login
-   * failure that looks like a wrong password.
+   * There are two Mango login pages in the wild and they take entirely
+   * different posts, which is the single thing most likely to make this fail
+   * against a live deployment.
+   *
+   * The current one is Vue. It renders no useful form and sends its own AJAX
+   * post of JSON to `authentication/login_do`, carrying a third field beyond
+   * the username and password: `maincode`, the company being signed in to.
+   * Omit it and the sign-in fails in a way that reads exactly like a wrong
+   * password. Older deployments are ASP.NET forms with an anti-forgery token
+   * to echo back, so the page is asked which it is rather than assumed.
+   *
+   * Cookies are the other half. A session is several cookies, not one, and
+   * some of them are set on the 302 that follows the post rather than on the
+   * post itself — so the redirect chain is walked by hand, collecting cookies
+   * at every hop. Letting fetch follow redirects loses them, and the failure
+   * appears later as a data endpoint answering HTML.
    */
   async login(): Promise<this> {
     const loginUrl = this.url('Authentication/Login');
@@ -171,11 +232,115 @@ export class MangoClient {
 
     const html = await page.text();
 
+    // The company list is printed into the page, so a wrong maincode can be
+    // caught here by name rather than arriving as a failed sign-in.
+    const companies = companiesFrom(html);
+    if (companies.length > 0 && !companies.some((c) => c.code === this.credentials.maincode)) {
+      throw new MangoError(
+        `This Mango serves no company "${this.credentials.maincode}". It offers: `
+        + `${companies.map((c) => `${c.code}${c.name ? ` (${c.name})` : ''}`).join(', ')}. `
+        + 'Set MANGO_MAINCODE to the right one.',
+      );
+    }
+
+    if (/login_do/i.test(html)) await this.loginDo(loginUrl);
+    else await this.loginForm(html, loginUrl);
+
+    if (!(await this.isAuthenticated())) {
+      throw new MangoError(
+        'Signed in but Mango still reports no session. Check the credentials, '
+        + 'and check whether the account is locked or needs a password change.',
+      );
+    }
+
+    this.authenticated = true;
+    return this;
+  }
+
+  /**
+   * The Vue login: JSON to `authentication/login_do`.
+   *
+   * It answers the same `{success, error}` envelope everything else does, so a
+   * rejected sign-in says why. If the deployment wants form encoding instead —
+   * some builds do — the post is repeated that way rather than reported as a
+   * failure, since the difference is not something an operator can act on.
+   */
+  private async loginDo(referer: string): Promise<void> {
+    const url = this.url('authentication/login_do');
+    const payload = {
+      userid: this.credentials.username,
+      userpass: this.credentials.password,
+      maincode: this.credentials.maincode,
+    };
+
+    const post = (contentType: string, body: string) => this.request(url, {
+      method: 'POST',
+      headers: this.headers({ 'content-type': contentType, referer, accept: 'application/json' }),
+      body,
+    });
+
+    // The envelope has to be read off this response before the redirect chain
+    // is walked — a body can only be read once, and following first throws the
+    // answer away.
+    let response = await post('application/json', JSON.stringify(payload));
+    let body = await this.envelope(response);
+
+    // A redirect is an answer in itself: this build signs in and sends you on
+    // rather than replying in JSON.
+    const redirected = response.status >= 300 && response.status < 400;
+
+    if (body === null && !redirected) {
+      response = await post(
+        'application/x-www-form-urlencoded',
+        new URLSearchParams(payload).toString(),
+      );
+      body = await this.envelope(response);
+      if (body === null && !(response.status >= 300 && response.status < 400)) {
+        throw new MangoError(
+          'authentication/login_do answered neither JSON nor a redirect. Either this is not a Mango '
+          + 'login page, or something answered in its place.',
+        );
+      }
+    }
+
+    if (body?.success === false) {
+      const detail = [body.error, body.error_type].filter(Boolean).join(' — ');
+      throw new MangoError(
+        `Mango refused the sign-in${detail ? `: ${detail}` : '.'} `
+        + `The account is "${this.credentials.username}" against company ${this.credentials.maincode}.`,
+      );
+    }
+
+    // Now the redirects, for the cookies they set on the way.
+    await this.follow(response);
+  }
+
+  /** Reads an envelope out of a response, or null if it did not answer JSON. */
+  private async envelope(
+    response: Response,
+  ): Promise<{ success?: boolean; error?: string; error_type?: string } | null> {
+    const text = await response.text();
+    if (!text.trim()) return null;
+    try {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      return body && typeof body === 'object' ? body : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The older ASP.NET form.
+   *
+   * Field names are read from the form rather than hard-coded: Mango renames
+   * them between builds, and an anti-forgery token has to be echoed back.
+   */
+  private async loginForm(html: string, loginUrl: string): Promise<void> {
     const form = html.match(/<form\b[\s\S]*?<\/form>/i)?.[0];
     if (!form) {
       throw new MangoError(
-        'Reached Authentication/Login but found no form on it. Either the page has been '
-        + 'restructured, or something returned a page of its own in Mango’s place.',
+        'This login page is neither the Vue one nor an ASP.NET form. Either the page has been '
+        + 'restructured, or something returned a page of its own in Mango\u2019s place.',
       );
     }
 
@@ -201,6 +366,8 @@ export class MangoClient {
 
     fields.set(userField, this.credentials.username);
     fields.set(passField, this.credentials.password);
+    // Harmless where the form has no company field, and necessary where it does.
+    if (!fields.has('maincode')) fields.set('maincode', this.credentials.maincode);
 
     const action = form.match(/action="([^"]*)"/i)?.[1] || 'Authentication/Login';
     const postUrl = action.startsWith('http')
@@ -209,7 +376,7 @@ export class MangoClient {
         ? new URL(action, this.credentials.baseUrl).toString()
         : this.url(action);
 
-    const submitted = await this.request(postUrl, {
+    const submitted = await this.follow(await this.request(postUrl, {
       method: 'POST',
       headers: this.headers({
         'content-type': 'application/x-www-form-urlencoded',
@@ -217,19 +384,36 @@ export class MangoClient {
         accept: 'text/html',
       }),
       body: new URLSearchParams([...fields]).toString(),
-    });
+    }));
     await submitted.text();
+  }
 
-    if (!(await this.isAuthenticated())) {
-      throw new MangoError(
-        'Signed in but Mango still reports no session. Check the credentials, '
-        + 'and check whether the account is locked or needs a password change.',
-      );
+  /**
+   * Walks a redirect chain by hand, keeping the cookies set along the way.
+   *
+   * This is not a detail. Mango sets part of the session on the 302 after a
+   * successful post, and `redirect: "follow"` drops those — leaving a client
+   * that believes it signed in and is then answered with the login page by
+   * every endpoint it asks.
+   */
+  private async follow(response: Response, hops = 5): Promise<Response> {
+    let current = response;
+
+    for (let hop = 0; hop < hops; hop += 1) {
+      if (current.status < 300 || current.status >= 400) return current;
+      const location = current.headers.get('location');
+      if (!location) return current;
+
+      const next = new URL(location, current.url || this.credentials.baseUrl).toString();
+      // Drain unless the caller already read it — reading twice throws, and
+      // leaving it undrained holds the socket open.
+      if (!current.bodyUsed) await current.text().catch(() => undefined);
+      current = await this.request(next, { headers: this.headers({ accept: 'text/html' }) });
     }
 
-    this.authenticated = true;
-    return this;
+    return current;
   }
+
 
   async isAuthenticated(): Promise<boolean> {
     try {

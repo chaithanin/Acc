@@ -49,6 +49,13 @@ export interface MangoTransaction {
   transfer_due_date?: MangoValue;
   cancel_status?: MangoValue;
   cancel_date?: MangoValue;
+  /**
+   * Whether this row is the live one.
+   *
+   * Mango keeps superseded rows in the same list rather than removing them, so
+   * a unit that has been booked twice appears twice. Only "N" means retired.
+   */
+  active?: MangoValue;
   [key: string]: MangoValue;
 }
 

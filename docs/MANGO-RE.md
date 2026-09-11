@@ -43,7 +43,13 @@ They go in the environment, never in the repository:
 MANGO_BASE_URL=https://chaithanin.mangoanywhere.com/production.re
 MANGO_USER=<service account username>
 MANGO_PASS=<service account password>
+MANGO_MAINCODE=MG1     # optional; MG1 is Chaithanin Co., Ltd.
 ```
+
+**The company is part of the sign-in.** Mango serves several companies — MG1 to
+MG6 — and the login carries the code alongside the username. Leave it wrong and
+the sign-in fails exactly as a wrong password does, which is why the run reads
+the company list off the login page and names the valid codes instead.
 
 The angle brackets are deliberate. A value copied straight out of an example is
 the ordinary way this goes wrong, and the run refuses to start on one rather
@@ -52,6 +58,35 @@ somebody to reset a password that was never the problem.
 
 `.env` and `.env*.local` are git-ignored. On the deployment VM these belong in
 the container's environment (`/opt/gtg/run.sh`) rather than baked into the image.
+
+## How the sign-in works, and why it matters
+
+The login page is **Vue, not an ASP.NET form**. It renders nothing useful to
+scrape and posts its own JSON:
+
+```
+POST /authentication/login_do
+{ "userid": "…", "userpass": "…", "maincode": "MG1" }
+```
+
+Reading it as a form — which is the obvious thing to do with an ASP.NET
+application, and what this connector did at first — produces a sign-in that
+fails with no useful message. Older deployments *are* forms, with an
+anti-forgery token to echo back, so the page is asked which kind it is rather
+than assumed; both paths are tested.
+
+A session is **several cookies, and some of them are set on the redirect after
+the post** rather than on the post itself. Letting `fetch` follow redirects
+loses those, and the failure surfaces much later as data endpoints answering
+HTML — which reads as a permissions problem and is not one. The redirect chain
+is therefore walked by hand, collecting cookies at every hop.
+
+Getting HTML where JSON was expected always means the session lapsed or the
+account lacks rights. It never means there is no data.
+
+> This is not guesswork: the Booking system already pulls from the same Mango,
+> and this is the mechanism it established. Where the two differ, Booking's
+> working integration wins.
 
 ## Where to run it from
 
@@ -108,6 +143,13 @@ each is the kind that would otherwise sit invisible inside a type coercion.
 same list with `cancel_status` set. Summing the list without looking reports money
 nobody owes.
 
+**A superseded row is not a second contract.** When a unit is rebooked Mango
+keeps the old row in the same list, marked `active = N`, rather than removing
+it. Summing without checking reports the same unit twice, at a value nobody ever
+owed. The rule is *exclude what is marked N* rather than *keep what is marked
+Y*: a build that stops sending the column would otherwise retire every row at
+once and report a whole company as zero, with no error anywhere.
+
 **What has been collected is the receipts.** The transaction list carries no
 "received" column at all, so reading one would put zero against every contract.
 Collected is the sum of the receipts (`transaction_detail`) filed against each
@@ -132,6 +174,22 @@ price list carries the history as well as the current position.
 Dates arrive in three formats and sometimes in Buddhist years. A Buddhist year
 left alone puts every due date 543 years out, and an ageing report then shows
 nothing overdue on a ledger that is months behind.
+
+## What this pull does not know: Holding
+
+`All_Transaction_Data` carries no Holding status. A unit a salesperson is
+holding therefore appears in this pull as though nothing has happened to it —
+Booking found 47 such units in LOVEIT-D alone, reachable only through
+`Api/Public/LastTransaction`.
+
+For the figures here that is harmless: a hold is not money owed, and nothing in
+the receivable ledger or the price list is affected. It matters for **inventory**
+— how many units are actually free to sell — and that is a question the
+[Booking API](BOOKING-API.md) answers properly, with its own `HOLDING` status.
+So the gap is covered, by the other connector rather than by this one.
+
+Do not build a unit-availability figure on this pull. It will be wrong by
+however many units are on hold, and it will look right.
 
 ## Matching projects
 

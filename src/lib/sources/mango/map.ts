@@ -48,6 +48,8 @@ export interface MangoMapResult {
   counts: {
     contracts: number;
     cancelled: number;
+    /** Rows Mango has retired, kept in the list and not counted. */
+    superseded: number;
     receipts: number;
     orphanReceipts: number;
     units: number;
@@ -116,6 +118,18 @@ function flagged(value: MangoValue): boolean {
   return true;
 }
 
+/**
+ * Whether a row is still the live one.
+ *
+ * Deliberately not `flagged()`. A retired row is marked "N"; everything else,
+ * including a build that does not send the column at all, is live. Requiring a
+ * positive Y instead would drop every row the moment Mango stopped sending it,
+ * turning a whole project into zero without an error anywhere.
+ */
+function live(value: MangoValue): boolean {
+  return !/^n$/i.test(text(value) ?? '');
+}
+
 // ------------------------------------------------------------------- mapping
 
 export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): MangoMapResult {
@@ -148,12 +162,21 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
   let cancelled = 0;
   let contracts = 0;
+  let superseded = 0;
   const seenDocs = new Set<string>();
 
   transactions.forEach((row, index) => {
     const docno = text(row.docno);
     const project = text(row.pre_event2);
     const unit = text(row.pre_event);
+
+    // A superseded row is not a second contract. Mango keeps the old row in
+    // the same list marked inactive when a unit is rebooked, so summing
+    // without checking reports the same unit's money more than once.
+    if (!live(row.active)) {
+      superseded += 1;
+      return;
+    }
 
     // A cancelled booking is not a receivable. Mango keeps the row with
     // cancel_status set, and summing the list without checking would report
@@ -272,7 +295,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   for (const row of pricelist) {
     // A revised price supersedes the original, and an inactive unit is not for
     // sale — counting either would overstate what the project can earn.
-    if (!flagged(row.active)) continue;
+    if (!live(row.active)) continue;
 
     const project = text(row.pre_event2);
     const price = money(row.revise) || money(row.asking_price);
@@ -313,6 +336,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
     counts: {
       contracts,
       cancelled,
+      superseded,
       receipts: details.length,
       orphanReceipts,
       units: units.size,

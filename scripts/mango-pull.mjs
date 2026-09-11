@@ -12,6 +12,7 @@ import path from 'node:path';
  *   MANGO_BASE_URL   https://chaithanin.mangoanywhere.com/production.re
  *   MANGO_USER       a service account, not a person's login
  *   MANGO_PASS
+ *   MANGO_MAINCODE   the company to sign in to; MG1 (Chaithanin) by default
  *
  * The account matters. Mango filters every response by the permissions of
  * whoever signed in, so a pull is only as complete as that account's project
@@ -68,7 +69,7 @@ try {
 }
 
 console.log(bold(`\n── Mango RE · ${credentials.baseUrl}`));
-console.log(`   signing in as ${credentials.username}`);
+console.log(`   signing in as ${credentials.username} · company ${credentials.maincode}`);
 
 const client = new MangoClient(credentials);
 
@@ -126,6 +127,7 @@ const mapped = mapMangoBundle(bundle, { reportDate });
 
 console.log(`   contracts          ${String(mapped.counts.contracts).padStart(7)}`);
 console.log(`   cancelled, dropped ${String(mapped.counts.cancelled).padStart(7)}`);
+console.log(`   superseded, dropped${String(mapped.counts.superseded).padStart(7)}`);
 console.log(`   receipts           ${String(mapped.counts.receipts).padStart(7)}`);
 console.log(`   units priced       ${String(mapped.counts.units).padStart(7)}`);
 

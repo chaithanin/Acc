@@ -56,6 +56,18 @@ export function mangoFixture(): MangoBundle {
         transfer_due_date: '2026-05-31',
         cancel_status: 'Y', cancel_date: '2026-04-02',
       },
+      /**
+       * Superseded. V-201 was booked, the booking was replaced, and Mango
+       * keeps the old row in the same list marked inactive rather than
+       * removing it. Summing without checking reports this unit twice — and
+       * at a value nobody ever owed.
+       */
+      {
+        docno: 'BK-0005-OLD', pre_event2: 'MARINA_VTR', pre_event: 'V-201',
+        customer_name: 'Wichai T.', netamount: 4_800_000,
+        book_status: 'Y', contract_status: 'Y', transfer_status: 'N',
+        cancel_status: 'N', active: 'N',
+      },
       // A second project, so project filtering can be checked.
       {
         docno: 'BK-0005', pre_event2: 'MARINA_VTR', pre_event: 'V-201',
