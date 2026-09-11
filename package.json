@@ -14,7 +14,8 @@
     "seed": "node --import ./scripts/register-ts.mjs scripts/seed.mjs",
     "test:adversarial": "node --import ./scripts/register-ts.mjs scripts/adversarial-test.mjs",
     "test:e2e": "node --import ./scripts/register-ts.mjs scripts/e2e-audit.mjs",
-    "test:load": "node --import ./scripts/register-ts.mjs scripts/load-test.mjs"
+    "test:load": "node --import ./scripts/register-ts.mjs scripts/load-test.mjs",
+    "mango:pull": "node --import ./scripts/register-ts.mjs scripts/mango-pull.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

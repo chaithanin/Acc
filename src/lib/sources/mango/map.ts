@@ -1,0 +1,335 @@
+import { round2 } from '@/lib/calc/aggregate';
+import type { IncomeCategory, ImportIssue, NormalizedDataset, SourceRef } from '@/lib/types';
+import { emptyDataset } from '@/lib/types';
+import type { MangoBundle, MangoTransaction, MangoTransactionDetail, MangoValue } from './types';
+
+/**
+ * Turning Mango's sales ledger into the records this system reports on.
+ *
+ * Three decisions here are accounting decisions rather than plumbing, and each
+ * is the kind that would otherwise be buried in a coercion:
+ *
+ *   A cancelled booking is not a receivable. Mango keeps cancelled rows in the
+ *   same list with `cancel_status` set, and summing the list without checking
+ *   would report money nobody owes.
+ *
+ *   What has been collected is the receipts, not a column. `transaction` has no
+ *   "received" field; `transaction_detail` has one row per receipt. Collected
+ *   is their sum per contract, which is also why a receipt for a contract that
+ *   is not in the transaction list is reported rather than dropped.
+ *
+ *   The asking price is what the project expects to sell for. Summing the
+ *   active price list gives the total sale value that revenue recognition
+ *   needs and that somebody has been typing in by hand.
+ */
+
+export interface MangoMapOptions {
+  /** The date this pull represents. Every record is stamped with it. */
+  reportDate: string;
+  /** Acc project id per Mango project code, where one is known. */
+  projectIdByCode?: Map<string, string>;
+}
+
+export interface MangoMapResult {
+  data: NormalizedDataset;
+  issues: ImportIssue[];
+  /** Total asking price of the active price list, per Mango project code. */
+  saleValueByProject: Map<string, number>;
+  /**
+   * Receipts banked, by month.
+   *
+   * Collections, not income raised — Mango issues no monthly invoice. Returned
+   * rather than written into the income ledger, where it would be added to the
+   * contracts it is payment for and count the same money twice.
+   */
+  collectedByMonth: Map<string, number>;
+  /** Monthly targets, per Mango project code and month, for the budget screen. */
+  targets: { projectCode: string | null; month: string; income: number | null; expense: number | null }[];
+  counts: {
+    contracts: number;
+    cancelled: number;
+    receipts: number;
+    orphanReceipts: number;
+    units: number;
+  };
+}
+
+// ------------------------------------------------------------------ coercion
+
+/** Mango sends money as a number, a numeric string, or a string with commas. */
+function money(value: MangoValue): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string') return 0;
+
+  const cleaned = value.replace(/[,\s฿]/g, '');
+  if (cleaned === '' || cleaned === '-') return 0;
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function text(value: MangoValue): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * A date as YYYY-MM-DD, or null.
+ *
+ * Mango mixes ISO timestamps with `dd/MM/yyyy`, and its Thai screens sometimes
+ * carry a Buddhist year. A year past 2400 is converted rather than accepted:
+ * left alone it would make every due date 543 years away and every receivable
+ * read as not yet due.
+ */
+export function mangoDate(value: MangoValue): string | null {
+  const raw = text(value);
+  if (!raw) return null;
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return normaliseYear(Number(iso[1]), iso[2]!, iso[3]!);
+
+  const slashed = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slashed) {
+    return normaliseYear(
+      Number(slashed[3]),
+      String(slashed[2]).padStart(2, '0'),
+      String(slashed[1]).padStart(2, '0'),
+    );
+  }
+
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null;
+}
+
+function normaliseYear(year: number, month: string, day: string): string | null {
+  const gregorian = year > 2400 ? year - 543 : year;
+  if (gregorian < 1900 || gregorian > 2200) return null;
+  return `${gregorian}-${month}-${day}`;
+}
+
+/** Mango marks a flag with Y, 1, true or a Thai word; anything else is not set. */
+function flagged(value: MangoValue): boolean {
+  const raw = text(value);
+  if (!raw) return false;
+  if (/^(n|0|false|no)$/i.test(raw)) return false;
+  return true;
+}
+
+// ------------------------------------------------------------------- mapping
+
+export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): MangoMapResult {
+  const { reportDate, projectIdByCode = new Map() } = options;
+  const data = emptyDataset();
+  const issues: ImportIssue[] = [];
+
+  const transactions = Array.isArray(bundle.transaction) ? bundle.transaction : [];
+  const details = Array.isArray(bundle.transaction_detail) ? bundle.transaction_detail : [];
+  const pricelist = Array.isArray(bundle.pricelist) ? bundle.pricelist : [];
+  const saleTargets = Array.isArray(bundle.sale_target) ? bundle.sale_target : [];
+
+  const ref = (row: number, note: string): SourceRef => ({
+    file: 'Mango RE — All_Transaction_Data',
+    sheet: note,
+    row,
+    col: 1,
+    cell: `${note}!${row}`,
+  });
+
+  // --- receipts, grouped by the contract they belong to
+  const receiptsByDoc = new Map<string, MangoTransactionDetail[]>();
+  for (const detail of details) {
+    const docno = text(detail.docno);
+    if (!docno) continue;
+    const existing = receiptsByDoc.get(docno);
+    if (existing) existing.push(detail);
+    else receiptsByDoc.set(docno, [detail]);
+  }
+
+  let cancelled = 0;
+  let contracts = 0;
+  const seenDocs = new Set<string>();
+
+  transactions.forEach((row, index) => {
+    const docno = text(row.docno);
+    const project = text(row.pre_event2);
+    const unit = text(row.pre_event);
+
+    // A cancelled booking is not a receivable. Mango keeps the row with
+    // cancel_status set, and summing the list without checking would report
+    // money nobody owes.
+    if (flagged(row.cancel_status)) {
+      cancelled += 1;
+      return;
+    }
+
+    const contractual = money(row.netamount) || money(row.amount);
+    const receipts = docno ? (receiptsByDoc.get(docno) ?? []) : [];
+    const received = round2(receipts.reduce((sum, r) => sum + money(r.amount), 0));
+
+    // A row with no money on it is a placeholder, not a contract.
+    if (contractual === 0 && received === 0) return;
+
+    if (docno) seenDocs.add(docno);
+    contracts += 1;
+
+    if (received > contractual + 1) {
+      issues.push({
+        severity: 'warning',
+        code: 'MANGO_OVERPAID',
+        message:
+          `${unit ?? docno ?? 'A contract'} has receipts of ${received.toLocaleString()} `
+          + `against a contract value of ${contractual.toLocaleString()}. Either the contract value `
+          + 'was revised down after payment, or a receipt is filed against the wrong contract.',
+        source: ref(index + 1, 'transaction'),
+      });
+    }
+
+    data.receivable.push({
+      kind: 'receivable',
+      sourceRef: ref(index + 1, 'transaction'),
+      projectId: project ? projectIdByCode.get(project) ?? null : null,
+      projectLabel: project,
+      category: stageOf(row),
+      customer: text(row.customer_name) ?? text(row.customer_code),
+      unit,
+      contractualAmount: contractual,
+      receiveAmount: received,
+      // Derived rather than read: the sheet's own accrued column is the figure
+      // this system has always recomputed, and Mango has none at all.
+      accrueAmount: round2(contractual - received),
+      // What the buyer has to complete by. Without it a receivable cannot be
+      // aged, and unaged money is money nobody is chasing.
+      dueDate: mangoDate(row.transfer_due_date) ?? mangoDate(row.transfer_date),
+    });
+  });
+
+  // --- receipts filed against a contract that is not in the list
+  let orphanReceipts = 0;
+  for (const [docno, rows] of receiptsByDoc) {
+    if (seenDocs.has(docno)) continue;
+    orphanReceipts += rows.length;
+  }
+  if (orphanReceipts > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'MANGO_ORPHAN_RECEIPT',
+      message:
+        `${orphanReceipts} receipts belong to a contract that is not in this pull — `
+        + 'usually a cancelled booking that was refunded, or a project this account cannot see. '
+        + 'They are not counted as collections.',
+      source: ref(0, 'transaction_detail'),
+    });
+  }
+
+  // --- collections, by the month they were banked in
+  //
+  // Deliberately NOT written into the income ledger. Mango RE is one ledger:
+  // its transactions are the receivables and its details are the payments
+  // against them. This system has two, and a figure that appears in both is
+  // counted twice — revenue would read as the contracts plus the receipts for
+  // the same contracts. That is the exact defect the income-overlap rule was
+  // written to catch, and it should not be introduced on the way in.
+  //
+  // The monthly figure is real and useful, so it is returned for the caller to
+  // report rather than filed under a heading that means something else. It is
+  // collections, not income raised: Mango raises no monthly invoice.
+  const collectedByMonth = new Map<string, number>();
+  let undatedReceipts = 0;
+
+  for (const detail of details) {
+    const amount = money(detail.amount);
+    if (amount === 0) continue;
+
+    const date = mangoDate(detail.rcptdate);
+    if (!date) {
+      undatedReceipts += 1;
+      continue;
+    }
+
+    const month = date.slice(0, 7);
+    collectedByMonth.set(month, round2((collectedByMonth.get(month) ?? 0) + amount));
+  }
+
+  if (undatedReceipts > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'MANGO_UNDATED_RECEIPT',
+      message:
+        `${undatedReceipts} receipts carry no usable date. They still count towards what a `
+        + 'customer has paid, but they cannot be placed in a month, so the monthly collection '
+        + 'figure is short by their value.',
+      source: ref(0, 'transaction_detail'),
+    });
+  }
+
+  // --- what each project expects to sell for
+  const saleValueByProject = new Map<string, number>();
+  const units = new Set<string>();
+  for (const row of pricelist) {
+    // A revised price supersedes the original, and an inactive unit is not for
+    // sale — counting either would overstate what the project can earn.
+    if (!flagged(row.active)) continue;
+
+    const project = text(row.pre_event2);
+    const price = money(row.revise) || money(row.asking_price);
+    if (price === 0) continue;
+
+    const unit = text(row.pre_event);
+    if (unit) units.add(unit);
+    if (!project) continue;
+
+    saleValueByProject.set(project, round2((saleValueByProject.get(project) ?? 0) + price));
+  }
+
+  // --- monthly targets, which the budget screen compares actuals against
+  const targets = saleTargets
+    .map((row) => {
+      const year = Number(text(row.year));
+      const month = Number(text(row.month));
+      if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+
+      const gregorian = year > 2400 ? year - 543 : year;
+      return {
+        projectCode: text(row.pre_event2),
+        month: `${gregorian}-${String(month).padStart(2, '0')}`,
+        income: hasValue(row.target_sale_amount) ? money(row.target_sale_amount) : null,
+        expense: hasValue(row.budget) ? money(row.budget) : hasValue(row.expenses) ? money(row.expenses) : null,
+      };
+    })
+    .filter((t): t is NonNullable<typeof t> => t !== null);
+
+  void reportDate;
+
+  return {
+    data,
+    issues,
+    saleValueByProject,
+    collectedByMonth,
+    targets,
+    counts: {
+      contracts,
+      cancelled,
+      receipts: details.length,
+      orphanReceipts,
+      units: units.size,
+    },
+  };
+}
+
+const hasValue = (value: MangoValue) => value !== null && value !== undefined && String(value).trim() !== '';
+
+/**
+ * How far along a contract is, in the categories this system reports.
+ *
+ * Read from the furthest stage the row has reached rather than from a type
+ * column, because Mango records progress as a set of status flags and a
+ * contract that has transferred is no longer a booking.
+ */
+function stageOf(row: MangoTransaction): IncomeCategory {
+  if (flagged(row.transfer_status)) return 'transfer_fee';
+  if (flagged(row.down_status)) return 'down_payment';
+  if (flagged(row.contract_status)) return 'contract';
+  if (flagged(row.book_status)) return 'reservation';
+  return 'contract';
+}
