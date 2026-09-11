@@ -167,7 +167,20 @@ describe('collections', () => {
   it('says how much it could not place in a month, rather than dropping it quietly', () => {
     const undated = result.issues.find((i) => i.code === 'MANGO_UNDATED_RECEIPT');
     assert.ok(undated, 'a receipt had no date and nothing said so');
-    assert.match(undated.message, /short by their value/);
+    assert.match(undated.message, /the monthly collection figure is short/);
+  });
+
+  /**
+   * The fixture has exactly one undated receipt, and a warning that reads
+   * "1 receipts carry" is the kind of thing that makes a reader wonder what
+   * else was written without being looked at.
+   */
+  it('reads as a sentence when it is talking about one receipt', () => {
+    const undated = result.issues.find((i) => i.code === 'MANGO_UNDATED_RECEIPT');
+    assert.match(undated!.message, /^1 receipt carries no usable date\. It still counts/);
+
+    const orphan = result.issues.find((i) => i.code === 'MANGO_ORPHAN_RECEIPT');
+    assert.match(orphan!.message, /^2 receipts belong to a contract/);
   });
 
   it('still counts an undated receipt towards what the customer has paid', () => {

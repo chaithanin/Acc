@@ -29,9 +29,10 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (97) |
+| `npm test` | unit and integration tests (406) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
+| `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
 
 The database and uploaded originals live in `data/` and are git-ignored.
 Override the location with `GTG_DATA_DIR`.
@@ -180,6 +181,13 @@ Thai text is handled throughout: month names, Buddhist-era years (2569 → 2026)
 Ledger detail is stored for the audit trail while a derived account-level
 summary feeds the KPIs, so a ledger is never counted twice.
 
+Not everything has to arrive as a file. The sales ledger is read directly from
+**Mango RE**'s own JSON endpoints and goes through the same pipeline as an
+upload — same validation, duplicate check, snapshot, audit entry and rollback —
+so no one has to export a workbook for it. [`docs/MANGO-RE.md`](docs/MANGO-RE.md)
+covers the service account it needs, what the mapping decides and does not
+decide, and what to do when Mango renames a column.
+
 ---
 
 ## Configuration, not code
@@ -217,10 +225,11 @@ Enforced server-side on every route; the navigation filter is convenience only.
 npm test
 ```
 
-97 tests covering text normalisation and alias resolution, header detection and
+406 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
-ratios, budget utilisation and THB formatting.
+ratios, budget utilisation, THB formatting, and the Mango RE client and its
+mapping against a schema-faithful fixture.
 
 `tests/samples.test.ts` runs the **real** client workbooks end to end when
 `samples/` is present, and asserts that our independently computed closing
@@ -251,3 +260,4 @@ and has not been verified.
 * [`docs/DEPLOY.md`](docs/DEPLOY.md) — deploying to Google Cloud, and the cost reasoning
 * [`docs/DATABASE.md`](docs/DATABASE.md) — schema and the PostgreSQL migration path
 * [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record
+* [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE

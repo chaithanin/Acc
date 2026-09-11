@@ -25,6 +25,11 @@ import path from 'node:path';
  *   --date YYYY-MM-DD   the report date to file it under (default: today)
  *   --dry-run           fetch, map and report; write nothing
  *   --save <file>       also write the raw bundle to disk, for inspection
+ *   --force             go ahead despite a schema failure, or despite this
+ *                       pull being identical to one already imported
+ *
+ * docs/MANGO-RE.md has the rest: the account it needs, what the mapping
+ * decides, and what to do when the schema check stops a run.
  */
 
 const args = process.argv.slice(2);

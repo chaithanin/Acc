@@ -215,9 +215,10 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       severity: 'warning',
       code: 'MANGO_ORPHAN_RECEIPT',
       message:
-        `${orphanReceipts} receipts belong to a contract that is not in this pull — `
+        `${orphanReceipts} receipt${orphanReceipts === 1 ? '' : 's'} belong`
+        + `${orphanReceipts === 1 ? 's' : ''} to a contract that is not in this pull — `
         + 'usually a cancelled booking that was refunded, or a project this account cannot see. '
-        + 'They are not counted as collections.',
+        + `${orphanReceipts === 1 ? 'It is' : 'They are'} not counted as collections.`,
       source: ref(0, 'transaction_detail'),
     });
   }
@@ -256,9 +257,11 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       severity: 'warning',
       code: 'MANGO_UNDATED_RECEIPT',
       message:
-        `${undatedReceipts} receipts carry no usable date. They still count towards what a `
-        + 'customer has paid, but they cannot be placed in a month, so the monthly collection '
-        + 'figure is short by their value.',
+        `${undatedReceipts} receipt${undatedReceipts === 1 ? '' : 's'} carr`
+        + `${undatedReceipts === 1 ? 'ies' : 'y'} no usable date. `
+        + `${undatedReceipts === 1 ? 'It still counts' : 'They still count'} towards what a `
+        + `customer has paid, but ${undatedReceipts === 1 ? 'it cannot' : 'they cannot'} be placed `
+        + `in a month, so the monthly collection figure is short by ${undatedReceipts === 1 ? 'its' : 'their'} value.`,
       source: ref(0, 'transaction_detail'),
     });
   }

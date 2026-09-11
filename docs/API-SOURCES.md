@@ -10,6 +10,11 @@ and the field path rather than a cell address.
 That last part is not optional. A figure on the dashboard has to be traceable to
 where it came from, and "from the API" is not an answer a finance team can check.
 
+One such adapter is already written: the sales ledger is read out of Mango RE,
+which documents its own endpoints by using them —
+see [`MANGO-RE.md`](MANGO-RE.md). What follows is about the case where the API is
+not self-evident and the first job is to find out how to talk to it at all.
+
 ## Before an adapter can be written
 
 An adapter needs three things that only the API itself can tell us:
