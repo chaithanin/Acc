@@ -80,7 +80,15 @@ try {
   process.exit(1);
 }
 
-const projects = await client.projects();
+let projects;
+try {
+  projects = await client.projects();
+} catch (err) {
+  // A stack trace here would say "projects is not iterable", which describes
+  // this script rather than what Mango did.
+  console.error(`\n   ${err.message}`);
+  process.exit(1);
+}
 console.log(`   ${projects.length} projects visible to this account`);
 for (const p of projects) {
   console.log(`     ${String(p.pre_event2 ?? '—').padEnd(14)} ${p.name ?? ''}`
@@ -93,7 +101,13 @@ if (projects.length === 0) {
 }
 
 console.log(bold('\n── Pulling All_Transaction_Data'));
-const bundle = await client.allTransactionData(projectFilter);
+let bundle;
+try {
+  bundle = await client.allTransactionData(projectFilter);
+} catch (err) {
+  console.error(`\n   ${err.message}`);
+  process.exit(1);
+}
 
 for (const [name, rows] of Object.entries(bundle)) {
   if (Array.isArray(rows)) console.log(`   ${name.padEnd(20)} ${String(rows.length).padStart(7)} rows`);

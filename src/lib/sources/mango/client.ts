@@ -24,6 +24,15 @@ export interface MangoCredentials {
   username: string;
   password: string;
   /**
+   * Where to sign in, when that is not where the data is.
+   *
+   * Mango is several modules on one host and the session is shared between
+   * them — the cookie is even named for it. A module with no sign-in page of
+   * its own is therefore reached by signing in at one that has one and
+   * carrying the cookies across. Defaults to `baseUrl`.
+   */
+  loginBaseUrl?: string;
+  /**
    * The company being signed in to — MG1 is Chaithanin Co., Ltd.
    *
    * Mango is multi-company and the login carries this alongside the username.
@@ -161,6 +170,12 @@ export class MangoClient {
     return `${this.credentials.baseUrl}/${path.replace(/^\/+/, '')}`;
   }
 
+  /** Where the sign-in lives, which is not always where the data lives. */
+  private loginUrl(path: string): string {
+    const base = this.credentials.loginBaseUrl ?? this.credentials.baseUrl;
+    return `${base}/${path.replace(/^\/+/, '')}`;
+  }
+
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return {
       // Mango's controllers answer JSON to an XHR and HTML to anything else.
@@ -205,7 +220,7 @@ export class MangoClient {
    * appears later as a data endpoint answering HTML.
    */
   async login(): Promise<this> {
-    const loginUrl = this.url('Authentication/Login');
+    const loginUrl = this.loginUrl('Authentication/Login');
 
     let page: Response;
     try {
@@ -219,9 +234,19 @@ export class MangoClient {
     }
 
     // Mango serves the login page to anyone — that is the point of a login
-    // page. A refusal here is almost never Mango: it is something between this
-    // machine and Mango saying no. Saying "the form moved" instead would send
-    // whoever is on call hunting through endpoints that are perfectly fine.
+    // page — so nothing here is ever a rejected sign-in. But the two ways it
+    // can fail want opposite responses, and saying the wrong one costs an
+    // evening: a 404 is Mango answering that there is no such page, which
+    // means the address is wrong; anything else at this stage is something
+    // between this machine and Mango refusing to carry the request.
+    if (page.status === 404) {
+      throw new MangoError(
+        `${loginUrl} does not exist — Mango answered 404, so it was reached and had nothing `
+        + 'there. The address is wrong rather than blocked. If this module has no sign-in page '
+        + 'of its own, sign in at the one that does and point this at the module afterwards.',
+      );
+    }
+
     if (!page.ok) {
       throw new MangoError(
         `${loginUrl} answered ${page.status} before any credentials were sent. `
@@ -266,7 +291,7 @@ export class MangoClient {
    * failure, since the difference is not something an operator can act on.
    */
   private async loginDo(referer: string): Promise<void> {
-    const url = this.url('authentication/login_do');
+    const url = this.loginUrl('authentication/login_do');
     const payload = {
       userid: this.credentials.username,
       userpass: this.credentials.password,
@@ -370,11 +395,12 @@ export class MangoClient {
     if (!fields.has('maincode')) fields.set('maincode', this.credentials.maincode);
 
     const action = form.match(/action="([^"]*)"/i)?.[1] || 'Authentication/Login';
+    const loginBase = this.credentials.loginBaseUrl ?? this.credentials.baseUrl;
     const postUrl = action.startsWith('http')
       ? action
       : action.startsWith('/')
-        ? new URL(action, this.credentials.baseUrl).toString()
-        : this.url(action);
+        ? new URL(action, loginBase).toString()
+        : this.loginUrl(action);
 
     const submitted = await this.follow(await this.request(postUrl, {
       method: 'POST',
@@ -417,7 +443,7 @@ export class MangoClient {
 
   async isAuthenticated(): Promise<boolean> {
     try {
-      const response = await this.request(this.url('api/public/AuthStatus'), {
+      const response = await this.request(this.loginUrl('api/public/AuthStatus'), {
         headers: this.headers(),
       });
       if (response.status >= 300 && response.status < 400) return false;
@@ -490,8 +516,8 @@ export class MangoClient {
   }
 
   /** Projects this account may see. The code in `pre_event2` filters everything else. */
-  projects(take = 200, search = ''): Promise<MangoProject[]> {
-    return this.get<MangoProject[]>('RE_Master_data/projectmodal3', {
+  async projects(take = 200, search = ''): Promise<MangoProject[]> {
+    const answer = await this.get<unknown>('RE_Master_data/projectmodal3', {
       skip: 0,
       take,
       show_unit: 'false',
@@ -501,6 +527,8 @@ export class MangoClient {
       show_close: 'false',
       search_text: search,
     });
+
+    return unwrapRows<MangoProject>(answer, 'RE_Master_data/projectmodal3');
   }
 
   /**
@@ -512,6 +540,44 @@ export class MangoClient {
       pre_event2_arr: projects.join(','),
     });
   }
+}
+
+/**
+ * The rows out of an answer that is either a list or a list in a wrapper.
+ *
+ * Mango's grid endpoints answer `{ data: [...], total: n }` inside the usual
+ * envelope, so unwrapping once is not always enough — and the second wrapper
+ * is not universal, which is why this looks rather than assumes.
+ *
+ * Deliberately narrow: it unwraps only when the object is a paging wrapper and
+ * nothing else. `All_Transaction_Data` answers an object holding several named
+ * lists, and unwrapping that would throw away every list but one.
+ */
+export function unwrapRows<T>(answer: unknown, path: string): T[] {
+  if (Array.isArray(answer)) return answer as T[];
+
+  if (answer && typeof answer === 'object') {
+    const record = answer as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const paging = new Set(['data', 'total', 'count', 'rows', 'aggregates', 'errors', 'page', 'pages']);
+
+    if (keys.every((key) => paging.has(key))) {
+      const rows = record.data ?? record.rows;
+      if (Array.isArray(rows)) return rows as T[];
+    }
+
+    throw new MangoError(
+      `${path} answered an object where a list was expected. It holds: ${keys.slice(0, 12).join(', ')}`
+      + `${keys.length > 12 ? ', …' : ''}. The endpoint has changed shape and the caller needs updating.`,
+      answer,
+    );
+  }
+
+  throw new MangoError(
+    `${path} answered ${answer === null ? 'null' : typeof answer} where a list was expected. `
+    + 'Either this account may not see it, or the endpoint has changed.',
+    answer,
+  );
 }
 
 export interface SchemaFinding {

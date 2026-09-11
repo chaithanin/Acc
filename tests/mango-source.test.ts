@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { checkBundleSchema, companiesFrom, credentialsFromEnv, MangoError } from '@/lib/sources/mango/client';
+import { checkBundleSchema, companiesFrom, credentialsFromEnv, MangoError, unwrapRows } from '@/lib/sources/mango/client';
 import { mangoDate, mapMangoBundle } from '@/lib/sources/mango/map';
 import { mangoFixture } from './fixtures/mango-bundle';
 import { calculateMetrics } from '@/lib/calc/kpi';
@@ -537,5 +537,86 @@ describe('reading raw, for a module with no contract yet', () => {
     } finally {
       close();
     }
+  });
+});
+
+/**
+ * Shapes the live service actually answered with, kept here so the guesses
+ * that were wrong cannot come back.
+ */
+describe('answers that are not the shape the caller assumed', () => {
+  it('takes the rows out of a grid wrapper', () => {
+    const rows = unwrapRows<{ pre_event2: string }>(
+      { data: [{ pre_event2: 'HAMONIA' }, { pre_event2: 'MARINA_VTR' }], total: 2 },
+      'projectmodal3',
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].pre_event2, 'HAMONIA');
+  });
+
+  it('takes a plain list as it is', () => {
+    assert.equal(unwrapRows([{ a: 1 }], 'x').length, 1);
+  });
+
+  /**
+   * The bundle is an object holding several named lists. Unwrapping it as a
+   * paging wrapper would keep one list and throw the rest away, which is worse
+   * than failing — it would report a pull that worked and was mostly empty.
+   */
+  it('refuses to unwrap an object that holds several lists', () => {
+    assert.throws(
+      () => unwrapRows({ transaction: [], pricelist: [], sale_target: [] }, 'All_Transaction_Data'),
+      (err: unknown) => err instanceof MangoError
+        && /holds: transaction, pricelist, sale_target/.test((err as Error).message),
+    );
+  });
+
+  it('says what it got when the answer is nothing at all', () => {
+    assert.throws(
+      () => unwrapRows(null, 'projectmodal3'),
+      (err: unknown) => err instanceof MangoError && /answered null/.test((err as Error).message),
+    );
+  });
+});
+
+/**
+ * A 404 on the login page and a blocked request are opposite problems, and
+ * telling somebody the wrong one costs an evening: one means the address is
+ * wrong, the other means nothing reached Mango at all.
+ */
+describe('when the login page is not there', () => {
+  const serveStatus = async (status: number) => {
+    const http = await import('node:http');
+    const server = http.createServer((_req, res) => {
+      res.writeHead(status, { 'content-type': 'text/html' });
+      res.end('nope');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    return { base: `http://127.0.0.1:${port}`, close: () => server.close() };
+  };
+
+  const signIn = async (status: number) => {
+    const { base, close } = await serveStatus(status);
+    try {
+      const { MangoClient } = await import('@/lib/sources/mango/client');
+      await new MangoClient({ baseUrl: base, username: 'u', password: 'p', maincode: 'MG1' }).login();
+      assert.fail('signing in against a broken page succeeded');
+    } catch (err) {
+      return (err as Error).message;
+    } finally {
+      close();
+    }
+  };
+
+  it('calls a 404 a wrong address, not a blocked request', async () => {
+    const message = await signIn(404);
+    assert.match(message, /does not exist/);
+    assert.match(message, /wrong rather than blocked/);
+  });
+
+  it('still calls a refusal a refusal', async () => {
+    const message = await signIn(403);
+    assert.match(message, /network or proxy refusal/);
   });
 });

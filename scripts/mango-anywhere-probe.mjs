@@ -50,9 +50,19 @@ const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 const { MangoClient, credentialsFromEnv, MangoError } =
   await import('../src/lib/sources/mango/client.ts');
 
+/**
+ * Where to sign in.
+ *
+ * This module has no sign-in page of its own — it answers 404 for one. The
+ * session is shared across Mango's modules, so the sign-in happens at the
+ * estate module, which does have one, and the cookies are carried across.
+ */
+const loginBase = (process.env.MANGO_LOGIN_URL ?? process.env.MANGO_BASE_URL ?? `${HOST}/production.re`)
+  .replace(/\/+$/, '');
+
 let credentials;
 try {
-  credentials = { ...credentialsFromEnv(), baseUrl: base };
+  credentials = { ...credentialsFromEnv(), baseUrl: base, loginBaseUrl: loginBase };
 } catch (err) {
   console.error(err instanceof MangoError ? err.message : err);
   process.exit(2);
@@ -60,14 +70,15 @@ try {
 
 console.log(bold(`\n── Surveying ${base}`));
 console.log(`   as ${credentials.username} · company ${credentials.maincode}`);
+if (loginBase !== base) console.log(`   signing in at ${loginBase}, which is where the login page is`);
 
 const client = new MangoClient(credentials);
 try {
   await client.login();
 } catch (err) {
   console.error(`\n   ${err.message}`);
-  console.error('\n   If this module signs in differently from production.re, say so and the');
-  console.error('   client can learn the difference — it already knows two ways.');
+  console.error('\n   Point MANGO_LOGIN_URL at whichever module does have a sign-in page,');
+  console.error('   or MANGO_ANYWHERE_URL at the right address for this one.');
   process.exit(1);
 }
 console.log('   signed in');
@@ -95,7 +106,7 @@ const note = (path, where) => {
 
 console.log(bold('\n── Reading the pages for the endpoints they call'));
 
-for (const page of [entry, '', 'page/']) {
+for (const page of [entry, '', 'page/', 'Home/Index']) {
   try {
     const answer = await client.raw(page);
     console.log(`   ${(page || '/').padEnd(20)} ${answer.status} ${answer.contentType.split(';')[0]} `

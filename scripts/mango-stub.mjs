@@ -154,12 +154,15 @@ const server = http.createServer((req, res) => {
   if (path === '/api/public/AuthStatus') return json(res, { success: true, error: null, data: { user: USER } });
 
   if (path === '/RE_Master_data/projectmodal3') {
+    // The live service wraps the rows in a grid envelope inside the usual
+    // envelope — two layers, not one. Answering a bare list here is how this
+    // stub used to pass while the real pull crashed.
     return json(res, {
       success: true, error: null,
-      data: [
+      data: { total: 2, data: [
         { maincode: 'MG1', pre_event2: 'HAMONIA', name: 'Hamonia', proj_type: 'condo', total_units: 3, sold_units: 3, active: 'Y' },
         { maincode: 'MG1', pre_event2: 'MARINA_VTR', name: 'Marina Golden Bay Victoria', proj_type: 'condo', total_units: 4, sold_units: 2, active: 'Y' },
-      ],
+      ] },
     });
   }
 
