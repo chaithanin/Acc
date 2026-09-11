@@ -29,10 +29,11 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (407) |
+| `npm test` | unit and integration tests (432) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
+| `npm run booking:pull -- --dry-run` | read the unit inventory from the Booking API |
 
 The database and uploaded originals live in `data/` and are git-ignored.
 Override the location with `GTG_DATA_DIR`.
@@ -188,6 +189,14 @@ so no one has to export a workbook for it. [`docs/MANGO-RE.md`](docs/MANGO-RE.md
 covers the service account it needs, what the mapping decides and does not
 decide, and what to do when Mango renames a column.
 
+The **Booking API** supplies the other half: the unit inventory, its prices and
+where each unit stands in the funnel — which is what every take-up percentage
+divides by, and the one thing Mango cannot say, since Mango learns of a unit
+only once somebody books it. The two are kept apart deliberately: Mango is the
+source of every financial figure, Booking of none.
+[`docs/BOOKING-API.md`](docs/BOOKING-API.md) covers the scopes to ask for, the
+two traps in the data, and where the two systems disagree.
+
 ---
 
 ## Configuration, not code
@@ -225,7 +234,7 @@ Enforced server-side on every route; the navigation filter is convenience only.
 npm test
 ```
 
-407 tests covering text normalisation and alias resolution, header detection and
+432 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its
@@ -261,3 +270,4 @@ and has not been verified.
 * [`docs/DATABASE.md`](docs/DATABASE.md) — schema and the PostgreSQL migration path
 * [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record
 * [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE
+* [`docs/BOOKING-API.md`](docs/BOOKING-API.md) — reading the unit inventory from the Booking API
