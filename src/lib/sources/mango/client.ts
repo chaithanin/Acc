@@ -48,8 +48,13 @@ export function credentialsFromEnv(env: NodeJS.ProcessEnv = process.env): MangoC
   // A pasted template is the ordinary way this goes wrong, and it otherwise
   // fails several steps later as a rejected sign-in — which sends whoever is
   // running it to reset a password that was never the problem.
+  //
+  // The ellipsis is here because documentation writes it: an instruction that
+  // reads MANGO_USER=… gets copied whole, ellipsis and all, and that is a
+  // value somebody chose to type rather than a credential they hold.
+  const PLACEHOLDER = /^<.*>$|^(your|xxx+|changeme|placeholder)|^[…．.\-_*·•]+$/i;
   const placeholders = ['MANGO_BASE_URL', 'MANGO_USER', 'MANGO_PASS']
-    .filter((k) => /^<.*>$|^(your|xxx+|changeme|placeholder)/i.test(env[k]!.trim()));
+    .filter((k) => PLACEHOLDER.test(env[k]!.trim()));
   if (placeholders.length > 0) {
     throw new MangoError(
       `These still hold the placeholder from the instructions: ${placeholders.join(', ')}. `

@@ -371,6 +371,26 @@ describe('failing usefully', () => {
     );
   });
 
+  /**
+   * Found by watching somebody run it. The instructions wrote MANGO_USER=…
+   * and the ellipsis was exported verbatim, which the check let through — so
+   * the run went on to fail as a rejected sign-in, which is the exact wrong
+   * turn this check exists to prevent. Documentation writes ellipses, so the
+   * check has to know about them.
+   */
+  it('spots the ellipsis that documentation puts in the example', () => {
+    for (const value of ['…', '...', '-', '***']) {
+      assert.throws(
+        () => credentialsFromEnv({
+          MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',
+          MANGO_USER: value, MANGO_PASS: value,
+        } as unknown as NodeJS.ProcessEnv),
+        (err: unknown) => err instanceof MangoError && /placeholder/.test((err as Error).message),
+        `${JSON.stringify(value)} was accepted as a credential`,
+      );
+    }
+  });
+
   it('accepts credentials that merely look unusual', () => {
     const creds = credentialsFromEnv({
       MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',

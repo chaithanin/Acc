@@ -41,12 +41,40 @@ They go in the environment, never in the repository:
 
 ```
 MANGO_BASE_URL=https://chaithanin.mangoanywhere.com/production.re
-MANGO_USER=…
-MANGO_PASS=…
+MANGO_USER=<service account username>
+MANGO_PASS=<service account password>
 ```
+
+The angle brackets are deliberate. A value copied straight out of an example is
+the ordinary way this goes wrong, and the run refuses to start on one rather
+than letting it through to fail later as a rejected sign-in — which would send
+somebody to reset a password that was never the problem.
 
 `.env` and `.env*.local` are git-ignored. On the deployment VM these belong in
 the container's environment (`/opt/gtg/run.sh`) rather than baked into the image.
+
+## Where to run it from
+
+Not from a development container: the egress policy there refuses
+`chaithanin.mangoanywhere.com` outright, so the pull cannot reach Mango at all.
+The deployment VM can, and so can Google Cloud Shell, which is the quickest way
+to try it against the real service:
+
+```bash
+git clone -b claude/global-top-financial-dashboard-2jrq6e \
+  https://github.com/chaithanin/Acc.git && cd Acc
+npm ci
+npm run mango:pull -- --dry-run
+```
+
+`npm` reads `package.json` from the directory it is run in, so run it inside the
+clone — a fresh shell opens in the home directory, where there is no project and
+the error is about a missing `package.json` rather than anything to do with
+Mango.
+
+A dry run needs no database and no `--company`, which is what makes it a
+reasonable thing to do from a scratch machine: it signs in, reports what the
+account can see, and writes nothing anywhere.
 
 ## Flags
 
