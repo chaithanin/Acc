@@ -338,3 +338,32 @@ describe('a Mango pull passes the system’s own reconciliation rules', () => {
     assert.equal(overlap?.status, 'skipped');
   });
 });
+
+/**
+ * What goes wrong in practice, and whether the message sends the right person
+ * to the right place.
+ */
+describe('failing usefully', () => {
+  it('spots a pasted placeholder instead of failing later as a bad password', () => {
+    assert.throws(
+      () => credentialsFromEnv({
+        MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',
+        MANGO_USER: '<service account>',
+        MANGO_PASS: '<password>',
+      } as unknown as NodeJS.ProcessEnv),
+      (err: unknown) =>
+        err instanceof MangoError
+        && /placeholder/.test((err as Error).message)
+        && /MANGO_USER, MANGO_PASS/.test((err as Error).message),
+    );
+  });
+
+  it('accepts credentials that merely look unusual', () => {
+    const creds = credentialsFromEnv({
+      MANGO_BASE_URL: 'https://chaithanin.mangoanywhere.com/production.re',
+      MANGO_USER: 'svc.dashboard', MANGO_PASS: 'xY<z>9!',
+    } as unknown as NodeJS.ProcessEnv);
+
+    assert.equal(creds.username, 'svc.dashboard');
+  });
+});

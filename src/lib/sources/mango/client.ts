@@ -45,6 +45,18 @@ export function credentialsFromEnv(env: NodeJS.ProcessEnv = process.env): MangoC
     );
   }
 
+  // A pasted template is the ordinary way this goes wrong, and it otherwise
+  // fails several steps later as a rejected sign-in — which sends whoever is
+  // running it to reset a password that was never the problem.
+  const placeholders = ['MANGO_BASE_URL', 'MANGO_USER', 'MANGO_PASS']
+    .filter((k) => /^<.*>$|^(your|xxx+|changeme|placeholder)/i.test(env[k]!.trim()));
+  if (placeholders.length > 0) {
+    throw new MangoError(
+      `These still hold the placeholder from the instructions: ${placeholders.join(', ')}. `
+      + 'Put the real service-account details in before running.',
+    );
+  }
+
   return {
     baseUrl: env.MANGO_BASE_URL!.trim().replace(/\/+$/, ''),
     username: env.MANGO_USER!.trim(),
@@ -128,13 +140,37 @@ export class MangoClient {
    */
   async login(): Promise<this> {
     const loginUrl = this.url('Authentication/Login');
-    const page = await this.request(loginUrl, { headers: this.headers({ accept: 'text/html' }) });
+
+    let page: Response;
+    try {
+      page = await this.request(loginUrl, { headers: this.headers({ accept: 'text/html' }) });
+    } catch (err) {
+      throw new MangoError(
+        `Could not reach ${this.credentials.baseUrl}. `
+        + 'Check the address, and check whether outbound access to it is allowed from this machine.',
+        err,
+      );
+    }
+
+    // Mango serves the login page to anyone — that is the point of a login
+    // page. A refusal here is almost never Mango: it is something between this
+    // machine and Mango saying no. Saying "the form moved" instead would send
+    // whoever is on call hunting through endpoints that are perfectly fine.
+    if (!page.ok) {
+      throw new MangoError(
+        `${loginUrl} answered ${page.status} before any credentials were sent. `
+        + 'The login page is public, so this is a network or proxy refusal rather than a rejected '
+        + 'sign-in — check that outbound access to this host is allowed.',
+      );
+    }
+
     const html = await page.text();
 
     const form = html.match(/<form\b[\s\S]*?<\/form>/i)?.[0];
     if (!form) {
       throw new MangoError(
-        'No login form at Authentication/Login — the path may have changed, or the response was a redirect.',
+        'Reached Authentication/Login but found no form on it. Either the page has been '
+        + 'restructured, or something returned a page of its own in Mango’s place.',
       );
     }
 
