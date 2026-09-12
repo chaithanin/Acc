@@ -69,6 +69,8 @@ export interface MangoMapResult {
     superseded: number;
     /** Receipts against contracts absent from the pull — the sign of a short pull. */
     receiptsWithoutContract: number;
+    /** Contracts whose receipts exceed their contract value. */
+    overpaid: number;
     receipts: number;
     orphanReceipts: number;
     units: number;
@@ -187,6 +189,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   let cancelled = 0;
   let contracts = 0;
   let superseded = 0;
+  const overpaid: { label: string; contractual: number; received: number; over: number }[] = [];
   const seenDocs = new Set<string>();
   /**
    * Why a contract is not in the receivable list, where it is in the pull.
@@ -237,14 +240,14 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
     contracts += 1;
 
     if (received > contractual + 1) {
-      issues.push({
-        severity: 'warning',
-        code: 'MANGO_OVERPAID',
-        message:
-          `${unit ?? docno ?? 'A contract'} has receipts of ${received.toLocaleString()} `
-          + `against a contract value of ${contractual.toLocaleString()}. Either the contract value `
-          + 'was revised down after payment, or a receipt is filed against the wrong contract.',
-        source: ref(index + 1, 'transaction'),
+      // Collected rather than reported one by one. Two hundred identical
+      // warnings is not two hundred findings — it is one finding about the
+      // data, and printing it that many times buries whatever else was said.
+      overpaid.push({
+        label: unit ?? docno ?? `row ${index + 1}`,
+        contractual,
+        received,
+        over: round2(received - contractual),
       });
     }
 
@@ -457,6 +460,37 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   }
 
   /**
+   * Contracts that took more than they were for.
+   *
+   * One of these is a question about a contract. Two hundred is a question
+   * about the data — a price revised after payment throughout, or a kind of
+   * receipt that is not a payment of the contract still being counted — and
+   * the total overage says which scale of problem it is.
+   */
+  if (overpaid.length > 0) {
+    const total = round2(overpaid.reduce((sum, row) => sum + row.over, 0));
+    const worst = [...overpaid].sort((a, b) => b.over - a.over).slice(0, 5);
+
+    issues.push({
+      severity: overpaid.length > contracts * 0.05 ? 'error' : 'warning',
+      code: 'MANGO_OVERPAID',
+      message:
+        `${overpaid.length} of ${contracts} contracts have receipts exceeding their contract value, `
+        + `by ${Math.round(total).toLocaleString('en-US')} in total. `
+        + `The largest: ${worst.map((row) =>
+          `${row.label} took ${Math.round(row.received).toLocaleString('en-US')} against `
+          + `${Math.round(row.contractual).toLocaleString('en-US')}`).join('; ')}. `
+        + (overpaid.length > contracts * 0.05
+          ? 'At this many it is not a handful of mistyped contracts: either a kind of receipt that '
+            + 'is not a payment of the contract price is still being counted, or the contract values '
+            + 'held here are net of something the receipts are not.'
+          : 'Each is either a contract revised down after payment or a receipt filed against the '
+            + 'wrong contract.'),
+      source: ref(0, 'transaction'),
+    });
+  }
+
+  /**
    * Collected more than was ever contracted.
    *
    * Per contract this is a warning — a price revised down, a receipt on the
@@ -503,6 +537,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       receipts: details.length,
       orphanReceipts,
       receiptsWithoutContract: orphansByCause.unknown,
+      overpaid: overpaid.length,
       units: units.size,
     },
   };

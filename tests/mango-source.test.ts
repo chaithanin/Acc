@@ -788,3 +788,45 @@ describe('choosing which receipts count', () => {
     assert.ok(chosen.collectedByDoctype.size > 1, 'the kinds left out went unreported');
   });
 });
+
+/**
+ * Overpayment at scale is a different finding from overpayment once.
+ *
+ * A live pull raised 749 of these, then 217 after the fee-shaped receipts were
+ * excluded — 22% of every contract. At that rate it is not a handful of
+ * mistyped contracts, and two hundred identical warnings bury whatever else
+ * the run had to say.
+ */
+describe('overpayment, one contract and many', () => {
+  it('gathers them into one finding with the total', () => {
+    const result = run();
+    const overpaid = result.issues.filter((i) => i.code === 'MANGO_OVERPAID');
+    assert.equal(overpaid.length, 1, 'one message per contract, not one per pull');
+    assert.match(overpaid[0].message, /of \d+ contracts/);
+    assert.match(overpaid[0].message, /in total/);
+  });
+
+  it('counts them, so the scale is a number rather than a line count', () => {
+    assert.equal(run().counts.overpaid, 1);
+  });
+
+  /**
+   * One in a small pull is a warning about that contract. A fifth of every
+   * contract is a warning about the pull, and should not be filed at the same
+   * severity as a single revised price.
+   */
+  it('raises it as an error once it stops being a handful', () => {
+    const bundle = mangoFixture();
+    // Pay every contract double.
+    for (const row of bundle.transaction ?? []) {
+      const paid = (bundle.transaction_detail ?? []).filter((d) => d.docno === row.docno);
+      for (const receipt of paid) receipt.amount = Number(receipt.amount) * 10;
+    }
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    const overpaid = mapped.issues.find((i) => i.code === 'MANGO_OVERPAID');
+    assert.ok(overpaid);
+    assert.equal(overpaid!.severity, 'error');
+    assert.match(overpaid!.message, /not a handful of mistyped contracts/);
+  });
+});

@@ -236,11 +236,23 @@ of them turns the negative balance positive, which makes the question "is that
 kind a payment of the contract price?" — answerable by the accounts department
 in a sentence — rather than "why is this figure negative?".
 
+Counting `B,C,D,T` gives an outstanding balance of 123,686,942 against
+contracts of 2,593,767,505 — 4.8%, which is the shape a real figure has — and
+drops the overpayment findings from about 749 to about 217. `T` averages
+326,769 across 793 receipts, which is the size of a transfer instalment rather
+than a fee, and `R` averages 73,675 across 3,287, more than three per contract,
+which is the shape of a recurring charge. **That is a reading of the numbers,
+not an answer**: only the accounts department can say which letters are
+instalments.
+
 Once answered, record it in the command:
 
 ```bash
-npm run mango:pull -- --payment-kinds B,C,D --dry-run
+npm run mango:pull -- --payment-kinds B,C,D,T --dry-run
 ```
+
+Even then about a fifth of contracts still take more than they were for, which
+is its own question and is reported as one.
 
 Every kind is still reported, including the ones left out, because excluding a
 kind that *is* an instalment overstates what is still owed — the same error in
