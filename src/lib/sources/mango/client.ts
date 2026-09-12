@@ -159,6 +159,11 @@ class CookieJar {
   get size(): number {
     return this.jar.size;
   }
+
+  /** The names held, never the values: a session cookie is a full credential. */
+  names(): string[] {
+    return [...this.jar.keys()];
+  }
 }
 
 export class MangoClient {
@@ -507,6 +512,19 @@ export class MangoClient {
    */
   useAuthToken(token: string | null): void {
     this.discoveredToken = token?.trim() || null;
+  }
+
+  /**
+   * Which cookies this session holds, by name.
+   *
+   * Values are never returned. A Mango session cookie is a complete
+   * credential — anyone holding one is signed in as that user, no password
+   * involved — and this exists to be printed and pasted into a conversation.
+   * The names alone answer the question worth asking: what does a browser
+   * that works have which this does not.
+   */
+  cookieNames(): string[] {
+    return this.jar.names();
   }
 
   /** What the sign-in answered, for a survey that needs to look at it. */

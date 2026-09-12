@@ -543,6 +543,10 @@ if (refused.length > 0 && client.authToken) {
   }
 } else if (refused.length > 0) {
   console.log(`   ── ${refused.length} refused, and nothing here handed over a token.`);
+  console.log(`      This session holds: ${client.cookieNames().join(', ') || 'no cookies at all'}`);
+  console.log('      (names only — a session cookie is a complete credential.) A browser that');
+  console.log('      reaches these endpoints holds mg_global_auth_token2 among others; if that');
+  console.log('      name is missing above, the front end issues it somewhere this has not been.');
   console.log('      The Center namespace wants one; api/public does not, which is why some');
   console.log('      of these answered. Without it the company is never switched and every');
   console.log('      figure below is empty for that reason rather than for a real one.');
