@@ -42,7 +42,7 @@ const flag = (name, fallback = null) => {
 const HOST = 'https://chaithanin.mangoanywhere.com';
 const base = (process.env.MANGO_ANYWHERE_URL ?? `${HOST}/production.anywhere`).replace(/\/+$/, '');
 const entry = flag('entry', 'page/');
-const limit = Number(flag('limit', 60));
+const limit = Number(flag('limit', 150));
 const savePath = flag('save');
 
 const bold = (s) => `\x1b[1m${s}\x1b[0m`;
@@ -93,6 +93,20 @@ console.log('   signed in');
  * `approve_all` is one GET away from being a bad afternoon.
  */
 const MUTATES = /(save|update|delete|remove|insert|create|edit|upload|import|approve|reject|cancel|submit|confirm|post_|_post$|_do$|send|print|export)/i;
+
+/**
+ * Names that say outright that they read.
+ *
+ * Mango calls most of its own endpoints with `$_post`, so a GET to one
+ * answers 404 — the route exists and the verb does not match, which is
+ * indistinguishable from no route at all. Asking again with POST is therefore
+ * necessary, and is the one place this survey could do harm.
+ *
+ * So the POST attempt runs off a list of names that are reads, rather than off
+ * the absence of a name that writes. "Not obviously a write" is not good
+ * enough to justify posting to an endpoint nobody here has ever seen.
+ */
+const READS = /(readlist|read_list|_read\b|_list\b|getlist|_get\b|search|lookup|count|combo|dropdown|select_|_rpt|report|balance|summary|detail)/i;
 
 const CANDIDATE = /["'`](?:\/)?((?:[a-z][a-z0-9_]*\/){1,3}[A-Za-z][A-Za-z0-9_]*)["'`]/g;
 
@@ -382,17 +396,35 @@ const findings = [];
 for (const [path, meta] of safe.slice(0, limit)) {
   const where = meta.where;
   let answer;
+  let verb = 'GET';
   try {
     answer = await client.raw(path);
+
+    // A 404 from an endpoint that exists but only answers POST looks exactly
+    // like no endpoint at all. Ask again, but only where the name says read.
+    if ((answer.status === 404 || answer.status === 405) && READS.test(path) && !MUTATES.test(path)) {
+      const posted = await client.raw(path, { method: 'POST', body: {} });
+      if (posted.contentType.includes('json') || posted.status < 400) {
+        answer = posted;
+        verb = 'POST';
+      } else {
+        // Worth showing that both were tried: "GET 404" alone leaves a reader
+        // wondering whether the verb was the problem.
+        verb = 'both';
+      }
+    }
   } catch (err) {
-    console.log(`\n   ${path}\n     could not be read: ${err.message}`);
+    console.log(`   ${path.padEnd(52)} could not be read: ${err.message}`);
     continue;
   }
 
   const isJson = answer.contentType.includes('json');
   if (!isJson) {
-    // HTML here means signed out or not permitted — never an empty dataset.
-    findings.push({ path, where, status: answer.status, kind: answer.contentType.split(';')[0] });
+    // Printed rather than tallied silently: a list of what was asked is what
+    // makes "nothing answered" checkable by somebody who knows the system.
+    // Without it the survey cannot be told apart from one asking nonsense.
+    console.log(`   ${path.slice(0, 52).padEnd(54)} ${verb.padEnd(4)} ${answer.status}`);
+    findings.push({ path, where, status: answer.status, kind: answer.contentType.split(';')[0], verb });
     continue;
   }
 
@@ -407,8 +439,8 @@ for (const [path, meta] of safe.slice(0, limit)) {
   if (envelope && body.success === false) {
     // Not a finding about the data — a finding about this account's rights, or
     // an endpoint that wants parameters nobody has supplied yet.
-    findings.push({ path, where, status: answer.status, kind: 'refused', error: String(body.error ?? '') });
-    console.log(`\n   ${path}\n     refused: ${body.error ?? 'no reason given'}`);
+    findings.push({ path, where, status: answer.status, kind: 'refused', error: String(body.error ?? ''), verb });
+    console.log(`\n   ${path}  (${verb})\n     refused: ${body.error ?? 'no reason given'}`);
     await new Promise((r) => setTimeout(r, 250));
     continue;
   }
@@ -417,7 +449,7 @@ for (const [path, meta] of safe.slice(0, limit)) {
   const shape = shapeOf(payload);
   findings.push({ path, where, status: answer.status, kind: 'json', shape });
 
-  console.log(`\n   ${bold(path)}`);
+  console.log(`\n   ${bold(path)}  (${verb})`);
   console.log(`     ${shape}`);
 
   // Courtesy: this is somebody's production server and it logs every call.

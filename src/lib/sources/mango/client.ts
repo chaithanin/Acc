@@ -504,9 +504,24 @@ export class MangoClient {
    *
    * Read-only, like everything else here.
    */
-  async raw(path: string): Promise<{ status: number; contentType: string; text: string; url: string }> {
+  async raw(
+    path: string,
+    options: { method?: 'GET' | 'POST'; body?: unknown } = {},
+  ): Promise<{ status: number; contentType: string; text: string; url: string }> {
     const url = this.url(path);
-    const response = await this.request(url, { headers: this.headers() });
+    const method = options.method ?? 'GET';
+
+    // Mango calls most of its own endpoints with a JSON post, and answers 404
+    // to a GET for one — the route is there and the verb does not match, which
+    // reads as no route at all. So a survey has to be able to ask both ways.
+    const response = await this.request(url, {
+      method,
+      headers: method === 'POST'
+        ? this.headers({ 'content-type': 'application/json' })
+        : this.headers(),
+      ...(method === 'POST' ? { body: JSON.stringify(options.body ?? {}) } : {}),
+    });
+
     return {
       status: response.status,
       contentType: response.headers.get('content-type') ?? '',
