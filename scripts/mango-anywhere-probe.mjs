@@ -421,7 +421,6 @@ const KNOWN = [
   ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'N', company_code: '{company}', chq_date: '{today}' }],
   ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'Y', company_code: '{company}', chq_date: '{today}' }],
 
-  ['anywhere/center/Maincomp', { maincode: '{company}' }],
 
   // The navigation, and what the account is allowed to see of it.
   ['Anywhere/Center/MenuSelector', { module_: 'FIN', lang_code: 'EN' }],
@@ -429,8 +428,6 @@ const KNOWN = [
   ['anywhere/api/LayoutModuleConfig', {}],
   ['anywhere/api/StoreCurrency', {}],
 ];
-
-console.log(bold(`\n── Asking ${service} for what the application itself asks for`));
 
 const findings = [];
 let companiesOpen = [];
@@ -442,6 +439,55 @@ const fill = (value) => String(value)
   .replace('{today}', today)
   .replace('{company}', credentials.maincode)
   .replace('{user}', credentials.username);
+
+/**
+ * What the front end does before it asks for a figure.
+ *
+ * Signing in sets the company for the estate module, and these figures are not
+ * served by that module. The front end switches company on the service side of
+ * its own accord — `Maincomp` — and authenticates into the menu it is about to
+ * draw, and only then asks for numbers. Skipping that leaves the service with
+ * a session that is signed in and pointed at nothing, which answers politely
+ * and empty.
+ *
+ * Every call here was observed being made by the application in that order.
+ * They read and switch session state; none of them writes a record.
+ */
+const BOOTSTRAP = [
+  ['anywhere/api/LayoutModuleConfig', {}],
+  // The one that matters: it points the service session at a company. Without
+  // it the session is signed in and aimed at nothing, and every figure below
+  // answers politely and empty.
+  ['anywhere/center/Maincomp', { maincode: '{company}' }],
+  ['API/UserOnline/UserAuthentication', {}],
+  ['api/public/ViewUserAuthentication', { menu_name: 'M_FIN_MAIN', lang_code: '', menu_id: '10100' }],
+];
+
+console.log(bold(`\n── Settling the session on ${credentials.maincode}, the way the front end does`));
+
+for (const [path, params] of BOOTSTRAP) {
+  const query = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(fill(value))}`)
+    .join('&');
+
+  try {
+    const answer = await client.raw(`${service}/${path}${query ? `?${query}` : ''}`);
+    let note = `${answer.status}`;
+    if (answer.contentType.includes('json')) {
+      try {
+        const body = JSON.parse(answer.text);
+        note = body?.success === false ? `refused: ${body.error ?? 'no reason'}` : `${answer.status} ok`;
+      } catch { /* leave the status as the note */ }
+    }
+    console.log(`   ${path.slice(0, 44).padEnd(46)} ${note}`);
+  } catch (err) {
+    console.log(`   ${path.slice(0, 44).padEnd(46)} ${err.message}`);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+console.log(bold(`\n── Asking ${service} for what the application itself asks for`));
+
 
 for (const [path, params] of KNOWN) {
   const query = Object.entries(params)
@@ -489,9 +535,16 @@ for (const [path, params] of KNOWN) {
       companiesOpen = list
         .map((row) => ({
           code: String(row.maincode ?? row.code ?? '').trim().toUpperCase(),
-          name: String(row.compname ?? row.name ?? '').trim(),
+          name: String(row.mainname ?? row.compname ?? row.name ?? '').trim(),
+          isDefault: /^(y|1|true)$/i.test(String(row.default_login ?? '')),
         }))
         .filter((row) => row.code);
+
+      // Worth printing rather than counting: this is the group, and which
+      // company a figure belongs to is the first thing to know about it.
+      for (const company of companiesOpen) {
+        console.log(`       ${company.code.padEnd(6)} ${company.name}${company.isDefault ? '   (default)' : ''}`);
+      }
     }
   }
 
@@ -518,6 +571,9 @@ if (dashboardAsked > 0 && dashboardEmpty === dashboardAsked) {
     for (const company of others) console.log(`     ${company.code.padEnd(6)} ${company.name}`);
     console.log('\n   Try one of those:');
     console.log(`     MANGO_MAINCODE=${others[0].code} npm run mango:probe`);
+    console.log('\n   If every company comes back empty, the session is signed in but pointed');
+    console.log('   at nothing — open the same screen in the browser and compare. A figure');
+    console.log('   there and none here means one more step in the bootstrap above.');
   } else {
     console.log('\n   Either this company genuinely has no open receivables or payables, or the');
     console.log('   account cannot see them. Compare against the same screen in the browser.');

@@ -288,6 +288,19 @@ service's warm-up, which exists to have an effect; and
 `API/Public/UserInsertLogs`, which writes to somebody's audit trail. A survey
 has no business calling any of them.
 
+These figures are **scoped to a company**, and signing in does not settle
+which. The sign-in sets the company for the estate module; the service keeps
+its own, and the front end points it at one before asking for anything —
+`anywhere/center/Maincomp?maincode=…`, alongside a layout config and two
+authentication calls. Skip that and the service is signed in and aimed at
+nothing: every endpoint answers 200, `success: true`, and an empty list. It
+looks exactly like a company with no receivables.
+
+`api/public/LoginCompaniesByUserID?userid=…` lists the companies an account may
+open — six for the account tested — and which is its default. That list is the
+group, and which company a figure belongs to is the first thing to know about
+it.
+
 Not every endpoint needs the `x-mango-auth` header — `api/public/*` answers on
 cookies alone. What the service does need is the **full** cookie set, and part
 of it is only issued once the front end has been visited. Asking the service
