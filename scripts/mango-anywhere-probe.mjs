@@ -464,6 +464,12 @@ const BOOTSTRAP = [
 ];
 
 console.log(bold(`\n── Settling the session on ${credentials.maincode}, the way the front end does`));
+// Worth stating outright. A silent prompt gives no sign whether anything was
+// pasted, and "refused even with a token" and "refused, no token" are
+// different findings that would otherwise look identical here.
+console.log(`   token: ${process.env.MANGO_AUTH_TOKEN?.trim()
+  ? 'supplied through MANGO_AUTH_TOKEN'
+  : 'none supplied; will use one if a step hands it over'}`);
 
 /**
  * One bootstrap step, reporting what happened and keeping anything useful.

@@ -272,3 +272,4 @@ and has not been verified.
 * [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record
 * [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE
 * [`docs/BOOKING-API.md`](docs/BOOKING-API.md) — reading the unit inventory from the Booking API
+* [`docs/MANGO-API-REQUEST.md`](docs/MANGO-API-REQUEST.md) — what to ask Mango for, and why
