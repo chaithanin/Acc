@@ -268,9 +268,19 @@ back into a conversation. It keeps three rules:
 
 - **It discovers rather than guesses.** Mango's Vue pages name the endpoints
   they call, so the pages are read and those names followed — including one
-  level down through the screens the root page links to, since a module root
-  loads a shell and the endpoints that matter belong to the screens underneath.
-  Inventing plausible URLs produces a wall of 404s and teaches nothing.
+  level down through the screens the root page links to, and **into the scripts
+  each page loads**, which is where most of the names actually are. The module
+  is a Vue application: its pages are a few kilobytes of shell and the endpoint
+  names live in the bundle. Reading only the HTML finds two names and concludes
+  the module holds nothing, which is the wrong conclusion to hand somebody.
+  Inventing plausible URLs instead produces a wall of 404s and teaches nothing.
+- **It separates what Mango calls from what merely looks like a path.** A string
+  inside a `$_get` or `$_post` is an endpoint; a string that happens to contain
+  a slash usually is not. Both are followed, the confident ones first, so a
+  short list of real answers is not buried in route names.
+- **It says what every answer was**, not only the ones that held data. "Nothing
+  answered" cannot be told apart from looking in the wrong place or a lapsed
+  session unless the refusals and 404s are counted too.
 - **It reads and never writes.** Anything whose name suggests it changes
   something is skipped without being called, and listed at the end so the
   skipping is visible rather than silent.

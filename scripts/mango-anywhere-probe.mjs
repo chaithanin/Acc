@@ -97,32 +97,127 @@ const MUTATES = /(save|update|delete|remove|insert|create|edit|upload|import|app
 const CANDIDATE = /["'`](?:\/)?((?:[a-z][a-z0-9_]*\/){1,3}[A-Za-z][A-Za-z0-9_]*)["'`]/g;
 
 const discovered = new Map();
-const note = (path, where) => {
-  const clean = path.replace(/^\/+/, '');
-  if (!clean.includes('/')) return;
-  if (/\.(js|css|png|jpe?g|svg|gif|woff2?|map|ico)$/i.test(clean)) return;
-  if (!discovered.has(clean)) discovered.set(clean, where);
+const note = (path, where, confident = false) => {
+  const clean = path.replace(/^\/+/, '').split('?')[0];
+  if (!clean.includes('/') || clean.length > 120) return;
+  if (/^https?:/i.test(clean)) return;
+  if (/\.(js|css|png|jpe?g|svg|gif|woff2?|map|ico|html?)$/i.test(clean)) return;
+
+  const held = discovered.get(clean);
+  // A path named outright beats the same path merely spotted in a bundle.
+  if (!held || (confident && !held.confident)) discovered.set(clean, { where, confident });
 };
 
-console.log(bold('\n── Reading the pages for the endpoints they call'));
+/**
+ * The names a page calls, in two tiers.
+ *
+ * Mango's own calls go through `$_get` / `$_post`, so a string sitting inside
+ * one of those is an endpoint and not a guess. Everything else that merely
+ * looks like a path is kept too, but separately — in a bundled application
+ * most of those are asset paths and route names, and mixing the two turns a
+ * short list of real answers into a long list of 404s.
+ */
+const CALLED = /\$_(?:post|get|ajax|download)\s*\([^)]{0,200}?["'`]([^"'`]+)["'`]/g;
+const URL_FIELD = /\b(?:url|action|endpoint|api)\s*:\s*["'`]([^"'`]+)["'`]/g;
+
+const scanned = new Set();
+
+const scan = (text, where) => {
+  let confident = 0;
+  let loose = 0;
+
+  for (const pattern of [CALLED, URL_FIELD]) {
+    for (const match of text.matchAll(pattern)) {
+      const before = discovered.size;
+      note(match[1], where, true);
+      if (discovered.size > before) confident += 1;
+    }
+  }
+
+  for (const match of text.matchAll(CANDIDATE)) {
+    const before = discovered.size;
+    note(match[1], where, false);
+    if (discovered.size > before) loose += 1;
+  }
+
+  return { confident, loose };
+};
+
+/**
+ * Read a page, then read the scripts it loads.
+ *
+ * This is the part that was missing, and it is most of the job. The module is
+ * a Vue application: its pages are a shell of a few kilobytes and every
+ * endpoint name lives in the bundle they pull in. Reading only the HTML finds
+ * two names and concludes the module holds nothing, which is exactly the wrong
+ * conclusion to hand somebody.
+ */
+const readPage = async (path, label = path) => {
+  if (scanned.has(path)) return null;
+  scanned.add(path);
+
+  let answer;
+  try {
+    answer = await client.raw(path);
+  } catch (err) {
+    console.log(`   ${label.padEnd(24)} could not be read: ${err.message}`);
+    return null;
+  }
+
+  const type = answer.contentType.split(';')[0] || '—';
+  console.log(`   ${label.padEnd(24)} ${answer.status} ${type.padEnd(10)} ${answer.text.length.toLocaleString()} bytes`);
+
+  // A redirect is a signpost: read where it points.
+  if (answer.status >= 300 && answer.status < 400) {
+    const target = (answer.text.match(/href="([^"]+)"/i) ?? [])[1];
+    if (target) await readPage(target.replace(/^.*?\/production\.[a-z]+\//i, ''), `↳ ${target}`);
+    return answer;
+  }
+
+  if (answer.status >= 400 || !answer.text) return answer;
+
+  const { confident, loose } = scan(answer.text, path || '/');
+  if (confident || loose) {
+    console.log(`   ${''.padEnd(24)} ${confident} named outright, ${loose} more that look like paths`);
+  }
+
+  // Now the scripts. Same host only, and never the vendor bundles — those are
+  // megabytes of framework with no Mango endpoint in them.
+  const sources = [...answer.text.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((m) => m[1]);
+  const ours = sources.filter((src) => !/^https?:\/\//i.test(src) || src.includes('mangoanywhere'))
+    .filter((src) => !/(vue|jquery|bootstrap|kendo|moment|chart|polyfill|popper|lodash|axios)[.-]/i.test(src));
+
+  if (sources.length > 0) {
+    console.log(`   ${''.padEnd(24)} ${sources.length} scripts, reading ${Math.min(ours.length, 12)}`);
+  }
+
+  for (const src of ours.slice(0, 12)) {
+    const scriptPath = src.replace(/^.*?\/production\.[a-z]+\//i, '').replace(/^\//, '');
+    if (scanned.has(scriptPath)) continue;
+    scanned.add(scriptPath);
+
+    let script;
+    try {
+      script = await client.raw(scriptPath);
+    } catch {
+      continue;
+    }
+    if (script.status >= 400 || !script.text) continue;
+
+    const found = scan(script.text, scriptPath);
+    if (found.confident || found.loose) {
+      console.log(`     ${scriptPath.slice(-46).padEnd(48)} ${found.confident} named, ${found.loose} possible`);
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  return answer;
+};
+
+console.log(bold('\n── Reading the pages, and the scripts they load'));
 
 for (const page of [entry, '', 'page/', 'Home/Index']) {
-  try {
-    const answer = await client.raw(page);
-    console.log(`   ${(page || '/').padEnd(20)} ${answer.status} ${answer.contentType.split(';')[0]} `
-      + `${answer.text.length.toLocaleString()} bytes`);
-    if (!answer.text || answer.status >= 400) continue;
-
-    let found = 0;
-    for (const match of answer.text.matchAll(CANDIDATE)) {
-      const before = discovered.size;
-      note(match[1], page || '/');
-      if (discovered.size > before) found += 1;
-    }
-    if (found) console.log(`   ${''.padEnd(20)} ${found} endpoint names in this page`);
-  } catch (err) {
-    console.log(`   ${(page || '/').padEnd(20)} could not be read: ${err.message}`);
-  }
+  await readPage(page, page || '/');
 }
 
 /**
@@ -135,29 +230,14 @@ for (const page of [entry, '', 'page/', 'Home/Index']) {
  */
 console.log(bold('\n── Following the pages those named'));
 
-const pagesToRead = [...discovered.keys()].slice(0, limit);
+const pagesToRead = [...discovered.keys()].filter((path) => !MUTATES.test(path)).slice(0, limit);
 let reached = 0;
 
 for (const candidate of pagesToRead) {
-  if (MUTATES.test(candidate)) continue;
-
-  let answer;
-  try {
-    answer = await client.raw(candidate);
-  } catch {
-    continue;
-  }
-  if (answer.status >= 400 || answer.contentType.includes('json') || !answer.text) continue;
-
-  reached += 1;
-  let found = 0;
-  for (const match of answer.text.matchAll(CANDIDATE)) {
-    const before = discovered.size;
-    note(match[1], candidate);
-    if (discovered.size > before) found += 1;
-  }
-  if (found) console.log(`   ${candidate.padEnd(40)} named ${found} more`);
-  await new Promise((r) => setTimeout(r, 200));
+  if (scanned.has(candidate)) continue;
+  const answer = await readPage(candidate);
+  if (answer && answer.status < 400 && !answer.contentType.includes('json')) reached += 1;
+  await new Promise((r) => setTimeout(r, 150));
 }
 console.log(`   read ${reached} further page${reached === 1 ? '' : 's'}`);
 
@@ -167,7 +247,12 @@ for (const known of ['api/public/AuthStatus', 'rex_rpt/MenuReportReadList']) not
 const safe = [...discovered].filter(([path]) => !MUTATES.test(path));
 const skipped = [...discovered].filter(([path]) => MUTATES.test(path));
 
-console.log(`\n   ${discovered.size} candidates · ${safe.length} read-only · ${skipped.length} skipped as writes`);
+// Named-outright first: those are Mango's own calls and the likeliest to answer.
+safe.sort((a, b) => Number(b[1].confident) - Number(a[1].confident));
+
+const named = safe.filter(([, meta]) => meta.confident).length;
+console.log(`\n   ${discovered.size} candidates · ${named} named outright · `
+  + `${safe.length - named} spotted in passing · ${skipped.length} skipped as writes`);
 
 if (safe.length === 0) {
   console.log('\n   Nothing to follow. The page may load its script from a separate file —');
@@ -202,7 +287,8 @@ const shapeOf = (value, depth = 0) => {
 console.log(bold(`\n── Asking each one what it holds (${Math.min(safe.length, limit)} of ${safe.length})`));
 
 const findings = [];
-for (const [path, where] of safe.slice(0, limit)) {
+for (const [path, meta] of safe.slice(0, limit)) {
+  const where = meta.where;
   let answer;
   try {
     answer = await client.raw(path);
@@ -247,11 +333,47 @@ for (const [path, where] of safe.slice(0, limit)) {
 }
 
 const useful = findings.filter((f) => f.kind === 'json');
-console.log(bold(`\n── ${useful.length} endpoints answered data`));
+console.log(bold(`\n── ${useful.length} endpoint${useful.length === 1 ? '' : 's'} answered data`));
+
+/**
+ * What everything else said.
+ *
+ * "0 endpoints answered data" on its own is not a finding, it is the absence
+ * of one — it cannot be told apart from a module that holds nothing, a survey
+ * that looked in the wrong place, or a session that quietly lapsed. The tally
+ * below is what makes those three distinguishable.
+ */
+const tally = new Map();
+for (const finding of findings) {
+  if (finding.kind === 'json') continue;
+  const label = finding.kind === 'refused' ? `refused: ${finding.error || 'no reason'}`
+    : `${finding.status} ${finding.kind}`;
+  tally.set(label, (tally.get(label) ?? 0) + 1);
+}
+
+if (tally.size > 0) {
+  console.log('\n   The rest answered:');
+  for (const [label, count] of [...tally].sort((a, b) => b[1] - a[1])) {
+    console.log(`     ${String(count).padStart(4)} × ${label}`);
+  }
+
+  if ([...tally.keys()].some((k) => /text\/html/.test(k))) {
+    console.log('\n   HTML where JSON was expected means the session lapsed or this account may');
+    console.log('   not see it — never that the endpoint is empty. If everything answered HTML,');
+    console.log('   the survey found pages rather than endpoints: try --entry on a screen that');
+    console.log('   shows data, and check that the account can open this module at all.');
+  }
+}
 
 if (skipped.length > 0) {
   console.log(`\n   Not called, because the name says they change something:`);
   console.log(`     ${skipped.map(([p]) => p).join(', ')}`);
+}
+
+if (useful.length === 0 && discovered.size < 10) {
+  console.log('\n   Almost nothing was found to ask. That usually means the endpoint names live');
+  console.log('   in a script this did not reach — run again with --save findings.json and');
+  console.log('   --entry pointing at a screen that actually lists something.');
 }
 
 if (savePath) {
