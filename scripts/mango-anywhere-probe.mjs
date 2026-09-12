@@ -121,6 +121,26 @@ const CALLED = /\$_(?:post|get|ajax|download)\s*\([^)]{0,200}?["'`]([^"'`]+)["'`
 const URL_FIELD = /\b(?:url|action|endpoint|api)\s*:\s*["'`]([^"'`]+)["'`]/g;
 
 const scanned = new Set();
+/**
+ * Scripts still to read.
+ *
+ * A Vue application this size splits itself: the shell loads a main bundle,
+ * and each screen's code — with its endpoints — arrives in a chunk of its own,
+ * named inside that bundle. Reading only what the HTML lists reaches the shell
+ * and stops one file short of everything worth finding.
+ */
+const scriptQueue = [];
+const SCRIPT_PATTERN = /["'`]([A-Za-z0-9_./-]+\.js)(?:\?[^"'`]*)?["'`]/g;
+
+const queueScript = (src) => {
+  if (!src) return;
+  if (/^https?:\/\//i.test(src) && !src.includes('mangoanywhere')) return;
+  if (/(vue|jquery|bootstrap|kendo|moment|chart|polyfill|popper|lodash|axios|require|runtime)[.-]/i.test(src)) return;
+
+  const path = src.replace(/^.*?\/production\.[a-z]+\//i, '').replace(/^\//, '').split('?')[0];
+  if (!path || scanned.has(path) || scriptQueue.includes(path)) return;
+  scriptQueue.push(path);
+};
 
 const scan = (text, where) => {
   let confident = 0;
@@ -139,6 +159,8 @@ const scan = (text, where) => {
     note(match[1], where, false);
     if (discovered.size > before) loose += 1;
   }
+
+  for (const match of text.matchAll(SCRIPT_PATTERN)) queueScript(match[1]);
 
   return { confident, loose };
 };
@@ -181,37 +203,44 @@ const readPage = async (path, label = path) => {
     console.log(`   ${''.padEnd(24)} ${confident} named outright, ${loose} more that look like paths`);
   }
 
-  // Now the scripts. Same host only, and never the vendor bundles — those are
-  // megabytes of framework with no Mango endpoint in them.
   const sources = [...answer.text.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((m) => m[1]);
-  const ours = sources.filter((src) => !/^https?:\/\//i.test(src) || src.includes('mangoanywhere'))
-    .filter((src) => !/(vue|jquery|bootstrap|kendo|moment|chart|polyfill|popper|lodash|axios)[.-]/i.test(src));
+  for (const src of sources) queueScript(src);
+  if (sources.length > 0) console.log(`   ${''.padEnd(24)} ${sources.length} scripts listed`);
 
-  if (sources.length > 0) {
-    console.log(`   ${''.padEnd(24)} ${sources.length} scripts, reading ${Math.min(ours.length, 12)}`);
-  }
+  return answer;
+};
 
-  for (const src of ours.slice(0, 12)) {
-    const scriptPath = src.replace(/^.*?\/production\.[a-z]+\//i, '').replace(/^\//, '');
-    if (scanned.has(scriptPath)) continue;
-    scanned.add(scriptPath);
+/**
+ * Work through the scripts, including the ones the scripts name.
+ *
+ * Bounded, because a bundle can name a great many chunks and this is somebody
+ * else's production server.
+ */
+const readScripts = async (max) => {
+  let read = 0;
+
+  while (scriptQueue.length > 0 && read < max) {
+    const path = scriptQueue.shift();
+    if (scanned.has(path)) continue;
+    scanned.add(path);
 
     let script;
     try {
-      script = await client.raw(scriptPath);
+      script = await client.raw(path);
     } catch {
       continue;
     }
     if (script.status >= 400 || !script.text) continue;
 
-    const found = scan(script.text, scriptPath);
+    read += 1;
+    const found = scan(script.text, path);
     if (found.confident || found.loose) {
-      console.log(`     ${scriptPath.slice(-46).padEnd(48)} ${found.confident} named, ${found.loose} possible`);
+      console.log(`     ${path.slice(-52).padEnd(54)} ${found.confident} named, ${found.loose} possible`);
     }
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 120));
   }
 
-  return answer;
+  return read;
 };
 
 console.log(bold('\n── Reading the pages, and the scripts they load'));
@@ -219,6 +248,10 @@ console.log(bold('\n── Reading the pages, and the scripts they load'));
 for (const page of [entry, '', 'page/', 'Home/Index']) {
   await readPage(page, page || '/');
 }
+
+const scriptsRead = await readScripts(Number(flag('scripts', 40)));
+console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
+  + `${scriptQueue.length > 0 ? `, ${scriptQueue.length} more named but not read (--scripts to raise)` : ''}`);
 
 /**
  * A second pass, through the pages the first one found.
@@ -244,15 +277,74 @@ console.log(`   read ${reached} further page${reached === 1 ? '' : 's'}`);
 // The two that every Mango module has, worth confirming even if no page named them.
 for (const known of ['api/public/AuthStatus', 'rex_rpt/MenuReportReadList']) note(known, 'known');
 
-const safe = [...discovered].filter(([path]) => !MUTATES.test(path));
-const skipped = [...discovered].filter(([path]) => MUTATES.test(path));
+/**
+ * A route is not an endpoint.
+ *
+ * This module routes in the browser: `page/transaction/ap/v_ap_senddoc` is a
+ * screen Vue draws, not something the server answers. Asking for one returns
+ * 404 every time, which is how a survey spends its whole budget learning
+ * nothing and reports that the module is empty.
+ *
+ * They are worth more than that, though — read together they are a map of
+ * what the module does, which is the thing actually worth knowing first.
+ */
+const isRoute = (path) => /^page\//i.test(path);
+const looksLikeData = (path) => /(_data\/|readlist|_list\b|\/read|^api\/|_rpt\/|x\/)/i.test(path);
 
-// Named-outright first: those are Mango's own calls and the likeliest to answer.
-safe.sort((a, b) => Number(b[1].confident) - Number(a[1].confident));
+const routes = [...discovered].filter(([path]) => isRoute(path));
+const callable = [...discovered].filter(([path]) => !isRoute(path));
+
+const safe = callable.filter(([path]) => !MUTATES.test(path));
+const skipped = callable.filter(([path]) => MUTATES.test(path));
+
+// Ask the likeliest first: what Mango was seen calling, then what is shaped
+// like one of its data endpoints, then the rest.
+const rank = ([path, meta]) => (meta.confident ? 0 : 2) + (looksLikeData(path) ? 0 : 1);
+safe.sort((a, b) => rank(a) - rank(b));
 
 const named = safe.filter(([, meta]) => meta.confident).length;
-console.log(`\n   ${discovered.size} candidates · ${named} named outright · `
-  + `${safe.length - named} spotted in passing · ${skipped.length} skipped as writes`);
+console.log(`\n   ${discovered.size} names · ${routes.length} screens · ${callable.length} callable `
+  + `(${named} named outright, ${skipped.length} skipped as writes)`);
+
+/**
+ * The map of the module, drawn from its screen names.
+ *
+ * Mango names its screens `page/<kind>/<module>/<screen>`, so grouping them
+ * says what this application is for — and that is a finding in its own right,
+ * whether or not a single endpoint answers.
+ */
+if (routes.length > 0) {
+  const MODULES = {
+    ap: 'accounts payable', ar: 'accounts receivable', gl: 'general ledger',
+    fa: 'fixed assets', ic: 'inventory', po: 'purchase orders', pr: 'payroll',
+    rt: 'retention', ma: 'maintenance', os: 'outsourcing', bg: 'budget',
+    cq: 'cheques', wh: 'withholding tax', pj: 'projects', st: 'stock',
+  };
+
+  const tree = new Map();
+  for (const [path] of routes) {
+    const parts = path.split('/');
+    const kind = parts[1] ?? '—';
+    const module = parts.length > 3 ? parts[2] : '—';
+    const key = `${kind}/${module}`;
+    tree.set(key, (tree.get(key) ?? 0) + 1);
+  }
+
+  console.log(bold('\n── What this module is, judging by its screens'));
+  const byModule = new Map();
+  for (const [key, count] of tree) {
+    const module = key.split('/')[1];
+    byModule.set(module, (byModule.get(module) ?? 0) + count);
+  }
+
+  for (const [module, count] of [...byModule].sort((a, b) => b[1] - a[1])) {
+    const name = MODULES[module];
+    console.log(`   ${module.padEnd(6)} ${String(count).padStart(4)} screens${name ? `   ${name}` : ''}`);
+  }
+
+  console.log('\n   Screens are drawn in the browser, so they are not asked for here — they');
+  console.log('   answer 404 by design. What they show is what this module covers.');
+}
 
 if (safe.length === 0) {
   console.log('\n   Nothing to follow. The page may load its script from a separate file —');
@@ -284,7 +376,7 @@ const shapeOf = (value, depth = 0) => {
   return typeof value;
 };
 
-console.log(bold(`\n── Asking each one what it holds (${Math.min(safe.length, limit)} of ${safe.length})`));
+console.log(bold(`\n── Asking the callable ones what they hold (${Math.min(safe.length, limit)} of ${safe.length})`));
 
 const findings = [];
 for (const [path, meta] of safe.slice(0, limit)) {
