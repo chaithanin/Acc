@@ -264,6 +264,14 @@ const readPage = async (path, label = path) => {
 
   if (answer.status >= 400 || !answer.text) return answer;
 
+  if (!client.authToken) {
+    const token = findToken(answer.text);
+    if (token) {
+      client.useAuthToken(token);
+      console.log(`   ${''.padEnd(24)} found a service token in this page`);
+    }
+  }
+
   const { confident, loose } = scan(answer.text, path || '/');
   if (confident || loose) {
     console.log(`   ${''.padEnd(24)} ${confident} named outright, ${loose} more that look like paths`);
@@ -299,6 +307,13 @@ const readScripts = async (max) => {
     if (script.status >= 400 || !script.text) continue;
 
     read += 1;
+    if (!client.authToken) {
+      const token = findToken(script.text);
+      if (token) {
+        client.useAuthToken(token);
+        console.log(`     ${''.padEnd(54)} found a service token in this script`);
+      }
+    }
     const found = scan(script.text, path);
     if (found.confident || found.loose) {
       console.log(`     ${path.slice(-52).padEnd(54)} ${found.confident} named, ${found.loose} possible`);
@@ -331,6 +346,41 @@ const shapeOf = (value, depth = 0) => {
   return typeof value;
 };
 
+/**
+ * The token the service wants, wherever it is kept.
+ *
+ * The sign-in answers success and nothing else — no token — while the service
+ * answers 403 without one. So it is minted for the front end rather than at
+ * sign-in, which means the front end has it somewhere: printed into the page,
+ * set as a cookie it copies into the header, or fetched on start-up.
+ *
+ * Two shapes are looked for: the header named outright, and a value in the
+ * shape Mango's tokens take — a long hex string, a dot, a short one.
+ */
+const TOKEN_SHAPES = [
+  /x-mango-auth["'\s:=]+([A-Za-z0-9]{24,}\.[A-Za-z0-9]{2,12})/i,
+  /["'](?:auth_?token|mango_?auth|token)["']\s*[:=]\s*["']([A-Za-z0-9]{24,}\.[A-Za-z0-9]{2,12})["']/i,
+  /\b([a-f0-9]{40,}\.[a-f0-9]{4,8})\b/,
+];
+
+const findToken = (text) => {
+  for (const shape of TOKEN_SHAPES) {
+    const found = text.match(shape)?.[1];
+    if (found) return found;
+  }
+  return null;
+};
+
+console.log(bold('\n── Reading the pages, and the scripts they load'));
+
+for (const page of [entry, '', 'page/', 'Home/Index']) {
+  await readPage(page, page || '/');
+}
+
+const scriptsRead = await readScripts(Number(flag('scripts', 40)));
+console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
+  + `${scriptQueue.length > 0 ? `, ${scriptQueue.length} more named but not read (--scripts to raise)` : ''}`);
+
 // ------------------------------------------------------- the service's menu
 
 /**
@@ -355,7 +405,9 @@ for (const module of MODULES) {
   }
 
   if (!answer.contentType.includes('json')) {
-    console.log(`   ${module.padEnd(5)} ${answer.status} ${answer.contentType.split(';')[0] || '—'}`);
+    const hint = answer.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    console.log(`   ${module.padEnd(5)} ${answer.status} ${answer.contentType.split(';')[0] || '—'}`
+      + `${hint ? `  ${hint}` : ''}`);
     continue;
   }
 
@@ -382,20 +434,18 @@ for (const module of MODULES) {
 }
 
 if (menus.length === 0) {
-  console.log('\n   Nothing answered. If these are 401s the service wants the x-mango-auth');
-  console.log('   header as well as the cookies — set MANGO_AUTH_TOKEN and run again.');
-  console.log(`   The sign-in answered: ${JSON.stringify(client.loginAnswer ?? {}).slice(0, 300)}`);
+  console.log(bold('\n   Nothing answered, but they were not 404s.'));
+  console.log('   403 means the route exists and the request was turned away — this is about');
+  console.log('   the request, not the address. The service wants an x-mango-auth header as');
+  console.log(`   well as the cookies, and this run ${client.authToken ? 'sent one it found in the front end.' : 'had none to send.'}`);
+  console.log(`   The sign-in answered: ${JSON.stringify(client.loginAnswer ?? {})}`);
+  console.log('\n   To settle it, take the header off a working request in the browser');
+  console.log('   (F12 → Network → any request → x-mango-auth) and run:');
+  console.log('     export MANGO_AUTH_TOKEN=...    # in your own shell, not pasted into chat');
+  console.log('     npm run mango:probe');
+  console.log('   It is short-lived, so it proves the mechanism rather than being the answer.');
 }
 
-console.log(bold('\n── Reading the pages, and the scripts they load'));
-
-for (const page of [entry, '', 'page/', 'Home/Index']) {
-  await readPage(page, page || '/');
-}
-
-const scriptsRead = await readScripts(Number(flag('scripts', 40)));
-console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
-  + `${scriptQueue.length > 0 ? `, ${scriptQueue.length} more named but not read (--scripts to raise)` : ''}`);
 
 /**
  * A second pass, through the pages the first one found.

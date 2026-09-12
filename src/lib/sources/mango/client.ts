@@ -173,6 +173,8 @@ export class MangoClient {
    * instead of being asked for by hand.
    */
   private loginPayload: Record<string, unknown> | null = null;
+  /** A service token found after signing in, rather than handed over by it. */
+  private discoveredToken: string | null = null;
 
   private readonly credentials: MangoCredentials;
   private readonly timeoutMs: number;
@@ -193,7 +195,7 @@ export class MangoClient {
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
-    const token = this.credentials.authToken ?? (this.loginPayload ? this.authToken : null);
+    const token = this.authToken;
     return {
       ...(token ? { 'x-mango-auth': token } : {}),
       // Mango's controllers answer JSON to an XHR and HTML to anything else.
@@ -486,6 +488,7 @@ export class MangoClient {
    */
   get authToken(): string | null {
     if (this.credentials.authToken) return this.credentials.authToken;
+    if (this.discoveredToken) return this.discoveredToken;
     if (!this.loginPayload) return null;
 
     for (const key of ['mango_auth', 'auth_token', 'token', 'access_token', 'x_mango_auth']) {
@@ -493,6 +496,17 @@ export class MangoClient {
       if (typeof value === 'string' && value.trim()) return value.trim();
     }
     return null;
+  }
+
+  /**
+   * Use a token found somewhere other than the sign-in.
+   *
+   * The sign-in does not always hand one over — it answers success and
+   * nothing else — while the service still wants the header. The token has to
+   * come from the front end then, so a caller that finds one can hand it over.
+   */
+  useAuthToken(token: string | null): void {
+    this.discoveredToken = token?.trim() || null;
   }
 
   /** What the sign-in answered, for a survey that needs to look at it. */
