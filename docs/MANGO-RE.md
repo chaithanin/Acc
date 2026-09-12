@@ -297,9 +297,35 @@ nothing: every endpoint answers 200, `success: true`, and an empty list. It
 looks exactly like a company with no receivables.
 
 `api/public/LoginCompaniesByUserID?userid=…` lists the companies an account may
-open — six for the account tested — and which is its default. That list is the
-group, and which company a figure belongs to is the first thing to know about
-it.
+open, and answers with the group itself:
+
+| Code | Company |
+|---|---|
+| MG1 | บริษัท ไชยธนินทร์ จำกัด |
+| MG2 | บริษัท เดอะ ซัน ไลท์ เรสซิเด้นซ์ 9 จำกัด |
+| MG3 | บริษัท มาริน่า โกลเด้น เบย์ วิคทอเรีย จำกัด |
+| MG4 | บริษัท โกลบอล ท็อป กรุ๊ป จำกัด |
+| MG5 | บริษัท มาริน่า โกลเด้น เบย์ เอลย่า จำกัด |
+| MG6 | บริษัท มาริน่า โกลเด้น เบย์ เจนีวา จำกัด |
+
+Which company a figure belongs to is the first thing to know about it, and
+these codes are the same ones the sign-in takes as `maincode`. They line up
+with the estate module's projects — MG3 is the company behind Marina Golden
+Bay Victoria — so the two sources can be reconciled company by company rather
+than by name matching.
+
+Not all of the service answers on cookies alone. The split is by namespace:
+`api/public/*` and `API/UserOnline/*` answer signed in, while `Anywhere/Center/*`
+and `anywhere/center/*` want the `x-mango-auth` header and refuse with 403
+without it. That refusal includes `Maincomp` — so without the token the company
+is never switched, and the figures below are empty for that reason rather than
+for a real one.
+
+The token appears to be minted during the bootstrap itself rather than at
+sign-in, which makes the order circular: the call that switches company is
+refused before the call that hands over the token has been made. The probe runs
+the sequence, keeps any token any step hands over, and asks the refused ones
+again.
 
 Not every endpoint needs the `x-mango-auth` header — `api/public/*` answers on
 cookies alone. What the service does need is the **full** cookie set, and part

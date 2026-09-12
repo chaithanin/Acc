@@ -465,25 +465,87 @@ const BOOTSTRAP = [
 
 console.log(bold(`\n── Settling the session on ${credentials.maincode}, the way the front end does`));
 
-for (const [path, params] of BOOTSTRAP) {
+/**
+ * One bootstrap step, reporting what happened and keeping anything useful.
+ *
+ * The response bodies are read rather than discarded. Two of these are named
+ * for authentication and answer 200 while the calls beside them are refused —
+ * so if the token the `Center` namespace wants is minted anywhere, it is
+ * minted here, and throwing the body away is how it stayed missing.
+ */
+const bootstrapStep = async ([path, params]) => {
   const query = Object.entries(params)
     .map(([key, value]) => `${key}=${encodeURIComponent(fill(value))}`)
     .join('&');
 
+  let answer;
   try {
-    const answer = await client.raw(`${service}/${path}${query ? `?${query}` : ''}`);
-    let note = `${answer.status}`;
-    if (answer.contentType.includes('json')) {
-      try {
-        const body = JSON.parse(answer.text);
-        note = body?.success === false ? `refused: ${body.error ?? 'no reason'}` : `${answer.status} ok`;
-      } catch { /* leave the status as the note */ }
-    }
-    console.log(`   ${path.slice(0, 44).padEnd(46)} ${note}`);
+    answer = await client.raw(`${service}/${path}${query ? `?${query}` : ''}`);
   } catch (err) {
-    console.log(`   ${path.slice(0, 44).padEnd(46)} ${err.message}`);
+    // "terminated" is a dropped connection rather than a refusal; one retry
+    // separates a flaky hop from a real answer.
+    try {
+      answer = await client.raw(`${service}/${path}${query ? `?${query}` : ''}`);
+    } catch (retryErr) {
+      return { path, note: retryErr.message, ok: false };
+    }
   }
+
+  let note = `${answer.status}`;
+  let ok = answer.status < 400;
+
+  if (answer.text) {
+    const token = findToken(answer.text);
+    if (token && token !== client.authToken) {
+      client.useAuthToken(token);
+      note += ' — and handed over a token';
+    }
+  }
+
+  if (answer.contentType.includes('json')) {
+    try {
+      const body = JSON.parse(answer.text);
+      if (body?.success === false) {
+        note = `refused: ${body.error ?? 'no reason'}`;
+        ok = false;
+      } else if (ok) {
+        note = `${answer.status} ok${note.includes('token') ? ' — and handed over a token' : ''}`;
+      }
+    } catch { /* leave the status as the note */ }
+  }
+
+  return { path, note, ok };
+};
+
+const bootstrapResults = [];
+for (const step of BOOTSTRAP) {
+  const result = await bootstrapStep(step);
+  bootstrapResults.push({ step, result });
+  console.log(`   ${result.path.slice(0, 44).padEnd(46)} ${result.note}`);
   await new Promise((r) => setTimeout(r, 200));
+}
+
+/**
+ * Try the refused ones again, if a token turned up along the way.
+ *
+ * The order the front end uses is the order it needs, but a token minted at
+ * step three is no use to step two on the first pass — and step two is the one
+ * that points the session at a company.
+ */
+const refused = bootstrapResults.filter(({ result }) => !result.ok);
+if (refused.length > 0 && client.authToken) {
+  console.log(`   ── ${refused.length} ${refused.length === 1 ? 'was' : 'were'} refused before a `
+    + 'token appeared; asking again');
+  for (const { step } of refused) {
+    const result = await bootstrapStep(step);
+    console.log(`   ${result.path.slice(0, 44).padEnd(46)} ${result.note}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+} else if (refused.length > 0) {
+  console.log(`   ── ${refused.length} refused, and nothing here handed over a token.`);
+  console.log('      The Center namespace wants one; api/public does not, which is why some');
+  console.log('      of these answered. Without it the company is never switched and every');
+  console.log('      figure below is empty for that reason rather than for a real one.');
 }
 
 console.log(bold(`\n── Asking ${service} for what the application itself asks for`));
