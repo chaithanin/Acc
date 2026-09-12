@@ -489,6 +489,38 @@ if (tally.size > 0) {
   }
 }
 
+/**
+ * The ones that are not simply absent.
+ *
+ * A 404 is the answer for a name that was never an endpoint, and a survey
+ * that finds nothing but 404s has learned that its names were wrong. Anything
+ * else — a 400 wanting parameters, a 401 or 403 about rights, a 500 that got
+ * far enough to break — is an endpoint that exists. One of those is worth more
+ * than the other hundred and forty-eight put together, so it does not get
+ * averaged into a tally.
+ */
+const exists = findings.filter((f) => f.kind !== 'json' && f.status !== 404);
+if (exists.length > 0) {
+  console.log(bold('\n── These exist — they answered something other than "no such thing"'));
+  for (const finding of exists) {
+    console.log(`   ${finding.path}`);
+    console.log(`     ${finding.verb} → ${finding.status}. `
+      + `${finding.status === 400 ? 'It wanted parameters nobody supplied, which means the route is real.'
+        : finding.status === 401 || finding.status === 403 ? 'It exists and this account may not have it.'
+        : 'It got far enough to fail rather than to be missing.'}`);
+  }
+}
+
+if (useful.length === 0 && findings.length > 0) {
+  const asked = findings.map((f) => f.path);
+  console.log(bold('\n── What was asked, so the guesses can be judged'));
+  for (const path of asked.slice(0, 40)) console.log(`   ${path}`);
+  if (asked.length > 40) console.log(`   … and ${asked.length - 40} more`);
+  console.log('\n   If these do not look like endpoints of this system, the names are wrong');
+  console.log('   and no amount of asking will help. One real URL settles it: open a screen');
+  console.log('   that lists something, F12 → Network → Fetch/XHR, and read one request off it.');
+}
+
 if (skipped.length > 0) {
   console.log(`\n   Not called, because the name says they change something:`);
   console.log(`     ${skipped.map(([p]) => p).join(', ')}`);
