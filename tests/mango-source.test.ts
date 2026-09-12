@@ -724,3 +724,67 @@ describe('collecting more than was ever owed', () => {
       'some receipts were left out of the breakdown');
   });
 });
+
+/**
+ * Which receipts are payments of the contract price.
+ *
+ * A live pull came back with six kinds of receipt filed against contracts,
+ * named by single letters, totalling more than was ever contracted. Only
+ * somebody who knows the system can say which are instalments and which are
+ * transfer fees, so the decision is an input rather than a guess.
+ */
+describe('choosing which receipts count', () => {
+  const withFee = () => {
+    const bundle = mangoFixture();
+    (bundle.transaction_detail ?? []).push({
+      docno: 'BK-0001', rcptno: 'RC-1999', rcptdate: '2026-08-30',
+      amount: 90_000, doctype: 'T',
+    });
+    return bundle;
+  };
+
+  it('counts every kind when nobody has said otherwise', () => {
+    const all = mapMangoBundle(withFee(), { reportDate: '2026-09-11' });
+    const bk1 = all.data.receivable.find((r) => r.unit === 'A-101');
+    assert.ok(bk1);
+    assert.ok(bk1!.receiveAmount >= 90_000, 'the unspecified kind was silently dropped');
+  });
+
+  it('counts only the kinds it was given', () => {
+    const chosen = mapMangoBundle(withFee(), {
+      reportDate: '2026-09-11',
+      // Every kind in the fixture except the fee added above — including
+      // โอนกรรมสิทธิ์, which is the balance paid at transfer and very much a
+      // payment of the contract.
+      paymentDoctypes: ['เงินจอง', 'เงินดาวน์', 'โอนกรรมสิทธิ์', 'งวดที่ 1', 'งวดที่ 2'],
+    });
+    const bk1 = chosen.data.receivable.find((r) => r.unit === 'A-101');
+    assert.ok(bk1);
+
+    const all = mapMangoBundle(withFee(), { reportDate: '2026-09-11' });
+    const before = all.data.receivable.find((r) => r.unit === 'A-101')!.receiveAmount;
+    assert.equal(before - bk1!.receiveAmount, 90_000, 'the excluded kind was still counted');
+  });
+
+  it('matches the kind whatever case it arrives in', () => {
+    const bundle = mangoFixture();
+    (bundle.transaction_detail ?? []).push({
+      docno: 'BK-0001', rcptno: 'RC-1998', rcptdate: '2026-08-30', amount: 10_000, doctype: 'd',
+    });
+
+    const chosen = mapMangoBundle(bundle, { reportDate: '2026-09-11', paymentDoctypes: ['D'] });
+    const bk1 = chosen.data.receivable.find((r) => r.unit === 'A-101');
+    assert.equal(bk1?.receiveAmount, 10_000);
+  });
+
+  /**
+   * The reason this is a choice and not a default: excluding a kind that is a
+   * real instalment would overstate what is still owed, which is the same
+   * error in the opposite direction.
+   */
+  it('still reports every kind it saw, including the ones not counted', () => {
+    const chosen = mapMangoBundle(withFee(), { reportDate: '2026-09-11', paymentDoctypes: ['T'] });
+    assert.ok(chosen.collectedByDoctype.has('T'));
+    assert.ok(chosen.collectedByDoctype.size > 1, 'the kinds left out went unreported');
+  });
+});

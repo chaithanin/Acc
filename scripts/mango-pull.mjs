@@ -28,6 +28,12 @@ import path from 'node:path';
  *   --save <file>       also write the raw bundle to disk, for inspection
  *   --force             go ahead despite a schema failure, or despite this
  *                       pull being identical to one already imported
+ *   --payment-kinds B,C,D,T
+ *                       which kinds of receipt count as payment of the
+ *                       contract price. Mango files fees and tax against the
+ *                       contract too, so counting every kind reports more
+ *                       collected than was ever owed. Unset, every kind counts
+ *                       and the run says the totals do not add up.
  *
  * docs/MANGO-RE.md has the rest: the account it needs, what the mapping
  * decides, and what to do when the schema check stops a run.
@@ -45,6 +51,9 @@ const projectFilter = (flag('projects') ?? '').split(',').map((s) => s.trim()).f
 const reportDate = flag('date') ?? new Date().toISOString().slice(0, 10);
 const dryRun = has('dry-run');
 const savePath = flag('save');
+// Which kinds of receipt are payments of the contract price. An accounting
+// decision, taken by whoever knows, and recorded in the command that ran.
+const paymentKinds = (flag('payment-kinds') ?? '').split(',').map((k) => k.trim()).filter(Boolean);
 
 if (!dryRun && !companyCode) {
   console.error('Which company is this for? Pass --company <code>, or --dry-run to only look.');
@@ -137,7 +146,7 @@ if (findings.length > 0) {
 // -------------------------------------------------------------------- map
 
 console.log(bold('\n── Mapping'));
-const mapped = mapMangoBundle(bundle, { reportDate });
+const mapped = mapMangoBundle(bundle, { reportDate, paymentDoctypes: paymentKinds });
 
 console.log(`   contracts          ${String(mapped.counts.contracts).padStart(7)}`);
 console.log(`   cancelled, dropped ${String(mapped.counts.cancelled).padStart(7)}`);
@@ -151,6 +160,9 @@ console.log(`   units priced       ${String(mapped.counts.units).padStart(7)}`);
 const contracted = mapped.data.receivable.reduce((s, r) => s + r.contractualAmount, 0);
 const received = mapped.data.receivable.reduce((s, r) => s + r.receiveAmount, 0);
 console.log(`\n   contracted         ${money(contracted).padStart(16)}`);
+if (paymentKinds.length > 0) {
+  console.log(`   counting only receipts of kind: ${paymentKinds.join(', ')}`);
+}
 console.log(`   collected          ${money(received).padStart(16)}`);
 console.log(`   outstanding        ${money(contracted - received).padStart(16)}`);
 
@@ -170,6 +182,27 @@ if (mapped.collectedByDoctype.size > 0) {
   for (const [kind, held] of kinds) {
     console.log(`     ${kind.slice(0, 28).padEnd(30)} ${String(held.count).padStart(7)}  ${money(held.amount).padStart(16)}`);
   }
+}
+
+/**
+ * What each kind is worth to the answer.
+ *
+ * The kinds are single letters and this code cannot know what they stand for.
+ * What it can do is the arithmetic: leave one out, and say what the
+ * outstanding balance becomes. A kind that turns a negative balance positive
+ * is the one to ask the accounts department about, and the question becomes
+ * "is R a payment of the contract price?" rather than "why is this negative?"
+ */
+if (paymentKinds.length === 0 && contracted > 0 && received > contracted) {
+  console.log('\n   if one kind were left out, outstanding would be:');
+  const kinds = [...mapped.collectedByDoctype.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  for (const [kind, held] of kinds) {
+    const balance = contracted - (received - held.amount);
+    console.log(`     without ${kind.slice(0, 12).padEnd(14)} ${money(balance).padStart(16)}`
+      + `${balance >= 0 ? '   ← positive' : ''}`);
+  }
+  console.log('\n   Pass the kinds that are payments of the contract price:');
+  console.log('     npm run mango:pull -- --payment-kinds B,C,D --dry-run');
 }
 
 // Errors first: a warning about one contract is not the same as a figure that
@@ -215,6 +248,7 @@ for (const project of projectsRepo.listProjects(true)) {
 
 const resolved = mapMangoBundle(bundle, {
   reportDate,
+  paymentDoctypes: paymentKinds,
   projectIdByCode: new Map(
     [...new Set(mapped.data.receivable.map((r) => r.projectLabel).filter(Boolean))]
       .map((code) => [code, byAlias.get(String(code).trim().toLowerCase()) ?? null])

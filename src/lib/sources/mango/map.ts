@@ -28,6 +28,16 @@ export interface MangoMapOptions {
   reportDate: string;
   /** Acc project id per Mango project code, where one is known. */
   projectIdByCode?: Map<string, string>;
+  /**
+   * Which kinds of receipt are payments of the contract price.
+   *
+   * Mango files everything against the contract — instalments, but also
+   * transfer fees, common charges and tax — so summing them all reports more
+   * collected than was ever owed. Which kinds count is an accounting decision,
+   * so it is made here by whoever knows, and not by this code. Left unset,
+   * every kind counts and the totals say loudly that they do not add up.
+   */
+  paymentDoctypes?: string[];
 }
 
 export interface MangoMapResult {
@@ -143,6 +153,11 @@ function live(value: MangoValue): boolean {
 
 export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): MangoMapResult {
   const { reportDate, projectIdByCode = new Map() } = options;
+  const paymentKinds = options.paymentDoctypes?.length
+    ? new Set(options.paymentDoctypes.map((kind) => kind.trim().toUpperCase()).filter(Boolean))
+    : null;
+  const isPayment = (detail: MangoTransactionDetail) =>
+    paymentKinds === null || paymentKinds.has((text(detail.doctype) ?? '').toUpperCase());
   const data = emptyDataset();
   const issues: ImportIssue[] = [];
 
@@ -208,7 +223,9 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
     const contractual = money(row.netamount) || money(row.amount);
     const receipts = docno ? (receiptsByDoc.get(docno) ?? []) : [];
-    const received = round2(receipts.reduce((sum, r) => sum + money(r.amount), 0));
+    const received = round2(receipts
+      .filter(isPayment)
+      .reduce((sum, r) => sum + money(r.amount), 0));
 
     // A row with no money on it is a placeholder, not a contract.
     if (contractual === 0 && received === 0) {
