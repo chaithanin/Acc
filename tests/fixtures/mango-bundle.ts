@@ -124,7 +124,12 @@ export function mangoFixture(): MangoBundle {
       // Filed against the cancelled booking — no longer a collection.
       { docno: 'BK-0004', rcptno: 'RC-4001', rcptdate: '2026-03-01', amount: 200_000, doctype: 'เงินจอง' },
 
-      // A receipt whose contract is not in this pull at all.
+      /**
+       * Filed against a contract that is nowhere in this pull — not cancelled,
+       * not replaced, absent. Somebody paid against a contract this account
+       * cannot see, which is the one kind of orphan that means the pull is
+       * short rather than merely tidy.
+       */
       { docno: 'BK-9999', rcptno: 'RC-9001', rcptdate: '2026-08-05', amount: 75_000, doctype: 'เงินจอง' },
 
       // A receipt with no usable date — cannot be placed in a month.

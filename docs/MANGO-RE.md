@@ -191,6 +191,24 @@ So the gap is covered, by the other connector rather than by this one.
 Do not build a unit-availability figure on this pull. It will be wrong by
 however many units are on hold, and it will look right.
 
+## Reading the warnings
+
+A receipt whose contract is not in the receivable list has several causes and
+only one of them matters. A refund against a cancelled booking belongs outside
+the list; so does a payment against a booking that was replaced. But a receipt
+filed against a contract that is **absent from the pull entirely** means
+somebody paid against a contract this account cannot see — the pull is short,
+and so is every figure taken from it.
+
+The run separates them, and raises the last as an error of its own
+(`MANGO_INCOMPLETE_PULL`) rather than as a line in a tally. It is the symptom
+that the service account's project rights are too narrow, and it is the only
+place that symptom shows.
+
+An overpayment warning — receipts exceeding the contract value — is usually
+either a contract revised down after payment or a receipt filed against the
+wrong contract. Both are worth a look and neither is this system's to fix.
+
 ## Matching projects
 
 Mango's project codes are resolved against the aliases each project already

@@ -142,6 +142,9 @@ const mapped = mapMangoBundle(bundle, { reportDate });
 console.log(`   contracts          ${String(mapped.counts.contracts).padStart(7)}`);
 console.log(`   cancelled, dropped ${String(mapped.counts.cancelled).padStart(7)}`);
 console.log(`   superseded, dropped${String(mapped.counts.superseded).padStart(7)}`);
+if (mapped.counts.receiptsWithoutContract > 0) {
+  console.log(`   receipts with no contract in this pull: ${mapped.counts.receiptsWithoutContract}`);
+}
 console.log(`   receipts           ${String(mapped.counts.receipts).padStart(7)}`);
 console.log(`   units priced       ${String(mapped.counts.units).padStart(7)}`);
 

@@ -180,7 +180,7 @@ describe('collections', () => {
     assert.match(undated!.message, /^1 receipt carries no usable date\. It still counts/);
 
     const orphan = result.issues.find((i) => i.code === 'MANGO_ORPHAN_RECEIPT');
-    assert.match(orphan!.message, /^2 receipts belong to a contract/);
+    assert.match(orphan!.message, /^2 receipts belong to no contract/);
   });
 
   it('still counts an undated receipt towards what the customer has paid', () => {
@@ -618,5 +618,49 @@ describe('when the login page is not there', () => {
   it('still calls a refusal a refusal', async () => {
     const message = await signIn(403);
     assert.match(message, /network or proxy refusal/);
+  });
+});
+
+
+/**
+ * Orphan receipts have several causes and only one of them is alarming.
+ *
+ * A refund against a cancelled booking is meant to sit outside the receivable
+ * list. A receipt against a contract that is simply absent means somebody paid
+ * against a contract this account cannot see — the pull is short, and so is
+ * every figure taken from it. A real pull reported 318 of these as one number,
+ * which could have been either.
+ */
+describe('telling a refund from a pull that is short', () => {
+  const result = run();
+
+  it('counts a receipt against a contract that is not in the pull at all', () => {
+    assert.equal(result.counts.receiptsWithoutContract, 1);
+    // And does not fold the refunded one in with it.
+    assert.equal(result.counts.orphanReceipts, 2);
+  });
+
+  it('raises it as an error of its own, not as a line in the orphan tally', () => {
+    const issue = result.issues.find((i) => i.code === 'MANGO_INCOMPLETE_PULL');
+    assert.ok(issue, 'a contract this account cannot see went unreported');
+    assert.equal(issue!.severity, 'error');
+    assert.match(issue!.message, /short by whatever those contracts hold/);
+  });
+
+  it('separates the causes in the orphan warning rather than adding them up', () => {
+    const orphan = result.issues.find((i) => i.code === 'MANGO_ORPHAN_RECEIPT');
+    assert.match(orphan!.message, /against cancelled bookings/);
+    assert.match(orphan!.message, /absent from this pull entirely/);
+  });
+
+  it('says nothing about a short pull when every orphan is accounted for', () => {
+    const bundle = mangoFixture();
+    bundle.transaction_detail = (bundle.transaction_detail ?? []).filter((r) => r.docno !== 'BK-9999');
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    assert.equal(mapped.counts.receiptsWithoutContract, 0);
+    assert.equal(mapped.issues.find((i) => i.code === 'MANGO_INCOMPLETE_PULL'), undefined);
+    // The refund on the cancelled booking is still reported, as it should be.
+    assert.ok(mapped.issues.find((i) => i.code === 'MANGO_ORPHAN_RECEIPT'));
   });
 });

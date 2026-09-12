@@ -50,6 +50,8 @@ export interface MangoMapResult {
     cancelled: number;
     /** Rows Mango has retired, kept in the list and not counted. */
     superseded: number;
+    /** Receipts against contracts absent from the pull — the sign of a short pull. */
+    receiptsWithoutContract: number;
     receipts: number;
     orphanReceipts: number;
     units: number;
@@ -164,6 +166,15 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   let contracts = 0;
   let superseded = 0;
   const seenDocs = new Set<string>();
+  /**
+   * Why a contract is not in the receivable list, where it is in the pull.
+   *
+   * A receipt against a contract that was cancelled is a refund, and a receipt
+   * against a contract that is nowhere in the pull means the contract is
+   * invisible to this account — the pull is short, and the collected figure
+   * with it. Counting those together hides the second behind the first.
+   */
+  const droppedDocs = new Map<string, 'cancelled' | 'superseded' | 'empty'>();
 
   transactions.forEach((row, index) => {
     const docno = text(row.docno);
@@ -175,6 +186,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
     // without checking reports the same unit's money more than once.
     if (!live(row.active)) {
       superseded += 1;
+      if (docno) droppedDocs.set(docno, 'superseded');
       return;
     }
 
@@ -183,6 +195,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
     // money nobody owes.
     if (flagged(row.cancel_status)) {
       cancelled += 1;
+      if (docno) droppedDocs.set(docno, 'cancelled');
       return;
     }
 
@@ -191,7 +204,10 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
     const received = round2(receipts.reduce((sum, r) => sum + money(r.amount), 0));
 
     // A row with no money on it is a placeholder, not a contract.
-    if (contractual === 0 && received === 0) return;
+    if (contractual === 0 && received === 0) {
+      if (docno) droppedDocs.set(docno, 'empty');
+      return;
+    }
 
     if (docno) seenDocs.add(docno);
     contracts += 1;
@@ -229,9 +245,11 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
   // --- receipts filed against a contract that is not in the list
   let orphanReceipts = 0;
+  const orphansByCause = { cancelled: 0, superseded: 0, empty: 0, unknown: 0 };
   for (const [docno, rows] of receiptsByDoc) {
     if (seenDocs.has(docno)) continue;
     orphanReceipts += rows.length;
+    orphansByCause[droppedDocs.get(docno) ?? 'unknown'] += rows.length;
   }
   if (orphanReceipts > 0) {
     issues.push({
@@ -239,9 +257,14 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       code: 'MANGO_ORPHAN_RECEIPT',
       message:
         `${orphanReceipts} receipt${orphanReceipts === 1 ? '' : 's'} belong`
-        + `${orphanReceipts === 1 ? 's' : ''} to a contract that is not in this pull — `
-        + 'usually a cancelled booking that was refunded, or a project this account cannot see. '
-        + `${orphanReceipts === 1 ? 'It is' : 'They are'} not counted as collections.`,
+        + `${orphanReceipts === 1 ? 's' : ''} to no contract in the receivable list, and `
+        + `${orphanReceipts === 1 ? 'is' : 'are'} not counted as collections: `
+        + [
+          orphansByCause.cancelled && `${orphansByCause.cancelled} against cancelled bookings`,
+          orphansByCause.superseded && `${orphansByCause.superseded} against replaced bookings`,
+          orphansByCause.empty && `${orphansByCause.empty} against rows carrying no contract value`,
+          orphansByCause.unknown && `${orphansByCause.unknown} against contracts absent from this pull entirely`,
+        ].filter(Boolean).join(', ') + '.',
       source: ref(0, 'transaction_detail'),
     });
   }
@@ -273,6 +296,30 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
     const month = date.slice(0, 7);
     collectedByMonth.set(month, round2((collectedByMonth.get(month) ?? 0) + amount));
+  }
+
+  /**
+   * Receipts whose contract is nowhere in the pull.
+   *
+   * The other causes are bookkeeping — a refund on a cancelled booking is
+   * meant to sit outside the receivable list. This one is different: the
+   * contract exists, somebody paid against it, and this account cannot see it.
+   * Every figure derived from the pull is short by whatever those contracts
+   * hold, and nothing else in the output would say so.
+   */
+  if (orphansByCause.unknown > 0) {
+    issues.push({
+      severity: 'error',
+      code: 'MANGO_INCOMPLETE_PULL',
+      message:
+        `${orphansByCause.unknown} receipt${orphansByCause.unknown === 1 ? '' : 's'} `
+        + `${orphansByCause.unknown === 1 ? 'is' : 'are'} filed against contracts this pull did not `
+        + 'return at all — not cancelled, not replaced, simply absent. Money was collected against '
+        + 'contracts this account cannot see, so the contracted and outstanding totals are short by '
+        + 'whatever those contracts hold. Widen the account\u2019s project rights before trusting '
+        + 'these figures.',
+      source: ref(0, 'transaction_detail'),
+    });
   }
 
   if (undatedReceipts > 0) {
@@ -339,6 +386,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       superseded,
       receipts: details.length,
       orphanReceipts,
+      receiptsWithoutContract: orphansByCause.unknown,
       units: units.size,
     },
   };
