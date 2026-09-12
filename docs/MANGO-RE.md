@@ -205,9 +205,27 @@ The run separates them, and raises the last as an error of its own
 that the service account's project rights are too narrow, and it is the only
 place that symptom shows.
 
-An overpayment warning — receipts exceeding the contract value — is usually
-either a contract revised down after payment or a receipt filed against the
-wrong contract. Both are worth a look and neither is this system's to fix.
+An overpayment warning on **one** contract — receipts exceeding the contract
+value — is usually either a contract revised down after payment or a receipt
+filed against the wrong contract. Both are worth a look and neither is this
+system's to fix.
+
+Across the **whole pull** it is a different finding and is raised as an error.
+The first live run collected 2.71bn against contracts of 2.59bn and reported
+an outstanding balance of minus 118 million, as though the company's customers
+were owed money. Not every receipt filed against a contract is a payment of it:
+transfer fees, common area charges and tax are filed the same way. The run
+therefore prints the receipts broken down by the kind Mango files them under,
+and which of those count as payment of the contract price is an accounting
+decision for somebody to make — not a coercion for this code to guess at.
+
+One column has already been misread this way. `revise` sits beside
+`asking_price` and reads like a revised price; it is the revision number.
+Preferring it priced 1,839 units at 24,035 baht in total — about thirteen baht
+each — and published that as what the project expects to sell for. The price
+list is read from `asking_price` alone now, and a sale value that averages
+below 50,000 a unit is refused rather than reported, because that is not a
+cheap project, it is the wrong column.
 
 ## Matching projects
 

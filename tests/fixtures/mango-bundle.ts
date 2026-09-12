@@ -136,14 +136,22 @@ export function mangoFixture(): MangoBundle {
       { docno: 'BK-0002', rcptno: 'RC-2004', rcptdate: '', amount: 25_000, doctype: 'งวดที่ 4' },
     ],
 
+    /**
+     * `revise` is the revision number, not a revised price.
+     *
+     * It reads like one beside a column called asking_price, and was taken for
+     * one — which priced a real project's 1,839 units at 24,035 baht in total,
+     * because the values here are 1, 2, 3. The small integers are the point of
+     * this fixture.
+     */
     pricelist: [
-      { pre_event2: 'HAMONIA', pre_event: 'A-101', asking_price: 3_200_000, revise: 3_000_000, active: 'Y' },
+      { pre_event2: 'HAMONIA', pre_event: 'A-101', asking_price: 3_200_000, revise: 2, active: 'Y' },
       { pre_event2: 'HAMONIA', pre_event: 'A-102', asking_price: 2_600_000, revise: null, active: 'Y' },
       { pre_event2: 'HAMONIA', pre_event: 'A-103', asking_price: '1,800,000', revise: 0, active: 'Y' },
       // Sold and withdrawn from sale: not part of what the project can earn.
-      { pre_event2: 'HAMONIA', pre_event: 'A-104', asking_price: 4_000_000, revise: null, active: 'N' },
+      { pre_event2: 'HAMONIA', pre_event: 'A-104', asking_price: 4_000_000, revise: 1, active: 'N' },
       { pre_event2: 'MARINA_VTR', pre_event: 'V-201', asking_price: 5_000_000, revise: null, active: 'Y' },
-      { pre_event2: 'MARINA_VTR', pre_event: 'V-202', asking_price: 1_000_000, revise: null, active: '1' },
+      { pre_event2: 'MARINA_VTR', pre_event: 'V-202', asking_price: 1_000_000, revise: 3, active: '1' },
     ],
 
     sale_target: [

@@ -36,6 +36,13 @@ export interface MangoMapResult {
   /** Total asking price of the active price list, per Mango project code. */
   saleValueByProject: Map<string, number>;
   /**
+   * Receipts by the kind Mango files them under, with totals.
+   *
+   * Reported rather than acted on: which kinds count as payment of the
+   * contract price is an accounting decision.
+   */
+  collectedByDoctype: Map<string, { count: number; amount: number }>;
+  /**
    * Receipts banked, by month.
    *
    * Collections, not income raised — Mango issues no monthly invoice. Returned
@@ -244,6 +251,27 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   });
 
   // --- receipts filed against a contract that is not in the list
+  /**
+   * What kind of receipt each payment is.
+   *
+   * Every receipt filed against a contract is summed as money collected
+   * against that contract, which assumes they are all payments of the contract
+   * price. A real pull collected more than was ever contracted, so at least
+   * some of them are not — transfer fees, common area charges and tax are all
+   * filed against the same contract and are not payments of it.
+   *
+   * Which ones is an accounting question, not a coercion, so this reports the
+   * kinds and their totals rather than quietly picking some to drop.
+   */
+  const byDoctype = new Map<string, { count: number; amount: number }>();
+  for (const detail of details) {
+    const kind = text(detail.doctype) ?? '(no type)';
+    const held = byDoctype.get(kind) ?? { count: 0, amount: 0 };
+    held.count += 1;
+    held.amount = round2(held.amount + money(detail.amount));
+    byDoctype.set(kind, held);
+  }
+
   let orphanReceipts = 0;
   const orphansByCause = { cancelled: 0, superseded: 0, empty: 0, unknown: 0 };
   for (const [docno, rows] of receiptsByDoc) {
@@ -338,20 +366,32 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
   // --- what each project expects to sell for
   const saleValueByProject = new Map<string, number>();
+  const unitsByProject = new Map<string, number>();
   const units = new Set<string>();
   for (const row of pricelist) {
-    // A revised price supersedes the original, and an inactive unit is not for
-    // sale — counting either would overstate what the project can earn.
+    // An inactive unit is not for sale, and counting it would overstate what
+    // the project can earn.
     if (!live(row.active)) continue;
 
     const project = text(row.pre_event2);
-    const price = money(row.revise) || money(row.asking_price);
+
+    /**
+     * `asking_price`, and only that.
+     *
+     * `revise` was read here as a revised price, on the reasonable-sounding
+     * assumption that a column named revise beside a price holds one. It does
+     * not: it is the revision number. Preferring it priced 1,839 units at
+     * 24,035 baht in total — about thirteen baht each — and reported that as
+     * what a project expects to sell for.
+     */
+    const price = money(row.asking_price);
     if (price === 0) continue;
 
     const unit = text(row.pre_event);
     if (unit) units.add(unit);
     if (!project) continue;
 
+    unitsByProject.set(project, (unitsByProject.get(project) ?? 0) + 1);
     saleValueByProject.set(project, round2((saleValueByProject.get(project) ?? 0) + price));
   }
 
@@ -374,10 +414,69 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
 
   void reportDate;
 
+  /**
+   * A sanity check on the price column.
+   *
+   * This is where the last mistake would have been caught: a sale value
+   * averaging thirteen baht a unit is not a cheap project, it is the wrong
+   * column. The threshold is deliberately far below any real Thai condominium
+   * unit, so it fires on a misread and never on a genuine figure.
+   */
+  for (const [project, value] of saleValueByProject) {
+    const count = unitsByProject.get(project) ?? 0;
+    if (count === 0) continue;
+    const average = value / count;
+    if (average >= 50_000) continue;
+
+    issues.push({
+      severity: 'error',
+      code: 'MANGO_IMPLAUSIBLE_PRICE',
+      message:
+        `${project} prices ${count} units at ${Math.round(value).toLocaleString('en-US')} in total — `
+        + `about ${Math.round(average).toLocaleString('en-US')} each. That is not a price; the price `
+        + 'column has been misread or has changed. The sale value for this project is not usable.',
+      source: ref(0, 'pricelist'),
+    });
+  }
+
+  /**
+   * Collected more than was ever contracted.
+   *
+   * Per contract this is a warning — a price revised down, a receipt on the
+   * wrong contract. Across the whole pull it is neither: it means the two
+   * sides are measuring different things, and an outstanding balance computed
+   * from them is a negative number presented as a debt.
+   */
+  const totalContracted = round2(data.receivable.reduce((sum, r) => sum + r.contractualAmount, 0));
+  const totalReceived = round2(data.receivable.reduce((sum, r) => sum + r.receiveAmount, 0));
+
+  if (totalReceived > totalContracted && totalContracted > 0) {
+    const kinds = [...byDoctype.entries()]
+      .sort((a, b) => b[1].amount - a[1].amount)
+      .slice(0, 6)
+      .map(([kind, held]) => `${kind} ${Math.round(held.amount).toLocaleString('en-US')}`)
+      .join(', ');
+
+    issues.push({
+      severity: 'error',
+      code: 'MANGO_COLLECTED_EXCEEDS_CONTRACTED',
+      message:
+        `Receipts total ${Math.round(totalReceived).toLocaleString('en-US')} against contracts of `
+        + `${Math.round(totalContracted).toLocaleString('en-US')} — `
+        + `${Math.round(totalReceived - totalContracted).toLocaleString('en-US')} more collected than `
+        + 'was ever owed, which makes the outstanding balance negative. Not every receipt filed '
+        + 'against a contract is a payment of it: transfer fees, common area charges and tax are '
+        + `filed the same way. The kinds present, by value: ${kinds}. Decide which are payments of `
+        + 'the contract before these figures are used.',
+      source: ref(0, 'transaction_detail'),
+    });
+  }
+
   return {
     data,
     issues,
     saleValueByProject,
+    collectedByDoctype: byDoctype,
     collectedByMonth,
     targets,
     counts: {

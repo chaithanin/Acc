@@ -198,15 +198,32 @@ describe('what a project expects to sell for', () => {
    * typing in by hand. Mango has it: the active price list.
    */
   it('sums the active price list per project', () => {
-    // 3,000,000 revised + 2,600,000 + 1,800,000. A-104 is withdrawn from sale.
-    assert.equal(result.saleValueByProject.get('HAMONIA'), 7_400_000);
+    // 3,200,000 + 2,600,000 + 1,800,000. A-104 is withdrawn from sale.
+    assert.equal(result.saleValueByProject.get('HAMONIA'), 7_600_000);
     assert.equal(result.saleValueByProject.get('MARINA_VTR'), 6_000_000);
   });
 
-  it('prefers a revised price over the original', () => {
-    // A-101 asks 3,200,000 and was revised to 3,000,000.
+  /**
+   * `revise` sits beside `asking_price` and sounds like a revised price. It is
+   * the revision number. Preferring it priced 1,839 real units at 24,035 baht
+   * in total — thirteen baht each — and published that as what a project
+   * expects to sell for.
+   */
+  it('ignores the revision number, which is not a price', () => {
     const hamonia = result.saleValueByProject.get('HAMONIA') ?? 0;
-    assert.ok(hamonia < 3_200_000 + 2_600_000 + 1_800_000);
+    assert.equal(hamonia, 7_600_000, 'the revision number was read as money');
+    assert.ok(hamonia > 1_000, 'the sale value collapsed to the size of a revision counter');
+  });
+
+  it('refuses to publish a sale value that is obviously not money', () => {
+    const bundle = mangoFixture();
+    // What the old reading produced: revision numbers where prices belong.
+    for (const row of bundle.pricelist ?? []) row.asking_price = 2;
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    const issue = mapped.issues.find((i) => i.code === 'MANGO_IMPLAUSIBLE_PRICE');
+    assert.ok(issue, 'a project priced at two baht a unit was reported as a figure');
+    assert.equal(issue!.severity, 'error');
   });
 
   it('leaves out units withdrawn from sale', () => {
@@ -662,5 +679,48 @@ describe('telling a refund from a pull that is short', () => {
     assert.equal(mapped.issues.find((i) => i.code === 'MANGO_INCOMPLETE_PULL'), undefined);
     // The refund on the cancelled booking is still reported, as it should be.
     assert.ok(mapped.issues.find((i) => i.code === 'MANGO_ORPHAN_RECEIPT'));
+  });
+});
+
+/**
+ * A total that cannot be true.
+ *
+ * The first real pull reported 2.71bn collected against 2.59bn contracted, and
+ * an outstanding balance of minus 118 million — presented as a debt. Per
+ * contract, receipts exceeding the contract value is a warning worth a look.
+ * Across a whole pull it is not: it means the two sides are measuring
+ * different things, and no figure derived from them is usable.
+ */
+describe('collecting more than was ever owed', () => {
+  it('raises it as an error, not as a negative balance', () => {
+    const bundle = mangoFixture();
+    // A payment far beyond any contract in the pull, as fees and tax filed
+    // against a contract would produce at scale.
+    (bundle.transaction_detail ?? []).push({
+      docno: 'BK-0001', rcptno: 'RC-1999', rcptdate: '2026-08-30',
+      amount: 500_000_000, doctype: 'ค่าธรรมเนียมการโอน',
+    });
+
+    const mapped = mapMangoBundle(bundle, { reportDate: '2026-09-11' });
+    const issue = mapped.issues.find((i) => i.code === 'MANGO_COLLECTED_EXCEEDS_CONTRACTED');
+    assert.ok(issue, 'more was collected than contracted and nothing said so');
+    assert.equal(issue!.severity, 'error');
+    // It names the kinds, because which of them are payments of the contract
+    // price is the question that has to be answered next.
+    assert.match(issue!.message, /ค่าธรรมเนียมการโอน/);
+  });
+
+  it('says nothing when the pull is coherent', () => {
+    const mapped = mapMangoBundle(mangoFixture(), { reportDate: '2026-09-11' });
+    assert.equal(mapped.issues.find((i) => i.code === 'MANGO_COLLECTED_EXCEEDS_CONTRACTED'), undefined);
+  });
+
+  it('reports the kinds of receipt rather than choosing between them', () => {
+    const mapped = mapMangoBundle(mangoFixture(), { reportDate: '2026-09-11' });
+    assert.ok(mapped.collectedByDoctype.size > 1, 'the receipt kinds were not reported');
+
+    const total = [...mapped.collectedByDoctype.values()].reduce((sum, held) => sum + held.count, 0);
+    assert.equal(total, (mangoFixture().transaction_detail ?? []).length,
+      'some receipts were left out of the breakdown');
   });
 });

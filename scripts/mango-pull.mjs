@@ -162,8 +162,26 @@ if (mapped.saleValueByProject.size > 0) {
   console.log('   (this is the figure revenue recognition needs, and it can now be set from here)');
 }
 
-for (const issue of mapped.issues) {
+// The kinds of receipt, because which of them are payments of the contract
+// price is the question the totals above depend on.
+if (mapped.collectedByDoctype.size > 0) {
+  console.log('\n   receipts by kind:');
+  const kinds = [...mapped.collectedByDoctype.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  for (const [kind, held] of kinds) {
+    console.log(`     ${kind.slice(0, 28).padEnd(30)} ${String(held.count).padStart(7)}  ${money(held.amount).padStart(16)}`);
+  }
+}
+
+// Errors first: a warning about one contract is not the same as a figure that
+// cannot be true, and the second should not be read after fifty of the first.
+const ordered = [...mapped.issues].sort((a, b) =>
+  (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
+
+for (const issue of ordered.slice(0, 12)) {
   console.log(`\n   ${issue.severity}: ${issue.message}`);
+}
+if (ordered.length > 12) {
+  console.log(`\n   … and ${ordered.length - 12} more of the same kinds.`);
 }
 
 if (dryRun) {
