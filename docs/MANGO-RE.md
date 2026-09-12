@@ -263,10 +263,37 @@ as well as the cookies; the sign-in hands that token over, so it is picked up
 automatically — and `MANGO_AUTH_TOKEN` supplies one by hand if a future build
 stops doing that.
 
-`production.service/Anywhere/Center/MenuDisplay?module_=FIN&lang_code=EN` is
-what the front end calls to draw its own navigation, which makes it the system
-describing itself: one authoritative answer per module instead of guessing at
-endpoint names. `npm run mango:probe` asks it for every module in turn.
+Two namespaces live under the service and they are not interchangeable:
+`Anywhere/Center/*` holds the navigation, and **`anywhereAPI/Dashboard/*` holds
+the figures**. The endpoints below were read off the finance dashboard as it
+loaded, which settled in one page what several rounds of surveying could not:
+
+| Endpoint | What it holds |
+|---|---|
+| `anywhereAPI/Dashboard/balanceArReadList` | receivable balances by counterparty |
+| `anywhereAPI/Dashboard/balanceApReadList` | payable balances by counterparty |
+| `anywhereAPI/Dashboard/viewArRead?type=MONTH\|QUARTER` | receivables by period |
+| `anywhereAPI/Dashboard/viewApRead?type=MONTH\|QUARTER` | payables by period |
+| `anywhereAPI/Dashboard/BarchartArRead` · `BarchartAPRead` | the ageing buckets |
+| `anywhereAPI/Dashboard/yearDetailARRead` · `yearDetailAPRead` | the year to date |
+| `anywhereAPI/Dashboard/view_bank_all_v2?bank_guarantee=N\|Y&company_code=` | bank balances — **`Y` is guarantees, which are not cash** |
+| `api/public/LoginCompaniesByUserID?userid=` | which companies an account may open |
+
+That list is most of what this dashboard currently gets by having somebody
+export a workbook.
+
+Three observed calls are deliberately **not** made by the probe: the chat
+poller, which says nothing about finance and repeats forever; the print
+service's warm-up, which exists to have an effect; and
+`API/Public/UserInsertLogs`, which writes to somebody's audit trail. A survey
+has no business calling any of them.
+
+Not every endpoint needs the `x-mango-auth` header — `api/public/*` answers on
+cookies alone. What the service does need is the **full** cookie set, and part
+of it is only issued once the front end has been visited. Asking the service
+before ever opening the front end is answered with 403 for everything, which
+reads as a rights problem and is not one; the probe therefore reads the front
+end first and asks afterwards.
 
 ## The other module
 

@@ -381,6 +381,101 @@ const scriptsRead = await readScripts(Number(flag('scripts', 40)));
 console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
   + `${scriptQueue.length > 0 ? `, ${scriptQueue.length} more named but not read (--scripts to raise)` : ''}`);
 
+/**
+ * Endpoints read off the running application, rather than guessed at.
+ *
+ * Watching the finance dashboard load says more in one page than four rounds
+ * of surveying did, and it corrects the namespace: the data lives under
+ * `anywhereAPI/Dashboard`, while `Anywhere/Center` holds the navigation. Every
+ * one of these was observed being called by the application itself.
+ *
+ * Left out deliberately: the chat poller, which says nothing about finance and
+ * would be asked over and over; the print service's warm-up, which exists to
+ * have an effect; and `API/Public/UserInsertLogs`, which writes to somebody's
+ * audit trail. A survey has no business calling any of them.
+ *
+ * `{company}` and `{today}` are filled in per run.
+ */
+const KNOWN = [
+  // What the company is owed and owes, which is the heart of it.
+  ['anywhereAPI/Dashboard/balanceArReadList', { startDate: '{today}', field: 'mainname', text: '' }],
+  ['anywhereAPI/Dashboard/balanceApReadList', { startDate: '{today}', field: 'mainname', text: '' }],
+  ['anywhereAPI/Dashboard/viewArRead', { type: 'MONTH' }],
+  ['anywhereAPI/Dashboard/viewApRead', { type: 'MONTH' }],
+  ['anywhereAPI/Dashboard/BarchartArRead', { today: '{today}', startDate: '{today}' }],
+  ['anywhereAPI/Dashboard/BarchartAPRead', { today: '{today}', startDate: '{today}' }],
+  ['anywhereAPI/Dashboard/yearDetailARRead', {}],
+  ['anywhereAPI/Dashboard/yearDetailAPRead', {}],
+
+  // Bank balances, asked twice because a guarantee is not cash.
+  ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'N', company_code: '{company}', chq_date: '{today}' }],
+  ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'Y', company_code: '{company}', chq_date: '{today}' }],
+
+  // Which companies this account may actually open — the answer to how
+  // complete any pull can be.
+  ['api/public/LoginCompaniesByUserID', { userid: '{user}' }],
+  ['anywhere/center/Maincomp', { maincode: '{company}' }],
+
+  // The navigation, and what the account is allowed to see of it.
+  ['Anywhere/Center/MenuSelector', { module_: 'FIN', lang_code: 'EN' }],
+  ['Anywhere/Center/AlertMessage', {}],
+  ['anywhere/api/LayoutModuleConfig', {}],
+  ['anywhere/api/StoreCurrency', {}],
+];
+
+console.log(bold(`\n── Asking ${service} for what the application itself asks for`));
+
+const findings = [];
+
+const today = new Date().toISOString().slice(0, 10);
+const fill = (value) => String(value)
+  .replace('{today}', today)
+  .replace('{company}', credentials.maincode)
+  .replace('{user}', credentials.username);
+
+for (const [path, params] of KNOWN) {
+  const query = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(fill(value))}`)
+    .join('&');
+  const url = `${service}/${path}${query ? `?${query}` : ''}`;
+  const label = `${path}${params.bank_guarantee ? ` (guarantee=${params.bank_guarantee})` : ''}`;
+
+  let answer;
+  try {
+    answer = await client.raw(url);
+  } catch (err) {
+    console.log(`   ${label.slice(0, 46).padEnd(48)} could not be read: ${err.message}`);
+    continue;
+  }
+
+  if (!answer.contentType.includes('json')) {
+    const hint = answer.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+    console.log(`   ${label.slice(0, 46).padEnd(48)} ${answer.status}  ${hint}`);
+    continue;
+  }
+
+  let body;
+  try {
+    body = JSON.parse(answer.text);
+  } catch {
+    console.log(`   ${label.slice(0, 46).padEnd(48)} answered JSON that will not parse`);
+    continue;
+  }
+
+  const envelope = body && typeof body === 'object' && 'success' in body;
+  if (envelope && body.success === false) {
+    console.log(`   ${label.slice(0, 46).padEnd(48)} refused: ${body.error ?? 'no reason'}`);
+    continue;
+  }
+
+  const payload = envelope ? body.data : body;
+  findings.push({ path, where: 'observed in the browser', status: answer.status, kind: 'json', shape: shapeOf(payload), verb: 'GET', host: 'service' });
+  console.log(`\n   ${bold(label)}`);
+  console.log(`     ${shapeOf(payload)}`);
+
+  await new Promise((r) => setTimeout(r, 250));
+}
+
 // ------------------------------------------------------- the service's menu
 
 /**
@@ -565,7 +660,6 @@ if (safe.length === 0) {
 
 console.log(bold(`\n── Asking what they hold (${Math.min(askable.length, limit)} of ${askable.length})`));
 
-const findings = [];
 for (const [path, meta] of askable.slice(0, limit)) {
   const where = meta.where;
   let answer;
