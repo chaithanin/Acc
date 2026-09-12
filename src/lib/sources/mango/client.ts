@@ -24,6 +24,12 @@ export interface MangoCredentials {
   username: string;
   password: string;
   /**
+   * The token the service application wants in `x-mango-auth`.
+   *
+   * Optional: the sign-in may hand one over, in which case this is not needed.
+   */
+  authToken?: string;
+  /**
    * Where to sign in, when that is not where the data is.
    *
    * Mango is several modules on one host and the session is shared between
@@ -83,6 +89,7 @@ export function credentialsFromEnv(env: NodeJS.ProcessEnv = process.env): MangoC
     username: env.MANGO_USER!.trim(),
     password: env.MANGO_PASS!,
     maincode: (env.MANGO_MAINCODE?.trim() || 'MG1').toUpperCase(),
+    ...(env.MANGO_AUTH_TOKEN?.trim() ? { authToken: env.MANGO_AUTH_TOKEN.trim() } : {}),
   };
 }
 
@@ -157,6 +164,15 @@ class CookieJar {
 export class MangoClient {
   private readonly jar = new CookieJar();
   private authenticated = false;
+  /**
+   * Everything the sign-in answered.
+   *
+   * The service application wants an `x-mango-auth` header as well as the
+   * cookies, and the token has to come from somewhere. Keeping the whole
+   * envelope rather than only `success` means it can be looked for here
+   * instead of being asked for by hand.
+   */
+  private loginPayload: Record<string, unknown> | null = null;
 
   private readonly credentials: MangoCredentials;
   private readonly timeoutMs: number;
@@ -177,7 +193,9 @@ export class MangoClient {
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const token = this.credentials.authToken ?? (this.loginPayload ? this.authToken : null);
     return {
+      ...(token ? { 'x-mango-auth': token } : {}),
       // Mango's controllers answer JSON to an XHR and HTML to anything else.
       'x-requested-with': 'XMLHttpRequest',
       accept: 'application/json, text/plain, */*',
@@ -328,6 +346,8 @@ export class MangoClient {
       }
     }
 
+    if (body && typeof body === 'object') this.loginPayload = body as Record<string, unknown>;
+
     if (body?.success === false) {
       const detail = [body.error, body.error_type].filter(Boolean).join(' — ');
       throw new MangoError(
@@ -456,6 +476,30 @@ export class MangoClient {
     }
   }
 
+  /**
+   * The token the service application asks for, if the sign-in gave one.
+   *
+   * Looked for by name rather than assumed: Mango has several tokens in play
+   * and picking the wrong one produces a 401 that reads like a lapsed session.
+   * An explicit `authToken` in the credentials wins, so a token obtained some
+   * other way can be supplied without changing this.
+   */
+  get authToken(): string | null {
+    if (this.credentials.authToken) return this.credentials.authToken;
+    if (!this.loginPayload) return null;
+
+    for (const key of ['mango_auth', 'auth_token', 'token', 'access_token', 'x_mango_auth']) {
+      const value = this.loginPayload[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  }
+
+  /** What the sign-in answered, for a survey that needs to look at it. */
+  get loginAnswer(): Record<string, unknown> | null {
+    return this.loginPayload;
+  }
+
   /** Calls an endpoint and unwraps Mango's `{success, error, data}` envelope. */
   async get<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
     if (!this.authenticated) {
@@ -508,7 +552,11 @@ export class MangoClient {
     path: string,
     options: { method?: 'GET' | 'POST'; body?: unknown } = {},
   ): Promise<{ status: number; contentType: string; text: string; url: string }> {
-    const url = this.url(path);
+    // Mango is three applications on one host: the estate module, the Vue
+    // front end, and the service the front end calls. One sign-in covers all
+    // of them because the cookies are set for the host, so an absolute URL is
+    // taken as given rather than forced under this client's own base.
+    const url = /^https?:\/\//i.test(path) ? path : this.url(path);
     const method = options.method ?? 'GET';
 
     // Mango calls most of its own endpoints with a JSON post, and answers 404

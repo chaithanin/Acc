@@ -41,6 +41,28 @@ const flag = (name, fallback = null) => {
 
 const HOST = 'https://chaithanin.mangoanywhere.com';
 const base = (process.env.MANGO_ANYWHERE_URL ?? `${HOST}/production.anywhere`).replace(/\/+$/, '');
+
+/**
+ * Where the answers are.
+ *
+ * Mango is three applications on one host, and this took a while to see. The
+ * estate module serves its own data; `production.anywhere` is a Vue front end
+ * and serves pages only; and `production.service` is what that front end
+ * actually calls. Asking the front end for endpoints returns 404 for every
+ * name ever tried, which is exactly what happened — correctly, and for a
+ * reason no amount of better guessing would have reached.
+ */
+const service = (process.env.MANGO_SERVICE_URL ?? `${HOST}/production.service`).replace(/\/+$/, '');
+
+/**
+ * The modules, as the front end names them.
+ *
+ * Taken from the screens the survey already found — `page/transaction/fin/...`
+ * is asked for as `module_=FIN` — plus the ones an accounting system of this
+ * shape always has. One call each, rather than a hundred and fifty guesses.
+ */
+const MODULES = (flag('modules') ?? 'FIN,AP,AR,GL,FA,IC,PO,RT,MA,OS,BG,CQ,PR,ST,PJ')
+  .split(',').map((m) => m.trim().toUpperCase()).filter(Boolean);
 const entry = flag('entry', 'page/');
 const limit = Number(flag('limit', 150));
 const savePath = flag('save');
@@ -257,6 +279,87 @@ const readScripts = async (max) => {
   return read;
 };
 
+/** Column names and counts. Never a value: this output gets pasted around. */
+const shapeOf = (value, depth = 0) => {
+  if (value === null || value === undefined) return 'nothing';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return 'empty list';
+    const first = value[0];
+    if (first && typeof first === 'object') {
+      const keys = Object.keys(first);
+      return `${value.length} rows · ${keys.length} columns: ${keys.slice(0, 14).join(', ')}`
+        + (keys.length > 14 ? ', …' : '');
+    }
+    return `${value.length} values`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (depth > 0) return `object with ${entries.length} keys`;
+    return `${entries.length} keys:`
+      + entries.map(([k, v]) => `\n       ${k}: ${shapeOf(v, depth + 1)}`).join('');
+  }
+  return typeof value;
+};
+
+// ------------------------------------------------------- the service's menu
+
+/**
+ * Ask the service what each module contains.
+ *
+ * `Anywhere/Center/MenuDisplay` is what the front end calls to draw its own
+ * navigation, so it is the system describing itself — one authoritative answer
+ * per module, in place of guessing at names and counting 404s.
+ */
+console.log(bold(`\n── Asking ${service} for each module's menu`));
+
+const menus = [];
+for (const module of MODULES) {
+  const url = `${service}/Anywhere/Center/MenuDisplay?module_=${encodeURIComponent(module)}&lang_code=EN`;
+
+  let answer;
+  try {
+    answer = await client.raw(url);
+  } catch (err) {
+    console.log(`   ${module.padEnd(5)} could not be read: ${err.message}`);
+    continue;
+  }
+
+  if (!answer.contentType.includes('json')) {
+    console.log(`   ${module.padEnd(5)} ${answer.status} ${answer.contentType.split(';')[0] || '—'}`);
+    continue;
+  }
+
+  let body;
+  try {
+    body = JSON.parse(answer.text);
+  } catch {
+    console.log(`   ${module.padEnd(5)} answered JSON that will not parse`);
+    continue;
+  }
+
+  const payload = body && typeof body === 'object' && 'success' in body ? body.data : body;
+  if (body?.success === false) {
+    console.log(`   ${module.padEnd(5)} refused: ${body.error ?? 'no reason given'}`);
+    continue;
+  }
+
+  menus.push({ module, payload });
+  console.log(`   ${module.padEnd(5)} ${shapeOf(payload)}`);
+
+  // Menu entries name the screens, and screens are named after their data.
+  scan(JSON.stringify(payload), `MenuDisplay:${module}`);
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+if (menus.length === 0) {
+  console.log('\n   Nothing answered. If these are 401s the service wants the x-mango-auth');
+  console.log('   header as well as the cookies — set MANGO_AUTH_TOKEN and run again.');
+  console.log(`   The sign-in answered: ${JSON.stringify(client.loginAnswer ?? {}).slice(0, 300)}`);
+} else if (savePath) {
+  fs.writeFileSync(savePath, JSON.stringify(menus, null, 1), 'utf8');
+  console.log(`\n   menus written to ${savePath}`);
+}
+
 console.log(bold('\n── Reading the pages, and the scripts they load'));
 
 for (const page of [entry, '', 'page/', 'Home/Index']) {
@@ -302,7 +405,7 @@ for (const known of ['api/public/AuthStatus', 'rex_rpt/MenuReportReadList']) not
  * They are worth more than that, though — read together they are a map of
  * what the module does, which is the thing actually worth knowing first.
  */
-const isRoute = (path) => /^page\//i.test(path);
+const isRoute = (path) => /^(page|transaction|report|master|setting|inquiry)\//i.test(path);
 const looksLikeData = (path) => /(_data\/|readlist|_list\b|\/read|^api\/|_rpt\/|x\/)/i.test(path);
 
 const routes = [...discovered].filter(([path]) => isRoute(path));
@@ -337,9 +440,11 @@ if (routes.length > 0) {
 
   const tree = new Map();
   for (const [path] of routes) {
-    const parts = path.split('/');
-    const kind = parts[1] ?? '—';
-    const module = parts.length > 3 ? parts[2] : '—';
+    // Both spellings appear: the front end's own links carry a `page/` prefix
+    // and the menu the service returns does not.
+    const parts = path.replace(/^page\//i, '').split('/');
+    const kind = parts[0] ?? '—';
+    const module = parts.length > 2 ? parts[1] : '—';
     const key = `${kind}/${module}`;
     tree.set(key, (tree.get(key) ?? 0) + 1);
   }
@@ -367,28 +472,6 @@ if (safe.length === 0) {
 }
 
 // ------------------------------------------------------------------- probe
-
-/** Column names and counts. Never a value: this output gets pasted around. */
-const shapeOf = (value, depth = 0) => {
-  if (value === null || value === undefined) return 'nothing';
-  if (Array.isArray(value)) {
-    if (value.length === 0) return 'empty list';
-    const first = value[0];
-    if (first && typeof first === 'object') {
-      const keys = Object.keys(first);
-      return `${value.length} rows · ${keys.length} columns: ${keys.slice(0, 14).join(', ')}`
-        + (keys.length > 14 ? ', …' : '');
-    }
-    return `${value.length} values`;
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (depth > 0) return `object with ${entries.length} keys`;
-    return `${entries.length} keys:`
-      + entries.map(([k, v]) => `\n       ${k}: ${shapeOf(v, depth + 1)}`).join('');
-  }
-  return typeof value;
-};
 
 console.log(bold(`\n── Asking the callable ones what they hold (${Math.min(safe.length, limit)} of ${safe.length})`));
 
@@ -535,6 +618,13 @@ if (useful.length === 0 && discovered.size < 10) {
 if (savePath) {
   fs.writeFileSync(savePath, JSON.stringify(findings, null, 1), 'utf8');
   console.log(`\n   written to ${savePath}`);
+}
+
+if (menus.length > 0) {
+  const total = menus.reduce((sum, m) => sum + (Array.isArray(m.payload) ? m.payload.length : 0), 0);
+  console.log(bold(`\n── ${menus.length} modules described themselves, ${total} menu entries in all`));
+  console.log('   That is the system saying what it holds, rather than this guessing at it.');
+  console.log('   Run again with --save menus.json to keep the whole answer.');
 }
 
 console.log('\n   Paste the section above back and the mapping can be written against it.\n');

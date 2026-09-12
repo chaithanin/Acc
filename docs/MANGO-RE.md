@@ -246,6 +246,28 @@ worded the way it is — the login page is public, so a refusal *there*, before 
 credentials are sent, is something between the machine and Mango saying no, not a
 rejected sign-in and not a moved endpoint.
 
+## Three applications, one sign-in
+
+Mango is not one application but three, on one host, and knowing which is
+which saves a long detour:
+
+| Path | What it is |
+|---|---|
+| `production.re` | the estate-sales module — serves both its screens and its own data, and is what the pull reads |
+| `production.anywhere` | a Vue front end for the accounting system. **Screens only.** Every data path asked of it answers 404, correctly |
+| `production.service` | the API that front end calls — `Anywhere/{Area}/{Action}` |
+
+One sign-in covers all three, because the session cookies are set for the host
+rather than for a path. The service application wants an `x-mango-auth` header
+as well as the cookies; the sign-in hands that token over, so it is picked up
+automatically — and `MANGO_AUTH_TOKEN` supplies one by hand if a future build
+stops doing that.
+
+`production.service/Anywhere/Center/MenuDisplay?module_=FIN&lang_code=EN` is
+what the front end calls to draw its own navigation, which makes it the system
+describing itself: one authoritative answer per module instead of guessing at
+endpoint names. `npm run mango:probe` asks it for every module in turn.
+
 ## The other module
 
 `production.re` is the estate-sales module, and it is the one this pull reads.
