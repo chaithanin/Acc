@@ -337,6 +337,11 @@ const shapeOf = (value, depth = 0) => {
     }
     return `${value.length} values`;
   }
+  // A count is the finding, not its type. "total: number" hides whether the
+  // answer was empty because there is nothing or because it was asked wrongly.
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return String(value);
+
   if (value && typeof value === 'object') {
     const entries = Object.entries(value);
     if (depth > 0) return `object with ${entries.length} keys`;
@@ -397,6 +402,11 @@ console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
  * `{company}` and `{today}` are filled in per run.
  */
 const KNOWN = [
+  // First, because it frames everything after it: these figures are scoped to
+  // the company signed in to, and an empty answer from the wrong company looks
+  // exactly like a company with nothing in it.
+  ['api/public/LoginCompaniesByUserID', { userid: '{user}' }],
+
   // What the company is owed and owes, which is the heart of it.
   ['anywhereAPI/Dashboard/balanceArReadList', { startDate: '{today}', field: 'mainname', text: '' }],
   ['anywhereAPI/Dashboard/balanceApReadList', { startDate: '{today}', field: 'mainname', text: '' }],
@@ -411,9 +421,6 @@ const KNOWN = [
   ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'N', company_code: '{company}', chq_date: '{today}' }],
   ['anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'Y', company_code: '{company}', chq_date: '{today}' }],
 
-  // Which companies this account may actually open — the answer to how
-  // complete any pull can be.
-  ['api/public/LoginCompaniesByUserID', { userid: '{user}' }],
   ['anywhere/center/Maincomp', { maincode: '{company}' }],
 
   // The navigation, and what the account is allowed to see of it.
@@ -426,6 +433,9 @@ const KNOWN = [
 console.log(bold(`\n── Asking ${service} for what the application itself asks for`));
 
 const findings = [];
+let companiesOpen = [];
+let dashboardAsked = 0;
+let dashboardEmpty = 0;
 
 const today = new Date().toISOString().slice(0, 10);
 const fill = (value) => String(value)
@@ -473,7 +483,45 @@ for (const [path, params] of KNOWN) {
   console.log(`\n   ${bold(label)}`);
   console.log(`     ${shapeOf(payload)}`);
 
+  if (path.endsWith('LoginCompaniesByUserID')) {
+    const list = Array.isArray(payload) ? payload : payload?.data;
+    if (Array.isArray(list)) {
+      companiesOpen = list
+        .map((row) => ({
+          code: String(row.maincode ?? row.code ?? '').trim().toUpperCase(),
+          name: String(row.compname ?? row.name ?? '').trim(),
+        }))
+        .filter((row) => row.code);
+    }
+  }
+
+  // An answer that parsed and held nothing is worth counting: several of them
+  // together say the question was scoped wrongly, not that the books are bare.
+  const rows = Array.isArray(payload) ? payload
+    : Array.isArray(payload?.data) ? payload.data : null;
+  if (rows !== null && path.startsWith('anywhereAPI/')) {
+    dashboardAsked += 1;
+    if (rows.length === 0) dashboardEmpty += 1;
+  }
+
   await new Promise((r) => setTimeout(r, 250));
+}
+
+if (dashboardAsked > 0 && dashboardEmpty === dashboardAsked) {
+  console.log(bold(`\n   All ${dashboardAsked} dashboard endpoints answered, and every one was empty.`));
+  console.log('   They answered, so this is not about rights or the address. These figures are');
+  console.log(`   scoped to the company signed in to, which here is ${credentials.maincode}.`);
+
+  const others = companiesOpen.filter((c) => c.code !== credentials.maincode);
+  if (others.length > 0) {
+    console.log('\n   This account can also open:');
+    for (const company of others) console.log(`     ${company.code.padEnd(6)} ${company.name}`);
+    console.log('\n   Try one of those:');
+    console.log(`     MANGO_MAINCODE=${others[0].code} npm run mango:probe`);
+  } else {
+    console.log('\n   Either this company genuinely has no open receivables or payables, or the');
+    console.log('   account cannot see them. Compare against the same screen in the browser.');
+  }
 }
 
 // ------------------------------------------------------- the service's menu
