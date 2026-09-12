@@ -252,7 +252,20 @@ npm run mango:pull -- --payment-kinds B,C,D,T --dry-run
 ```
 
 Even then about a fifth of contracts still take more than they were for, which
-is its own question and is reported as one.
+is its own question and is reported as one — and the overages are not small.
+Contracts appear that have taken three to six times their value, which no
+schedule of fees explains.
+
+The first thing to rule out is this system's own arithmetic. Receipts are
+matched to contracts **on the document number alone**, so a number carried by
+two live contracts credits both with the whole set of receipts: the same money
+counted twice, both contracts reading as overpaid, and the collected total
+inflated by the duplicates. Mango's document numbers look like a sequence and a
+year — `0013912017` — which is exactly the shape that repeats across projects.
+
+The run checks for it and says so plainly if it finds any. If it does, the
+matching needs a second key and the totals need no other explanation; if it
+does not, the overpayments are real and belong to the accounts department.
 
 Every kind is still reported, including the ones left out, because excluding a
 kind that *is* an instalment overstates what is still owed — the same error in

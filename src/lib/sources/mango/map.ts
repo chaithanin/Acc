@@ -71,6 +71,8 @@ export interface MangoMapResult {
     receiptsWithoutContract: number;
     /** Contracts whose receipts exceed their contract value. */
     overpaid: number;
+    /** Document numbers carried by more than one live contract. */
+    sharedDocnos: number;
     receipts: number;
     orphanReceipts: number;
     units: number;
@@ -190,6 +192,16 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   let contracts = 0;
   let superseded = 0;
   const overpaid: { label: string; contractual: number; received: number; over: number }[] = [];
+  /**
+   * How many live contracts carry each document number.
+   *
+   * Receipts are attached by document number and nothing else. If two
+   * contracts share one, both are credited with the whole set of receipts —
+   * the same money counted twice, and a contract that appears to have taken
+   * several times what it was for. Mango's numbers look like a sequence and a
+   * year, which is exactly the shape that repeats across projects.
+   */
+  const docnoCount = new Map<string, number>();
   const seenDocs = new Set<string>();
   /**
    * Why a contract is not in the receivable list, where it is in the pull.
@@ -236,7 +248,10 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       return;
     }
 
-    if (docno) seenDocs.add(docno);
+    if (docno) {
+      seenDocs.add(docno);
+      docnoCount.set(docno, (docnoCount.get(docno) ?? 0) + 1);
+    }
     contracts += 1;
 
     if (received > contractual + 1) {
@@ -460,6 +475,33 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
   }
 
   /**
+   * Document numbers shared by more than one live contract.
+   *
+   * Checked before the overpayment finding because it explains it: a shared
+   * number multiplies receipts rather than splitting them, so every contract
+   * sharing one looks overpaid and the collected total is inflated by the
+   * duplicates. If this fires, the receipt matching needs another key — not
+   * the totals a different explanation.
+   */
+  const sharedDocnos = [...docnoCount].filter(([, count]) => count > 1);
+  if (sharedDocnos.length > 0) {
+    const affected = sharedDocnos.reduce((sum, [, count]) => sum + count, 0);
+    issues.push({
+      severity: 'error',
+      code: 'MANGO_DUPLICATE_DOCNO',
+      message:
+        `${sharedDocnos.length} document number${sharedDocnos.length === 1 ? ' is' : 's are'} carried `
+        + `by more than one live contract, covering ${affected} contracts: `
+        + `${sharedDocnos.slice(0, 5).map(([docno, count]) => `${docno} ×${count}`).join(', ')}`
+        + `${sharedDocnos.length > 5 ? ', …' : ''}. Receipts are matched on the document number `
+        + 'alone, so each of those contracts is credited with the whole set — the same money counted '
+        + 'more than once. Collected is overstated by the duplicates, and those contracts will read '
+        + 'as overpaid.',
+      source: ref(0, 'transaction'),
+    });
+  }
+
+  /**
    * Contracts that took more than they were for.
    *
    * One of these is a question about a contract. Two hundred is a question
@@ -538,6 +580,7 @@ export function mapMangoBundle(bundle: MangoBundle, options: MangoMapOptions): M
       orphanReceipts,
       receiptsWithoutContract: orphansByCause.unknown,
       overpaid: overpaid.length,
+      sharedDocnos: sharedDocnos.length,
       units: units.size,
     },
   };

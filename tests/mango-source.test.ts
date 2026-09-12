@@ -830,3 +830,61 @@ describe('overpayment, one contract and many', () => {
     assert.match(overpaid!.message, /not a handful of mistyped contracts/);
   });
 });
+
+/**
+ * A document number carried by two contracts.
+ *
+ * Receipts are matched on the document number alone, so a number used twice
+ * credits both contracts with the whole set — the same money counted twice,
+ * every contract sharing it reading as overpaid, and the collected total
+ * inflated. A live pull showed contracts that had taken three to six times
+ * their value, which is the shape this makes.
+ */
+describe('a document number used more than once', () => {
+  const shared = () => {
+    const bundle = mangoFixture();
+    const first = (bundle.transaction ?? [])[0];
+    (bundle.transaction ?? []).push({
+      ...first,
+      pre_event: 'A-999',
+      customer_name: 'Another buyer entirely',
+    });
+    return bundle;
+  };
+
+  it('is reported, and named', () => {
+    const mapped = mapMangoBundle(shared(), { reportDate: '2026-09-11' });
+    const issue = mapped.issues.find((i) => i.code === 'MANGO_DUPLICATE_DOCNO');
+    assert.ok(issue, 'two contracts shared a document number and nothing said so');
+    assert.equal(issue!.severity, 'error');
+    assert.match(issue!.message, /BK-0001/);
+    assert.equal(mapped.counts.sharedDocnos, 1);
+  });
+
+  it('says that the money is counted more than once', () => {
+    const mapped = mapMangoBundle(shared(), { reportDate: '2026-09-11' });
+    const issue = mapped.issues.find((i) => i.code === 'MANGO_DUPLICATE_DOCNO');
+    assert.match(issue!.message, /counted more than once/);
+  });
+
+  /**
+   * The symptom this explains: both contracts are credited with the full set,
+   * so the collected total counts those receipts twice.
+   */
+  it('is what inflates the collected total', () => {
+    const plain = mapMangoBundle(mangoFixture(), { reportDate: '2026-09-11' });
+    const doubled = mapMangoBundle(shared(), { reportDate: '2026-09-11' });
+
+    const sum = (rows: { receiveAmount: number }[]) =>
+      rows.reduce((total, row) => total + row.receiveAmount, 0);
+
+    assert.ok(sum(doubled.data.receivable) > sum(plain.data.receivable),
+      'the duplicate did not inflate collections, so this test no longer covers the bug');
+  });
+
+  it('says nothing when every document number is its own', () => {
+    const mapped = mapMangoBundle(mangoFixture(), { reportDate: '2026-09-11' });
+    assert.equal(mapped.counts.sharedDocnos, 0);
+    assert.equal(mapped.issues.find((i) => i.code === 'MANGO_DUPLICATE_DOCNO'), undefined);
+  });
+});
