@@ -219,6 +219,33 @@ therefore prints the receipts broken down by the kind Mango files them under,
 and which of those count as payment of the contract price is an accounting
 decision for somebody to make — not a coercion for this code to guess at.
 
+The live pull returned six kinds, named by single letters:
+
+```
+   D   10,222   1,518,604,776
+   C    1,666     546,579,511
+   T      793     259,128,421
+   R    3,287     242,198,674
+   B    1,086     168,805,568
+   O        1             910
+```
+
+The run does the arithmetic that turns that list into a question worth asking:
+leave one kind out, and say what the outstanding balance becomes. Exactly one
+of them turns the negative balance positive, which makes the question "is that
+kind a payment of the contract price?" — answerable by the accounts department
+in a sentence — rather than "why is this figure negative?".
+
+Once answered, record it in the command:
+
+```bash
+npm run mango:pull -- --payment-kinds B,C,D --dry-run
+```
+
+Every kind is still reported, including the ones left out, because excluding a
+kind that *is* an instalment overstates what is still owed — the same error in
+the other direction, and just as tidy-looking.
+
 One column has already been misread this way. `revise` sits beside
 `asking_price` and reads like a revised price; it is the revision number.
 Preferring it priced 1,839 units at 24,035 baht in total — about thirteen baht
