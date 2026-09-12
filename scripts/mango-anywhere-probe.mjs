@@ -132,6 +132,36 @@ const READS = /(readlist|read_list|_read\b|_list\b|getlist|_get\b|search|lookup|
 
 const CANDIDATE = /["'`](?:\/)?((?:[a-z][a-z0-9_]*\/){1,3}[A-Za-z][A-Za-z0-9_]*)["'`]/g;
 
+/**
+ * Most strings with a slash in them are not endpoints.
+ *
+ * A bundle inlines its libraries, so the same pattern that finds
+ * `api/public/AuthStatus` also finds MIME types, xlsx internals, date formats
+ * and the import specifiers of every module in the tree — `text/css`,
+ * `xl/worksheets/sheet`, `m/d/yy`, `dayjs/plugin/utc`, `blots/block`. Asking a
+ * finance system for a hundred of those is noise on somebody's production
+ * server, and it buries the handful of real names.
+ *
+ * So a name is only asked for if it either was seen being called or looks like
+ * something this system serves. The rest are still collected and counted —
+ * they are evidence about the survey, not about Mango.
+ */
+const MIME = /^(text|image|audio|video|application|octet|font|model|multipart)\//i;
+const LIBRARY = /^(xl|blots|modules|core|formats|themes|ui|dayjs|moment|lodash|plugin|locale|es|dist|src|node_modules|@)\//i;
+const NOT_A_PATH = /[@:\s?#<>"'`\\]|^\d+\/|\/\d+$|^[a-z]{1,2}\/[a-z]{1,2}\//i;
+const MANGOISH = /(^api\/|^rex|^re\/|^anywhere\/|_data\/|_rpt|readlist|_list\b|modal|display|center\/)/i;
+
+/**
+ * A screen, not an endpoint: this module routes in the browser, so the server
+ * answers 404 for every one of these by design.
+ */
+const isRoute = (path) => /^(page|transaction|report|master|setting|inquiry)\//i.test(path);
+
+const plausible = (path) => {
+  if (MIME.test(path) || LIBRARY.test(path) || NOT_A_PATH.test(path)) return false;
+  return MANGOISH.test(path);
+};
+
 const discovered = new Map();
 const note = (path, where, confident = false) => {
   const clean = path.replace(/^\/+/, '').split('?')[0];
@@ -355,9 +385,6 @@ if (menus.length === 0) {
   console.log('\n   Nothing answered. If these are 401s the service wants the x-mango-auth');
   console.log('   header as well as the cookies — set MANGO_AUTH_TOKEN and run again.');
   console.log(`   The sign-in answered: ${JSON.stringify(client.loginAnswer ?? {}).slice(0, 300)}`);
-} else if (savePath) {
-  fs.writeFileSync(savePath, JSON.stringify(menus, null, 1), 'utf8');
-  console.log(`\n   menus written to ${savePath}`);
 }
 
 console.log(bold('\n── Reading the pages, and the scripts they load'));
@@ -380,7 +407,17 @@ console.log(`   read ${scriptsRead} script${scriptsRead === 1 ? '' : 's'}`
  */
 console.log(bold('\n── Following the pages those named'));
 
-const pagesToRead = [...discovered.keys()].filter((path) => !MUTATES.test(path)).slice(0, limit);
+/**
+ * Only things that might actually be pages.
+ *
+ * This pass exists to find more pages to read, so following a MIME type or a
+ * date format costs a request on somebody's production server and can only
+ * ever answer 404. Screens are excluded for the same reason they are not
+ * asked for later: the browser draws them.
+ */
+const pagesToRead = [...discovered.keys()]
+  .filter((path) => !MUTATES.test(path) && !isRoute(path) && plausible(path))
+  .slice(0, limit);
 let reached = 0;
 
 for (const candidate of pagesToRead) {
@@ -405,7 +442,6 @@ for (const known of ['api/public/AuthStatus', 'rex_rpt/MenuReportReadList']) not
  * They are worth more than that, though — read together they are a map of
  * what the module does, which is the thing actually worth knowing first.
  */
-const isRoute = (path) => /^(page|transaction|report|master|setting|inquiry)\//i.test(path);
 const looksLikeData = (path) => /(_data\/|readlist|_list\b|\/read|^api\/|_rpt\/|x\/)/i.test(path);
 
 const routes = [...discovered].filter(([path]) => isRoute(path));
@@ -416,12 +452,16 @@ const skipped = callable.filter(([path]) => MUTATES.test(path));
 
 // Ask the likeliest first: what Mango was seen calling, then what is shaped
 // like one of its data endpoints, then the rest.
-const rank = ([path, meta]) => (meta.confident ? 0 : 2) + (looksLikeData(path) ? 0 : 1);
-safe.sort((a, b) => rank(a) - rank(b));
+const askable = safe.filter(([path, meta]) => meta.confident || plausible(path));
+const noise = safe.length - askable.length;
 
-const named = safe.filter(([, meta]) => meta.confident).length;
-console.log(`\n   ${discovered.size} names · ${routes.length} screens · ${callable.length} callable `
-  + `(${named} named outright, ${skipped.length} skipped as writes)`);
+const rank = ([path, meta]) => (meta.confident ? 0 : 2) + (looksLikeData(path) ? 0 : 1);
+askable.sort((a, b) => rank(a) - rank(b));
+
+const named = askable.filter(([, meta]) => meta.confident).length;
+console.log(`\n   ${discovered.size} names · ${routes.length} screens · ${askable.length} worth asking `
+  + `(${named} seen being called, ${skipped.length} skipped as writes, ${noise} discarded as `
+  + `MIME types, library imports and the like)`);
 
 /**
  * The map of the module, drawn from its screen names.
@@ -432,7 +472,7 @@ console.log(`\n   ${discovered.size} names · ${routes.length} screens · ${call
  */
 if (routes.length > 0) {
   const MODULES = {
-    ap: 'accounts payable', ar: 'accounts receivable', gl: 'general ledger',
+    fin: 'cash and finance', ap: 'accounts payable', ar: 'accounts receivable', gl: 'general ledger',
     fa: 'fixed assets', ic: 'inventory', po: 'purchase orders', pr: 'payroll',
     rt: 'retention', ma: 'maintenance', os: 'outsourcing', bg: 'budget',
     cq: 'cheques', wh: 'withholding tax', pj: 'projects', st: 'stock',
@@ -473,23 +513,35 @@ if (safe.length === 0) {
 
 // ------------------------------------------------------------------- probe
 
-console.log(bold(`\n── Asking the callable ones what they hold (${Math.min(safe.length, limit)} of ${safe.length})`));
+console.log(bold(`\n── Asking what they hold (${Math.min(askable.length, limit)} of ${askable.length})`));
 
 const findings = [];
-for (const [path, meta] of safe.slice(0, limit)) {
+for (const [path, meta] of askable.slice(0, limit)) {
   const where = meta.where;
   let answer;
   let verb = 'GET';
+  let host = 'service';
   try {
-    answer = await client.raw(path);
+    // The service first: the front end holds no data paths, so a name found in
+    // its bundle belongs to the application it calls, not to the one it is.
+    answer = await client.raw(`${service}/${path}`);
+
+    if (answer.status === 404) {
+      const onUi = await client.raw(path);
+      if (onUi.status !== 404) {
+        answer = onUi;
+        host = 'ui';
+      }
+    }
 
     // A 404 from an endpoint that exists but only answers POST looks exactly
     // like no endpoint at all. Ask again, but only where the name says read.
     if ((answer.status === 404 || answer.status === 405) && READS.test(path) && !MUTATES.test(path)) {
-      const posted = await client.raw(path, { method: 'POST', body: {} });
+      const posted = await client.raw(`${service}/${path}`, { method: 'POST', body: {} });
       if (posted.contentType.includes('json') || posted.status < 400) {
         answer = posted;
         verb = 'POST';
+        host = 'service';
       } else {
         // Worth showing that both were tried: "GET 404" alone leaves a reader
         // wondering whether the verb was the problem.
@@ -530,9 +582,9 @@ for (const [path, meta] of safe.slice(0, limit)) {
 
   const payload = envelope ? body.data : body;
   const shape = shapeOf(payload);
-  findings.push({ path, where, status: answer.status, kind: 'json', shape });
+  findings.push({ path, where, status: answer.status, kind: 'json', shape, verb, host });
 
-  console.log(`\n   ${bold(path)}  (${verb})`);
+  console.log(`\n   ${bold(path)}  (${verb} on the ${host})`);
   console.log(`     ${shape}`);
 
   // Courtesy: this is somebody's production server and it logs every call.
@@ -616,8 +668,11 @@ if (useful.length === 0 && discovered.size < 10) {
 }
 
 if (savePath) {
-  fs.writeFileSync(savePath, JSON.stringify(findings, null, 1), 'utf8');
-  console.log(`\n   written to ${savePath}`);
+  // One file holding everything. Two writers sharing a name meant the menus —
+  // the only part worth keeping — were overwritten by the findings a moment
+  // after being fetched.
+  fs.writeFileSync(savePath, JSON.stringify({ menus, findings, asked: askable.map(([p]) => p) }, null, 1), 'utf8');
+  console.log(`\n   menus and findings written to ${savePath}`);
 }
 
 if (menus.length > 0) {
