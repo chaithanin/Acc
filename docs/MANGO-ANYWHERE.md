@@ -54,6 +54,22 @@ nothing about money and repeats forever; the print service's warm-up, which
 exists to have an effect; and `API/Public/UserInsertLogs`, which writes to
 somebody's audit trail.
 
+## When the sign-in does not take
+
+Mango leaves its own explanation on the screen — a wrong password, an expired
+one, a session already open somewhere else — so the run waits for the password
+box to go, and if it does not, reads the page and prints what it says. Waiting a
+minute and then reporting "no token went past" throws that explanation away and
+substitutes a guess, which is what an earlier version did.
+
+One explanation is worth knowing in advance. This Mango serves an
+`API/Public/KickUserOnline` endpoint, which is what a system with **one session
+per account** has. A sign-in from here can therefore turn somebody else's
+session off, and theirs can turn this one off — so a pull competing with a
+person using the same account will fail intermittently and for no visible
+reason. That is the strongest argument yet for the service account this has
+wanted all along, and it is not only about audit trails.
+
 ## When the token does not appear
 
 The run waits for the token rather than for a number of seconds, because how

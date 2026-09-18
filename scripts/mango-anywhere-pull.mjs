@@ -467,10 +467,13 @@ try {
   const signInNeeded = await page.locator('input[type=password]').count() > 0;
   if (signInNeeded) {
     console.log('   signing in');
-    await page.locator('input[type=password]').first().fill(pass);
 
+    // Username first, then password: filling the password field and then
+    // hunting for a text box has the focus in the wrong place if the page
+    // submits on Enter mid-way.
     const userField = page.locator('input[type=text]:visible, input[name*=user i]:visible').first();
     if (await userField.count() > 0) await userField.fill(user);
+    await page.locator('input[type=password]').first().fill(pass);
 
     // The company picker, where the page offers one.
     const picker = page.locator('select').first();
@@ -478,11 +481,40 @@ try {
       await picker.selectOption({ value: maincode }).catch(() => undefined);
     }
 
-    await Promise.all([
-      page.waitForLoadState('networkidle', { timeout: 90_000 }).catch(() => undefined),
-      page.keyboard.press('Enter'),
-    ]);
-    await page.waitForTimeout(3_000);
+    const submit = page.locator('button[type=submit], input[type=submit], button:has-text("Login"), button:has-text("Sign in"), button:has-text("เข้าสู่ระบบ")').first();
+    if (await submit.count() > 0) await submit.click({ timeout: 10_000 }).catch(() => undefined);
+    else await page.keyboard.press('Enter');
+
+    /**
+     * Wait for the password box to go, and read the page if it does not.
+     *
+     * A sign-in that does not take leaves Mango's own explanation on the
+     * screen — a wrong password, an expired one, a session already open
+     * elsewhere. Waiting a minute and then reporting "no token went past"
+     * throws that explanation away and substitutes a guess.
+     */
+    const signedIn = await page.locator('input[type=password]').first()
+      .waitFor({ state: 'detached', timeout: 25_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!signedIn) {
+      const said = (await page.locator('body').innerText().catch(() => ''))
+        .split('\n').map((l) => l.trim())
+        .filter((l) => l && l.length < 200)
+        .slice(0, 12)
+        .join(' · ');
+
+      console.error('\n   The sign-in did not take. Mango still shows a password box, and the page says:');
+      console.error(`     ${said || '(nothing this could read)'}`);
+      console.error('\n   Worth knowing: this Mango has an API/Public/KickUserOnline endpoint, which');
+      console.error('   is what a system with one session per account has. If somebody is signed in');
+      console.error('   as this account in a browser, that may be the whole of it — which is another');
+      console.error('   reason for the pull to have a service account of its own.');
+      await page.screenshot({ path: 'mango-anywhere-signin.png', fullPage: true }).catch(() => undefined);
+      console.error('\n   A screenshot: mango-anywhere-signin.png');
+      process.exit(1);
+    }
   }
 
   /**
