@@ -1,0 +1,117 @@
+# Reading the accounting figures out of Mango Anywhere
+
+```bash
+npm run anywhere:pull -- --dry-run
+```
+
+There is an API. The reason this needs a browser is narrower and stranger than
+"no API", and worth stating exactly, because it decides what any future
+approach has to do.
+
+## Why a browser
+
+Mango is three applications on one host. `production.anywhere` is a Vue front
+end and serves screens only. `production.service` is the API behind it, and the
+figures are there. Signing in from a script gets cookies the service accepts
+for `api/public/*` and refuses, with 403, for `Anywhere/Center/*` — including
+`Maincomp`, the call that points the session at a company. Without that call
+every figure answers `200`, `success: true`, and an empty list, which looks
+exactly like a company with no receivables.
+
+What those endpoints want is an `x-mango-auth` header, and the token is **bound
+to the session that minted it**. A token lifted out of somebody's browser is
+refused, because it belongs to their session and not to this one — tried, and
+that is what happens. What mints it is the front end's own JavaScript.
+
+So this runs the front end, once, to have it authenticate itself.
+
+## What it is not
+
+It is not screen scraping. Nothing here reads a rendered table, waits for a
+grid to paint, or clicks through a report to an Excel export. The browser does
+one job — sign in, and let the application's start-up mint a token — and the
+token is then taken off the application's own network traffic and used to call
+the same JSON endpoints the application calls.
+
+That distinction is the difference between a fragile integration and a durable
+one. The data arrives as JSON with its column names intact, so a redesigned
+screen changes nothing here; only a changed endpoint would.
+
+## What it reads
+
+Every endpoint was observed being called by the finance dashboard itself:
+
+| | |
+|---|---|
+| `balanceArReadList` · `balanceApReadList` | receivable and payable balances by counterparty |
+| `viewArRead` · `viewApRead` | the same, by month |
+| `BarchartArRead` · `BarchartAPRead` | the ageing buckets |
+| `yearDetailARRead` · `yearDetailAPRead` | year to date |
+| `view_bank_all_v2` | bank balances, asked twice — `bank_guarantee=Y` is guarantees, which are **not** cash |
+
+Three observed calls are deliberately not made: the chat poller, which says
+nothing about money and repeats forever; the print service's warm-up, which
+exists to have an effect; and `API/Public/UserInsertLogs`, which writes to
+somebody's audit trail.
+
+## Running it
+
+```
+MANGO_USER, MANGO_PASS     a service account, not a person's login
+MANGO_MAINCODE             the company to read — MG1..MG6, default MG1
+```
+
+Flags: `--company <code>` for the dashboard company, `--date`, `--dry-run`,
+`--save <file>` to keep the raw answers, `--headed` to watch it work.
+
+It needs a Chromium. Playwright looks for the exact build its own version
+shipped with, so a machine that already has one usually has the wrong one —
+that is not a missing browser, and the error Playwright raises for it sends
+people to reinstall what they already have. The pull looks for a Chromium in
+the usual places first, prints which it chose, and takes `CHROMIUM_PATH` if it
+guesses wrong. Where there is genuinely none:
+
+```bash
+npx playwright install --with-deps chromium
+```
+
+## Keeping it to itself
+
+This runs inside a company network against a finance system, so the browser is
+given nothing to do but the job. Requests to any host but Mango's are refused
+at the page level and what was refused is reported, so a page that turns out to
+need something external says so rather than failing quietly.
+
+One honest limit: Chromium's own process attempts a couple of Google
+connections at start-up — an update check and a connectivity probe — which
+neither the launch flags nor page-level interception reliably prevent. They
+carry nothing of Mango's, and on a network with restricted egress they simply
+fail. If that matters for an audit, the answer is the network policy rather
+than a browser flag.
+
+## Testing it without touching live data
+
+```bash
+node scripts/anywhere-stub.mjs
+MANGO_ANYWHERE_URL=http://127.0.0.1:4380/production.anywhere \
+MANGO_SERVICE_URL=http://127.0.0.1:4380/production.service \
+MANGO_USER=svc.dashboard MANGO_PASS=stub-password \
+  npm run anywhere:pull -- --dry-run
+```
+
+The stub is three applications on one origin like the real one, and it refuses
+every service call without the header — so a pull that fails to obtain the
+token fails the test rather than passing it.
+
+## What is not written yet
+
+The mapping into this system's records. The columns above are what it will be
+written against, and guessing at them before seeing the real ones is how the
+`revise` column came to be read as a price on the estate side. Run with
+`--save` and keep the file.
+
+And before any of it is scheduled: **ask Mango for the official API**, which
+this system already has a tokens page for. See
+[`MANGO-API-REQUEST.md`](MANGO-API-REQUEST.md). A browser holding a session open
+is a reasonable way to obtain figures nobody can otherwise reach; it is not a
+reasonable thing to depend on every morning at six.

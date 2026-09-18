@@ -29,12 +29,13 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (466) |
+| `npm test` | unit and integration tests (456, plus more when `samples/` is present) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
 | `npm run booking:pull -- --dry-run` | read the unit inventory from the Booking API |
 | `npm run mango:probe` | survey Mango's other module, read-only, and report its shape |
+| `npm run anywhere:pull -- --dry-run` | read the accounting figures out of Mango Anywhere |
 
 The database and uploaded originals live in `data/` and are git-ignored.
 Override the location with `GTG_DATA_DIR`.
@@ -235,7 +236,7 @@ Enforced server-side on every route; the navigation filter is convenience only.
 npm test
 ```
 
-466 tests covering text normalisation and alias resolution, header detection and
+456 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its
@@ -272,4 +273,5 @@ and has not been verified.
 * [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record
 * [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE
 * [`docs/BOOKING-API.md`](docs/BOOKING-API.md) — reading the unit inventory from the Booking API
+* [`docs/MANGO-ANYWHERE.md`](docs/MANGO-ANYWHERE.md) — reading the accounting figures through a browser, and why that is necessary
 * [`docs/MANGO-API-REQUEST.md`](docs/MANGO-API-REQUEST.md) — what to ask Mango for, and why
