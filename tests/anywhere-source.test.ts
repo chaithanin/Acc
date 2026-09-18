@@ -59,6 +59,10 @@ describe('what the group is owed', () => {
   it('says why total_amt is not treated as the history', () => {
     const issue = run().issues.find((i) => i.code === 'ANYWHERE_TOTAL_AMT_IS_NOT_THE_HISTORY');
     assert.ok(issue, 'a column was quietly set aside');
+    // "3 of 5 customers owe": the noun follows the population, the verb the
+    // count. Pluralising the noun from the count gave "1 of 27 customer owes".
+    assert.match(issue!.message, /^3 of 5 customers owe more/,
+      'the count and the population disagree about number');
     assert.match(issue!.message, /this period\u2019s billing/);
     assert.match(issue!.message, /no figure here claims to say what was collected/);
   });

@@ -169,10 +169,12 @@ export function mapAnywhereBundle(
       severity: 'info',
       code: 'ANYWHERE_TOTAL_AMT_IS_NOT_THE_HISTORY',
       message:
-        `${arInconsistent} of ${arBalances.length} customer${arInconsistent === 1 ? '' : 's'} owe`
-        + `${arInconsistent === 1 ? 's' : ''} more than total_amt shows against `
-        + `${arInconsistent === 1 ? 'them' : 'them'}, which is why total_amt is not treated as `
-        + 'everything ever invoiced. Alongside a '
+        // "1 of 27 customers owes": the noun follows the population, the verb
+        // follows the count. Pluralising the noun from the count produced
+        // "1 of 27 customer owes".
+        `${arInconsistent} of ${arBalances.length} customers owe`
+        + `${arInconsistent === 1 ? 's' : ''} more than total_amt shows against them, which is why `
+        + 'total_amt is not treated as everything ever invoiced. Alongside a '
         + 'total_inv of a handful of documents it reads as this period\u2019s billing. Only the '
         + 'balance is used, and no figure here claims to say what was collected.',
       source: ref('arBalances', 0),
