@@ -35,6 +35,16 @@ export interface AnywhereMapOptions {
   maincode: string;
   /** Acc project id, where the company maps to a single project. */
   projectId?: string | null;
+  /**
+   * Negate the bank balances.
+   *
+   * Mango returned every one of eleven accounts as a negative number, which is
+   * a sign convention rather than a company nine figures overdrawn — but which
+   * convention is a question for whoever knows the chart of accounts, so it is
+   * answered here rather than assumed. Left unset, the balances are taken as
+   * they arrive and a negative total is refused.
+   */
+  flipBankSign?: boolean;
 }
 
 export interface AnywhereMapResult {
@@ -90,7 +100,8 @@ export function mapAnywhereBundle(
   bundle: AnywhereBundle,
   options: AnywhereMapOptions,
 ): AnywhereMapResult {
-  const { maincode, projectId = null } = options;
+  const { maincode, projectId = null, flipBankSign = false } = options;
+  const bankSign = flipBankSign ? -1 : 1;
   // reportDate is part of the contract and belongs to the import wrapper rather
   // than to any record here; the records are a position, not a period.
   void options.reportDate;
@@ -158,8 +169,10 @@ export function mapAnywhereBundle(
       severity: 'info',
       code: 'ANYWHERE_TOTAL_AMT_IS_NOT_THE_HISTORY',
       message:
-        `${arInconsistent} of ${arBalances.length} customers owe more than total_amt shows against `
-        + 'them, which is why total_amt is not treated as everything ever invoiced. Alongside a '
+        `${arInconsistent} of ${arBalances.length} customer${arInconsistent === 1 ? '' : 's'} owe`
+        + `${arInconsistent === 1 ? 's' : ''} more than total_amt shows against `
+        + `${arInconsistent === 1 ? 'them' : 'them'}, which is why total_amt is not treated as `
+        + 'everything ever invoiced. Alongside a '
         + 'total_inv of a handful of documents it reads as this period\u2019s billing. Only the '
         + 'balance is used, and no figure here claims to say what was collected.',
       source: ref('arBalances', 0),
@@ -219,7 +232,7 @@ export function mapAnywhereBundle(
   const bankByType = new Map<string, { count: number; amount: number }>();
 
   bankAccounts.forEach((row, index) => {
-    const balance = money(row.balamt);
+    const balance = round2(money(row.balamt) * bankSign);
     cash = round2(cash + balance);
 
     const kind = text(row.account_type) ?? '(no type)';
@@ -243,18 +256,36 @@ export function mapAnywhereBundle(
   if (cash < 0) {
     const types = [...bankByType.entries()]
       .sort((a, b) => a[1].amount - b[1].amount)
-      .map(([kind, held]) => `${kind} ${held.count} account${held.count === 1 ? '' : 's'} `
+      .map(([kind, held]) => `type ${kind} — ${held.count} account${held.count === 1 ? '' : 's'}, `
         + `${Math.round(held.amount).toLocaleString('en-US')}`)
       .join('; ');
 
+    /**
+     * Every account negative is a convention. Some negative is a mixture.
+     *
+     * A company does not hold eleven bank accounts that are all overdrawn. If
+     * the sign is uniform the reading is that Mango keeps these the accounting
+     * way round; if it is mixed, the list contains liabilities among the
+     * assets. Those want different answers, and calling both "not a cash
+     * position" leaves the reader to work out which they have.
+     */
+    const balances = bankAccounts.map((row) => money(row.balamt)).filter((value) => value !== 0);
+    const allNegative = balances.length > 0 && balances.every((value) => value < 0);
+
     issues.push({
       severity: 'error',
-      code: 'ANYWHERE_BANK_TOTAL_NEGATIVE',
-      message:
-        `The bank accounts sum to ${Math.round(cash).toLocaleString('en-US')}, which is not a cash `
-        + 'position. They come from one endpoint but are evidently not all cash — an overdraft or a '
-        + `loan account is a balance the other way round. By account_type: ${types}. Say which of `
-        + 'those are cash and the figure becomes usable; until then it is not.',
+      code: allNegative ? 'ANYWHERE_BANK_SIGN_INVERTED' : 'ANYWHERE_BANK_TOTAL_NEGATIVE',
+      message: allNegative
+        ? `All ${balances.length} bank accounts came back negative, totalling `
+          + `${Math.round(cash).toLocaleString('en-US')}. A group does not hold `
+          + `${balances.length} overdrawn accounts, so this is a sign convention rather than a `
+          + `position: read the other way round it is ${Math.round(-cash).toLocaleString('en-US')}. `
+          + `By account_type: ${types}. Confirm that against one account in Mango\u2019s own screen `
+          + 'and the figure becomes usable — a cash position with the sign wrong is worse than none.'
+        : `The bank accounts sum to ${Math.round(cash).toLocaleString('en-US')}, which is not a cash `
+          + 'position. Some are positive and some negative, so the list holds liabilities among the '
+          + `assets — an overdraft or a loan account. By account_type: ${types}. Say which of those `
+          + 'are cash and the figure becomes usable; until then it is not.',
       source: ref('bankAccounts', 0),
     });
   }

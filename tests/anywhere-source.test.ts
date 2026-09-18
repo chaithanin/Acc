@@ -264,3 +264,59 @@ describe('an empty answer', () => {
     assert.equal(result.counts.customers, 0);
   });
 });
+
+/**
+ * Every account negative is a convention. Some negative is a mixture.
+ *
+ * The live answer returned all eleven accounts negative, totalling minus 112
+ * million across two account types that were both negative — so it is not
+ * loans mixed in with cash, which was my first reading. A group does not hold
+ * eleven overdrawn accounts. Those two cases want different answers and
+ * reporting both as "not a cash position" leaves the reader to work out which
+ * they have.
+ */
+describe('which way round the bank balances are', () => {
+  const allNegative = () => {
+    const bundle = anywhereFixture();
+    bundle.bankAccounts = (bundle.bankAccounts ?? []).map((account) => ({
+      ...account,
+      balamt: -Math.abs(Number(String(account.balamt).replace(/[,\s]/g, ''))),
+    }));
+    return bundle;
+  };
+
+  it('calls a uniform sign a convention, and says what it would read the other way', () => {
+    const mapped = mapAnywhereBundle(allNegative(), { reportDate: '2026-09-18', maincode: 'MG2' });
+    const issue = mapped.issues.find((i) => i.code === 'ANYWHERE_BANK_SIGN_INVERTED');
+    assert.ok(issue, 'all-negative balances were not recognised as a convention');
+    assert.match(issue!.message, /sign convention rather than a position/);
+    assert.match(issue!.message, /233,950,000/, 'it did not say what the figure would be');
+    assert.equal(mapped.issues.find((i) => i.code === 'ANYWHERE_BANK_TOTAL_NEGATIVE'), undefined);
+  });
+
+  it('calls a mixed sign a mixture, which is a different problem', () => {
+    // The fixture as it stands: two positive accounts and one loan.
+    const mapped = mapAnywhereBundle(anywhereFixture(), { reportDate: '2026-09-18', maincode: 'MG2' });
+    const issue = mapped.issues.find((i) => i.code === 'ANYWHERE_BANK_TOTAL_NEGATIVE');
+    assert.ok(issue);
+    assert.match(issue!.message, /liabilities among the assets/);
+  });
+
+  /**
+   * The answer is recorded rather than inferred. Reading a cash position with
+   * the sign wrong is worse than reporting none.
+   */
+  it('takes the balances the other way round when told to, and says nothing more', () => {
+    const mapped = mapAnywhereBundle(allNegative(), {
+      reportDate: '2026-09-18', maincode: 'MG2', flipBankSign: true,
+    });
+    assert.equal(mapped.totals.cash, 233_950_000);
+    assert.equal(mapped.issues.find((i) => i.code === 'ANYWHERE_BANK_SIGN_INVERTED'), undefined);
+    assert.ok(mapped.data.bank.every((account) => account.currentAmount > 0));
+  });
+
+  it('is not applied by default', () => {
+    const mapped = mapAnywhereBundle(allNegative(), { reportDate: '2026-09-18', maincode: 'MG2' });
+    assert.ok(mapped.totals.cash < 0, 'the sign was flipped without being asked');
+  });
+});

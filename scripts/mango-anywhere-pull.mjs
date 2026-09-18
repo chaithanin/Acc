@@ -31,6 +31,9 @@
  * Flags:
  *   --company <code>    which company in the dashboard the data belongs to
  *   --force             import even when this pull is identical to a previous one
+ *   --flip-bank-sign    take the bank balances as the negative of what Mango
+ *                       sends, once that has been confirmed against one
+ *                       account in Mango's own screen
  *   --date YYYY-MM-DD   the date to file it under (default: today)
  *   --all-companies     walk every company this account can open
  *   --dry-run           fetch, map and report; write nothing
@@ -60,6 +63,9 @@ const companyCode = flag('company');
 const reportDate = flag('date') ?? new Date().toISOString().slice(0, 10);
 const dryRun = has('dry-run');
 const savePath = flag('save');
+// Mango returns the bank balances the accounting way round. Confirmed against
+// one account in its own screen, this records the answer in the command.
+const flipBankSign = has('flip-bank-sign');
 const maincode = (process.env.MANGO_MAINCODE ?? 'MG1').toUpperCase();
 
 if (!dryRun && !companyCode) {
@@ -572,17 +578,20 @@ try {
   // ----------------------------------------------------------------- map
 
   const { mapAnywhereBundle } = await import('../src/lib/sources/anywhere/map.ts');
-  const mapped = mapAnywhereBundle(bundle, { reportDate, maincode });
+  const mapped = mapAnywhereBundle(bundle, { reportDate, maincode, flipBankSign });
 
   console.log(bold('\n── ' + maincode));
   const line = (label, value) => console.log(`   ${label.padEnd(26)} ${money(value).padStart(18)}`);
 
-  line('invoiced to customers', mapped.totals.receivable);
-  line('still owed by them', mapped.totals.receivableOutstanding);
-  line('invoiced by suppliers', mapped.totals.payable);
-  line('still owed to them', mapped.totals.payableOutstanding);
+  // Only the balances. total_amt is this period's billing rather than a
+  // history, so a line called "invoiced" would be claiming more than it knows.
+  line('owed by customers', mapped.totals.receivableOutstanding);
+  line('owed to suppliers', mapped.totals.payableOutstanding);
+  line('billed this period, in', mapped.totals.receivable);
+  line('billed this period, out', mapped.totals.payable);
   line('in the bank', mapped.totals.cash);
   if (mapped.totals.guarantees > 0) line('held as guarantees', mapped.totals.guarantees);
+  if (flipBankSign) console.log('   (bank balances read as the negative of what Mango sends)');
 
   console.log(`\n   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
     + `${mapped.counts.bankAccounts} bank accounts`);

@@ -187,13 +187,24 @@ is how one of them silently becomes empty.
 changed, which makes adding it to the cash position the easy mistake. It is
 counted, kept out, and reported.
 
-**Nor is every "bank" account cash.** The eleven accounts summed to **minus 112
-million**, which is no cash position at all: one endpoint returns current
-accounts alongside what are evidently loans or overdrafts, and `account_type` is
-the only thing distinguishing them. The run refuses to publish a negative cash
-figure, groups the balances by type with their totals, and asks which types are
-cash. That question is for whoever knows the chart of accounts; guessing it is
-how a company appears to be nine figures overdrawn, or nine figures richer.
+**The bank balances come back the accounting way round.** The eleven accounts
+summed to **minus 112 million**, which is no cash position — and the first
+reading, that loans were mixed in with cash, turned out to be wrong: both
+`account_type` groups were negative, `2` at −97,180,309 and `1` at −14,657,064.
+A group does not hold eleven overdrawn accounts. A uniform sign is a convention;
+a mixed one would be liabilities among the assets. Those want different answers,
+so the run distinguishes them and says which it found, along with what the
+figure reads as the other way round.
+
+It still will not publish it. Confirm the sign against one account in Mango's
+own screen, then record the answer in the command:
+
+```bash
+npm run anywhere:pull -- --company HAMONIA --flip-bank-sign
+```
+
+A cash position with the sign wrong is worse than none, which is why this is an
+input rather than an inference.
 
 **`total_inv` is not used in any figure**, and the run says so on every pull
 along with whether it looks like a count or an amount. That is the lesson from
