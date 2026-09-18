@@ -87,6 +87,19 @@ sudo dnf install -y chromium                              # Fedora, RHEL
 `CHROMIUM_PATH=/path/to/chrome` overrides all of it. `npx playwright install
 --with-deps chromium` is still the tidiest answer where it works.
 
+Two more things go wrong at this step, both of which announce themselves badly.
+
+Chromium's **sandbox** needs kernel features a hosted shell or a container
+often does not grant, and without them it fails as "the browser has been
+closed", which says nothing about sandboxes. Dropping the sandbox is a real
+reduction in isolation, so it is not the default: the pull tries with it, and
+falls back without it while saying so.
+
+On Debian and Ubuntu **`/usr/bin/chromium-browser` is sometimes a wrapper
+around a Snap**, which cannot run in a hosted shell and fails the same way.
+`chromium` is preferred over it for that reason; where only the wrapper is
+installed, `sudo apt-get install -y chromium` gets the real one.
+
 ## Keeping it to itself
 
 This runs inside a company network against a finance system, so the browser is

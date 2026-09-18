@@ -180,6 +180,9 @@ const findChromium = () => {
    * "install a browser" into "you already have one".
    */
   const systemNames = [
+    // `chromium` before `chromium-browser`: on Debian and Ubuntu the latter is
+    // sometimes a wrapper around a Snap, which cannot run in a hosted shell and
+    // fails in a way that looks like the browser crashing.
     'chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable',
     'microsoft-edge', 'microsoft-edge-stable',
   ];
@@ -232,23 +235,50 @@ const launchArgs = [
   '--disable-search-engine-choice-screen',
   '--disable-features=OptimizationHints,MediaRouter,DialMediaRouteProvider,'
     + 'NetworkTimeServiceQuerying,InterestFeedContentSuggestions,Translate',
-  ...(typeof process.getuid === 'function' && process.getuid() === 0
-    ? ['--no-sandbox', '--disable-dev-shm-usage']
-    : []),
+  '--disable-dev-shm-usage',
 ];
+
+/**
+ * Start it, and try again without the sandbox if it will not start.
+ *
+ * Chromium's sandbox needs kernel features a hosted shell or a container often
+ * does not grant, and it fails as "the browser has been closed" — which says
+ * nothing about sandboxes to whoever reads it. Dropping the sandbox is a real
+ * reduction in isolation, so it is not the default: the safe attempt goes
+ * first, and the fallback announces itself.
+ */
+const launch = (args) => chromium.launch({ headless: !has('headed'), executablePath, args });
 
 let browser;
 try {
-  browser = await chromium.launch({ headless: !has('headed'), executablePath, args: launchArgs });
-} catch (err) {
-  console.error(`\n   Chromium would not start: ${err.message.split('\n')[0]}`);
-  console.error('\n   No browser was found, and Playwright\u2019s own download is the first thing');
-  console.error('   to fail on a machine with a small disk or restricted egress. One from the');
-  console.error('   distribution\u2019s packages does this job just as well:');
-  console.error('     sudo apt-get update && sudo apt-get install -y chromium   # Debian, Ubuntu');
-  console.error('     sudo dnf install -y chromium                              # Fedora, RHEL');
-  console.error('   or point at one already installed:  CHROMIUM_PATH=/path/to/chrome');
-  process.exit(2);
+  browser = await launch(launchArgs);
+} catch (firstError) {
+  try {
+    browser = await launch([...launchArgs, '--no-sandbox']);
+    console.log('   started without the sandbox — this machine will not grant it');
+  } catch (err) {
+    // Two different problems wearing the same message. Saying "no browser was
+    // found" when one was found and would not start sends the reader to
+    // install a second copy of what they already have.
+    if (executablePath) {
+      console.error(`\n   ${executablePath} would not start.`);
+      console.error(`   ${err.message.split('\n').slice(0, 4).join('\n   ')}`);
+      console.error('\n   It was found, so this is not a missing browser. On Debian and Ubuntu');
+      console.error('   /usr/bin/chromium-browser is sometimes a wrapper around a Snap that cannot');
+      console.error('   run here; the real package works:');
+      console.error('     sudo apt-get install -y chromium');
+      console.error('     CHROMIUM_PATH=/usr/bin/chromium npm run anywhere:pull -- --dry-run');
+    } else {
+      console.error(`\n   No browser was found: ${err.message.split('\n')[0]}`);
+      console.error('\n   Playwright\u2019s own download is the first thing to fail on a machine with');
+      console.error('   a small disk or restricted egress. One from the distribution\u2019s packages');
+      console.error('   does this job just as well:');
+      console.error('     sudo apt-get update && sudo apt-get install -y chromium   # Debian, Ubuntu');
+      console.error('     sudo dnf install -y chromium                              # Fedora, RHEL');
+      console.error('   or point at one already installed:  CHROMIUM_PATH=/path/to/chrome');
+    }
+    process.exit(2);
+  }
 }
 const context = await browser.newContext({ ignoreHTTPSErrors: false });
 
