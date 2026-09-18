@@ -142,8 +142,40 @@ console.log(`   as ${user} · company ${maincode}`);
  * browser, and the error Playwright raises for it sends people to reinstall
  * something they already have.
  */
+/**
+ * Is this a real browser, or a script standing where one should be?
+ *
+ * On Ubuntu `chromium` and `chromium-browser` are transitional packages whose
+ * binaries are shell scripts that hand off to a Snap. In a hosted shell the
+ * Snap cannot run, and the failure arrives as "the browser has been closed" —
+ * which reads as a crash rather than as the wrong file entirely. An executable
+ * that begins with a shebang is not a browser, and saying so is worth more
+ * than any amount of retrying.
+ */
+const looksLikeAScript = (file) => {
+  try {
+    const handle = fs.openSync(file, 'r');
+    const head = Buffer.alloc(2);
+    fs.readSync(handle, head, 0, 2, 0);
+    fs.closeSync(handle);
+    return head.toString('latin1') === '#!';
+  } catch {
+    return false;
+  }
+};
+
 const findChromium = () => {
-  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
+  // Checked rather than trusted: an override naming a file that is not there
+  // otherwise fails several steps later as "executable doesn't exist", which
+  // reads as a bug in the lookup rather than a typo in the variable.
+  if (process.env.CHROMIUM_PATH) {
+    const named = process.env.CHROMIUM_PATH;
+    if (!fs.existsSync(named)) {
+      console.error(`\n   CHROMIUM_PATH points at ${named}, and there is nothing there.`);
+      process.exit(2);
+    }
+    return named;
+  }
 
   const roots = [process.env.PLAYWRIGHT_BROWSERS_PATH, '/opt/pw-browsers', '/ms-playwright']
     .filter(Boolean);
@@ -193,10 +225,16 @@ const findChromium = () => {
       const candidate = path.join(dir, name);
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
-        return candidate;
       } catch {
-        // not here; keep looking
+        continue;
       }
+      // A wrapper is remembered but not chosen: a real binary further down the
+      // list beats it, and it is only reported if nothing better turns up.
+      if (looksLikeAScript(candidate)) {
+        wrappers.push(candidate);
+        continue;
+      }
+      return candidate;
     }
   }
 
@@ -204,7 +242,20 @@ const findChromium = () => {
   return undefined;
 };
 
+const wrappers = [];
 const executablePath = findChromium();
+
+if (!executablePath && wrappers.length > 0) {
+  console.error(`\n   The only browsers on this machine are wrappers, not browsers:`);
+  for (const wrapper of wrappers) console.error(`     ${wrapper}`);
+  console.error('\n   On Ubuntu these hand off to a Snap, and a Snap cannot run in a hosted');
+  console.error('   shell — apt-get install chromium reinstalls the same wrapper. Google Chrome');
+  console.error('   ships a real binary in a .deb, which does work:');
+  console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
+  console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
+  console.error('   then run this again — it will be found on PATH.');
+  process.exit(2);
+}
 if (executablePath) console.log(`   browser: ${executablePath}`);
 
 /**
@@ -263,11 +314,18 @@ try {
     if (executablePath) {
       console.error(`\n   ${executablePath} would not start.`);
       console.error(`   ${err.message.split('\n').slice(0, 4).join('\n   ')}`);
-      console.error('\n   It was found, so this is not a missing browser. On Debian and Ubuntu');
-      console.error('   /usr/bin/chromium-browser is sometimes a wrapper around a Snap that cannot');
-      console.error('   run here; the real package works:');
-      console.error('     sudo apt-get install -y chromium');
-      console.error('     CHROMIUM_PATH=/usr/bin/chromium npm run anywhere:pull -- --dry-run');
+      console.error('\n   It was found, so this is not a missing browser.');
+      if (looksLikeAScript(executablePath)) {
+        console.error(`   ${executablePath} is a shell script, not a browser — on Ubuntu it hands`);
+        console.error('   off to a Snap, which cannot run in a hosted shell. apt-get install');
+        console.error('   chromium reinstalls the same wrapper; Google Chrome ships a real binary:');
+        console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
+        console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
+      } else {
+        console.error('   Try another: CHROMIUM_PATH=/path/to/chrome, or install Google Chrome:');
+        console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
+        console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
+      }
     } else {
       console.error(`\n   No browser was found: ${err.message.split('\n')[0]}`);
       console.error('\n   Playwright\u2019s own download is the first thing to fail on a machine with');

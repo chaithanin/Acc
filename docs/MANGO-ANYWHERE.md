@@ -95,10 +95,25 @@ closed", which says nothing about sandboxes. Dropping the sandbox is a real
 reduction in isolation, so it is not the default: the pull tries with it, and
 falls back without it while saying so.
 
-On Debian and Ubuntu **`/usr/bin/chromium-browser` is sometimes a wrapper
-around a Snap**, which cannot run in a hosted shell and fails the same way.
-`chromium` is preferred over it for that reason; where only the wrapper is
-installed, `sudo apt-get install -y chromium` gets the real one.
+On Ubuntu — Cloud Shell included — **`chromium` and `chromium-browser` are
+both transitional packages whose binaries are shell scripts handing off to a
+Snap**, and a Snap cannot run in a hosted shell. `apt-get install chromium`
+reinstalls the same wrapper, so there is no apt route to a real Chromium there
+at all.
+
+The pull recognises this rather than retrying: an executable beginning with a
+shebang is not a browser, so wrappers are skipped in favour of any real binary
+further along `PATH`, and if wrappers are all there is it says so and names the
+way out. Google Chrome ships a real binary in a `.deb`:
+
+```bash
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+```
+
+Then run the pull again — `google-chrome` is found on `PATH`. In Cloud Shell
+this has to be repeated each session, since the machine is ephemeral; on a real
+VM it is installed once.
 
 ## Keeping it to itself
 
