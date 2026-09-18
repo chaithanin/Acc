@@ -10,12 +10,16 @@ import type { AnywhereBundle } from '@/lib/sources/anywhere/types';
  */
 export const anywhereFixture = (): AnywhereBundle => ({
   arBalances: [
-    { maincode: 'MG2', customer_code: 'C-001', customer_name: 'ABC Trading Co., Ltd.', total_inv: 12, total_amt: 4_500_000, balance_amt: 1_250_000, grade_customer: 'A' },
+    { maincode: 'MG2', customer_code: 'C-001', customer_name: 'ABC Trading Co., Ltd.', total_inv: 2, total_amt: 450_000, balance_amt: 1_250_000, grade_customer: 'A' },
     { maincode: 'MG2', customer_code: 'C-002', customer_name: 'XYZ Limited', total_inv: 3, total_amt: 900_000, balance_amt: 0, grade_customer: 'A' },
     // Money arrives as a formatted string as often as a number.
-    { maincode: 'MG2', customer_code: 'C-003', customer_name: 'Somchai Ltd', total_inv: 7, total_amt: '2,400,000.50', balance_amt: '750,000', grade_customer: 'B' },
-    // Owes more than was invoiced: cannot be read as a payment.
-    { maincode: 'MG2', customer_code: 'C-004', customer_name: 'Impossible Co', total_inv: 1, total_amt: 100_000, balance_amt: 250_000, grade_customer: 'C' },
+    { maincode: 'MG2', customer_code: 'C-003', customer_name: 'Somchai Ltd', total_inv: 1, total_amt: '240,000.50', balance_amt: '750,000', grade_customer: 'B' },
+    /**
+     * Owes more than total_amt shows — sixteen of twenty-seven customers did in
+     * the live answer, which is what settled that total_amt is this period's
+     * billing rather than everything ever invoiced.
+     */
+    { maincode: 'MG2', customer_code: 'C-004', customer_name: 'Owes More Co', total_inv: 1, total_amt: 100_000, balance_amt: 250_000, grade_customer: 'C' },
     // Nothing on it at all.
     { maincode: 'MG2', customer_code: 'C-005', customer_name: 'Dormant Co', total_inv: 0, total_amt: 0, balance_amt: 0, grade_customer: '' },
   ],
@@ -40,6 +44,8 @@ export const anywhereFixture = (): AnywhereBundle => ({
   ],
 
   // One row per band.
+  // Agrees with the sum of balance_amt to the baht, as the live answer does —
+  // which is what confirmed that balance_amt is the real outstanding.
   arAgeing: [
     { grade_inv: 'A', balamt: 1_250_000 },
     { grade_inv: 'B', balamt: 750_000 },
@@ -68,6 +74,17 @@ export const anywhereFixture = (): AnywhereBundle => ({
       branch_id: '0456', branch_name: 'Jomtien', account_code: '987-6-54321-0',
       expenses: 0, income: 0, suspense: 0,
       balamt: '8,750,000', begamt: 8_000_000, begdate: '2026-01-01',
+    },
+    /**
+     * A balance the other way round, which is what made the live total minus
+     * 112 million. One endpoint returns these alongside the cash accounts, and
+     * `account_type` is the only thing distinguishing them.
+     */
+    {
+      account_name: 'เงินกู้ระยะยาว', account_type: 'LN', ac_code: '2312-01',
+      bank_id: 'SCB', name: 'ไทยพาณิชย์', name_eng: 'Siam Commercial Bank',
+      account_code: 'LOAN-0001', expenses: 0, income: 0, suspense: 0,
+      balamt: -180_000_000, begamt: -200_000_000, begdate: '2026-01-01',
     },
   ],
 

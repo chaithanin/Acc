@@ -7,62 +7,78 @@ import { anywhereFixture } from './fixtures/anywhere-bundle';
 const run = (projectId: string | null = null) =>
   mapAnywhereBundle(anywhereFixture(), { reportDate: '2026-09-18', maincode: 'MG2', projectId });
 
+/**
+ * `balance_amt` is the balance. `total_amt` is not the history.
+ *
+ * Read as invoiced-less-outstanding, the live answer had customers owing three
+ * times what had been billed to them — sixteen of twenty-seven individually
+ * impossible. What settles it is that the ageing bands total exactly the sum of
+ * `balance_amt`, to the baht. So the balance is trusted and nothing pretends to
+ * know what was collected.
+ */
 describe('what the group is owed', () => {
-  it('reads the invoiced total and what is still outstanding', () => {
+  it('records the balance as the amount owed', () => {
     const result = run();
-    // 4,500,000 + 900,000 + 2,400,000.50 + 100,000. The dormant row is dropped.
-    assert.equal(result.totals.receivable, 7_900_000.5);
+    // 1,250,000 + 750,000 + 250,000. The paid-off and dormant rows carry nothing.
     assert.equal(result.totals.receivableOutstanding, 2_250_000);
-    assert.equal(result.counts.customers, 4);
+    assert.equal(result.counts.customers, 3);
   });
 
-  /**
-   * Nothing in the answer says what came in, so collected is invoiced less
-   * outstanding. Subtracting is the only honest reading available.
-   */
-  it('derives what was collected rather than reading a column that is not there', () => {
+  it('treats the whole of a balance as unpaid, because that is what a balance is', () => {
     const abc = run().data.receivable.find((r) => r.customer === 'ABC Trading Co., Ltd.');
     assert.ok(abc);
-    assert.equal(abc!.contractualAmount, 4_500_000);
-    assert.equal(abc!.receiveAmount, 3_250_000);
+    assert.equal(abc!.contractualAmount, 1_250_000);
     assert.equal(abc!.accrueAmount, 1_250_000);
+    assert.equal(abc!.receiveAmount, 0, 'a payment was invented out of two columns that cannot say');
+  });
+
+  it('never derives a payment from total_amt', () => {
+    // C-001 is billed 450,000 this period against a balance of 1,250,000. An
+    // invoiced-less-outstanding reading would make that a negative payment.
+    for (const row of run().data.receivable) {
+      assert.equal(row.receiveAmount, 0);
+      assert.ok(row.contractualAmount > 0);
+    }
   });
 
   it('reads money that arrives as a formatted string', () => {
     const somchai = run().data.receivable.find((r) => r.customer === 'Somchai Ltd');
-    assert.equal(somchai?.contractualAmount, 2_400_000.5);
-    assert.equal(somchai?.receiveAmount, 1_650_000.5);
+    assert.equal(somchai?.contractualAmount, 750_000);
+  });
+
+  it('drops a customer who owes nothing rather than filing an empty row', () => {
+    assert.ok(!run().data.receivable.some((r) => r.customer === 'XYZ Limited'));
+    assert.ok(!run().data.receivable.some((r) => r.customer === 'Dormant Co'));
   });
 
   /**
-   * Owing more than was invoiced cannot be read as a payment. Reporting a
-   * negative collection would be arithmetically tidy and wrong.
+   * Said out loud on every pull, because it is the reason a whole column is
+   * left alone — and because the estate side already lost a figure to a column
+   * whose name sounded right.
    */
-  it('refuses to turn an impossible balance into a negative payment', () => {
-    const result = run();
-    const impossible = result.data.receivable.find((r) => r.customer === 'Impossible Co');
-    assert.equal(impossible?.receiveAmount, 0);
-
-    const issue = result.issues.find((i) => i.code === 'ANYWHERE_AR_OUTSTANDING_EXCEEDS_INVOICED');
-    assert.ok(issue, 'a balance larger than the invoices went unreported');
-    assert.match(issue!.message, /^1 customer owes more than was invoiced/,
-      'the singular warning does not read as a sentence');
+  it('says why total_amt is not treated as the history', () => {
+    const issue = run().issues.find((i) => i.code === 'ANYWHERE_TOTAL_AMT_IS_NOT_THE_HISTORY');
+    assert.ok(issue, 'a column was quietly set aside');
+    assert.match(issue!.message, /this period\u2019s billing/);
+    assert.match(issue!.message, /no figure here claims to say what was collected/);
   });
 });
 
 describe('what the group owes', () => {
-  it('reads the vendor balances', () => {
+  it('records the vendor balances as owed in full', () => {
     const result = run();
-    assert.equal(result.totals.payable, 4_300_000);
     assert.equal(result.totals.payableOutstanding, 890_000);
-    assert.equal(result.counts.vendors, 2);
+    assert.equal(result.counts.vendors, 1, 'a vendor owed nothing was filed anyway');
+
+    const supplier = result.data.payable.find((r) => r.vendor === 'Supplier A Co., Ltd.');
+    assert.ok(supplier);
+    assert.equal(supplier!.invoiceAmount, 890_000);
+    assert.equal(supplier!.paidAmount, 0);
+    assert.equal(supplier!.statedOutstanding, 890_000);
   });
 
-  it('takes the vendor from cust_name, which is Mango’s wording for it', () => {
-    const supplier = run().data.payable.find((r) => r.vendor === 'Supplier A Co., Ltd.');
-    assert.ok(supplier, 'the vendor name was not carried through');
-    assert.equal(supplier!.invoiceAmount, 3_200_000);
-    assert.equal(supplier!.paidAmount, 2_310_000);
+  it('takes the vendor from cust_name, which is Mango\u2019s wording for it', () => {
+    assert.ok(run().data.payable.some((r) => r.vendor === 'Supplier A Co., Ltd.'));
   });
 
   /**
@@ -76,22 +92,53 @@ describe('what the group owes', () => {
   });
 });
 
+/**
+ * The bank endpoint does not return only cash.
+ *
+ * The live answer summed to minus 112 million, which is not a cash position.
+ * Eleven accounts arrive from one endpoint and `account_type` is the only thing
+ * telling a current account from a loan.
+ */
 describe('the bank', () => {
-  it('sums the balances into a cash position', () => {
+  it('keeps every account, including the ones that are balances the other way', () => {
+    assert.equal(run().counts.bankAccounts, 3);
+  });
+
+  it('refuses to publish a negative cash position, and names the types', () => {
     const result = run();
-    assert.equal(result.totals.cash, 53_950_000);
-    assert.equal(result.counts.bankAccounts, 2);
+    assert.ok(result.totals.cash < 0);
+
+    const issue = result.issues.find((i) => i.code === 'ANYWHERE_BANK_TOTAL_NEGATIVE');
+    assert.ok(issue, 'a negative cash position was reported as a cash position');
+    assert.equal(issue!.severity, 'error');
+    assert.match(issue!.message, /LN/, 'the account types were not named');
+    assert.match(issue!.message, /Say which of those are cash/);
+  });
+
+  it('groups the balances by type, so the question can be answered', () => {
+    const byType = run().bankByType;
+    assert.equal(byType.get('CA')?.amount, 45_200_000);
+    assert.equal(byType.get('SA')?.amount, 8_750_000);
+    assert.equal(byType.get('LN')?.amount, -180_000_000);
+  });
+
+  it('says nothing about the sign when every account is cash', () => {
+    const bundle = anywhereFixture();
+    bundle.bankAccounts = (bundle.bankAccounts ?? []).filter((a) => a.account_type !== 'LN');
+
+    const mapped = mapAnywhereBundle(bundle, { reportDate: '2026-09-18', maincode: 'MG2' });
+    assert.equal(mapped.totals.cash, 53_950_000);
+    assert.equal(mapped.issues.find((i) => i.code === 'ANYWHERE_BANK_TOTAL_NEGATIVE'), undefined);
   });
 
   /**
    * The guarantees come from the same endpoint with one parameter changed,
    * which makes adding them to cash the easy mistake. The bank is holding that
-   * money against the group's obligations; it is not money to spend.
+   * money against the group\u2019s obligations; it is not money to spend.
    */
-  it('keeps guarantees out of cash, and says it did', () => {
+  it('keeps guarantees out of the accounts, and says it did', () => {
     const result = run();
     assert.equal(result.totals.guarantees, 15_000_000);
-    assert.ok(result.totals.cash < result.totals.guarantees + result.totals.cash);
     assert.ok(!result.data.bank.some((b) => b.currentAmount === 15_000_000),
       'a guarantee was filed as a bank balance');
 
@@ -101,9 +148,9 @@ describe('the bank', () => {
   });
 
   it('names the bank in English where it can, and keeps the account number', () => {
-    const scb = run().data.bank.find((b) => b.bankName === 'Siam Commercial Bank');
+    const scb = run().data.bank.find((b) => b.accountNo === '123-4-56789-0');
     assert.ok(scb);
-    assert.equal(scb!.accountNo, '123-4-56789-0');
+    assert.equal(scb!.bankName, 'Siam Commercial Bank');
     assert.equal(scb!.pendingExpense, 150_000);
   });
 });

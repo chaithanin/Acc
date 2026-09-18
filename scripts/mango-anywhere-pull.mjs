@@ -30,6 +30,7 @@
  *
  * Flags:
  *   --company <code>    which company in the dashboard the data belongs to
+ *   --force             import even when this pull is identical to a previous one
  *   --date YYYY-MM-DD   the date to file it under (default: today)
  *   --all-companies     walk every company this account can open
  *   --dry-run           fetch, map and report; write nothing
@@ -40,6 +41,7 @@
  *   npx playwright install --with-deps chromium
  */
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -607,12 +609,116 @@ try {
     - (b.severity === 'error' ? 0 : b.severity === 'warning' ? 1 : 2));
   for (const issue of ordered) console.log(`\n   ${issue.severity}: ${issue.message}`);
 
-  if (dryRun) {
-    console.log(bold('\n   --dry-run: nothing was written.\n'));
-  } else {
-    console.log('\n   Writing into the dashboard is the next step and is not wired up yet:');
-    console.log('   these figures are a position rather than a period, and where they belong');
-    console.log('   among the uploaded workbooks is a decision, not a coercion.\n');
+  if (dryRun) console.log(bold('\n   --dry-run: nothing was written.\n'));
+
+  // --------------------------------------------------------------- persist
+
+  if (!dryRun) {
+
+    const companies = await import('../src/lib/db/repositories/companies.ts');
+    const imports = await import('../src/lib/db/repositories/imports.ts');
+    const snapshots = await import('../src/lib/db/repositories/snapshots.ts');
+    const { indexSourceRefs } = await import('../src/lib/calc/aggregate.ts');
+    const { mergeDatasets } = await import('../src/lib/types.ts');
+
+    const company = companies.listAllCompanies().find((c) => c.companyCode === companyCode);
+    if (!company) {
+      console.error(`\n   No company with code ${companyCode}. Add it in Settings › Companies first.`);
+      process.exit(1);
+    }
+
+    /**
+     * Mango is the source for these three, and the workbooks stay the source for
+     * the rest.
+     *
+     * Replacing a snapshot retires the whole of it, and the whole of it is more
+     * than receivables, payables and bank — the general ledger, the cash flow and
+     * the BOQ arrive from uploaded files and would go with it. So the records
+     * this pull does not own are read out of the current snapshot and carried
+     * forward, and only the three kinds Mango is authoritative for are replaced.
+     *
+     * The alternative, writing this alongside, is the double count the
+     * reconciliation rules exist to catch: the same balances twice, once from
+     * here and once from the workbook.
+     */
+    const OWNED = ['receivable', 'payable', 'bank'];
+
+    const current = snapshots.getCurrentSnapshot(company.id);
+    let carried = null;
+
+    if (current) {
+      const existing = snapshots.loadDataset(company.id, current.id);
+      carried = { ...existing.data };
+      for (const kind of OWNED) carried[kind] = [];
+
+      const dropped = OWNED.map((kind) => `${existing.data[kind]?.length ?? 0} ${kind}`).join(', ');
+      const kept = Object.entries(carried)
+        .filter(([, rows]) => Array.isArray(rows) && rows.length > 0)
+        .map(([kind, rows]) => `${rows.length} ${kind}`)
+        .join(', ');
+
+      console.log(bold('\n── Replacing what Mango owns, keeping what it does not'));
+      console.log(`   superseded from the workbooks: ${dropped || 'nothing'}`);
+      console.log(`   carried forward unchanged:     ${kept || 'nothing'}`);
+    } else {
+      console.log(bold('\n── First import for this company'));
+    }
+
+    const combined = carried ? mergeDatasets(carried, mapped.data) : mapped.data;
+    indexSourceRefs(combined);
+
+    const payload = JSON.stringify({ maincode, reportDate, bundle });
+    const file = {
+      fileName: `mango-anywhere-${maincode}-${reportDate}.json`,
+      originalName: `Mango Anywhere ${maincode} — ${reportDate}`,
+      containerFile: null,
+      filePath: `mango://${service}/anywhereAPI/Dashboard`,
+      // The hash of what Mango answered, so an identical pull is recognised as
+      // the duplicate it is rather than filed twice.
+      hash: createHash('sha256').update(payload).digest('hex'),
+      size: Buffer.byteLength(payload),
+      fileType: 'json',
+      project: { projectId: null, projectCode: null, projectName: null, matchedAlias: null, matchedIn: 'api', confidence: 1 },
+      reportDate,
+      reportType: 'receivable',
+      reportTypeLabel: `Mango Anywhere — ${maincode}`,
+      sheetCount: 1,
+      sheets: [],
+      data: combined,
+      rowCount: mapped.data.receivable.length + mapped.data.payable.length + mapped.data.bank.length,
+      issues: mapped.issues,
+      status: 'parsed',
+      error: null,
+    };
+
+    const duplicates = imports.findDuplicates(company.id, [{
+      fileName: file.fileName, hash: file.hash, reportDate,
+      projectId: null, reportType: 'receivable',
+    }]);
+
+    if (duplicates.length > 0 && !has('force')) {
+      console.error(`\n   This pull is identical to one already imported on `
+        + `${duplicates[0].importedAt.slice(0, 10)}. Nothing was written; --force to import anyway.`);
+      process.exit(1);
+    }
+
+    const outcome = imports.persistImport({
+      companyId: company.id,
+      reportDate,
+      label: `Mango Anywhere ${maincode} ${reportDate}`,
+      userId: null,
+      files: [file],
+      issues: [],
+      // Replace, because Mango is now the source for these three: writing them
+      // alongside the workbook's own would report the same balances twice.
+      mode: 'replace',
+    });
+
+    console.log(`\n   import   ${outcome.importId}`);
+    console.log(`   snapshot ${outcome.snapshotId}`);
+    console.log(`   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
+      + `${mapped.counts.bankAccounts} bank accounts written`);
+    console.log(bold('\n   Done.\n'));
   }
 } finally {
   await context.close();

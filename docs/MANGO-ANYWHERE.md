@@ -169,10 +169,15 @@ than against their names:
 
 Four things in that list decide how it is read.
 
-**Nothing says what came in.** There is what was invoiced and what is still
-owed, so collected is the difference — the only honest reading available. Where
-a customer owes *more* than was invoiced the subtraction is impossible, and the
-row reports that rather than a negative payment.
+**`total_amt` is not the history, and nothing says what came in.** Read as
+invoiced-less-outstanding, the live answer had customers owing three times what
+had been billed to them — sixteen of twenty-seven individually impossible. What
+settles it is that the **ageing bands total exactly the sum of `balance_amt`**,
+22,655,727 to the baht, so the balance is the balance, and `total_amt` beside a
+`total_inv` of one to four documents is this period's billing.
+
+So nothing derives a payment. A balance is what is unpaid; that is what it is
+recorded as, and what was collected is a question these columns cannot answer.
 
 **The two ageing screens return different shapes.** One row per band for
 receivables, one row with a column per band for payables. Assuming they match
@@ -181,6 +186,14 @@ is how one of them silently becomes empty.
 **A guarantee is not cash.** It comes from the same endpoint with one parameter
 changed, which makes adding it to the cash position the easy mistake. It is
 counted, kept out, and reported.
+
+**Nor is every "bank" account cash.** The eleven accounts summed to **minus 112
+million**, which is no cash position at all: one endpoint returns current
+accounts alongside what are evidently loans or overdrafts, and `account_type` is
+the only thing distinguishing them. The run refuses to publish a negative cash
+figure, groups the balances by type with their totals, and asks which types are
+cash. That question is for whoever knows the chart of accounts; guessing it is
+how a company appears to be nine figures overdrawn, or nine figures richer.
 
 **`total_inv` is not used in any figure**, and the run says so on every pull
 along with whether it looks like a count or an amount. That is the lesson from
@@ -193,13 +206,36 @@ not written into the income or expense ledgers: the balances already carry the
 invoiced amounts, and filing both would report the invoices plus the payments
 for those same invoices.
 
-## What is not written yet
+## Mango is the source for three kinds of record, and only three
 
-Persisting into the database. These figures are a **position** — what is owed
-today — where the import pipeline stores a period's records, and where a
-balance belongs among the uploaded workbooks is a decision rather than a
-coercion. Writing them beside the GL exports that already carry the same
-balances is precisely the double count the reconciliation rules exist to catch.
+Decided, and implemented as decided: **receivables, payables and bank balances
+come from here and no longer from an uploaded workbook.** Everything else — the
+general ledger, cash flow, BOQ, WIP — still comes from the files.
+
+That is narrower than "replace the snapshot", and the difference matters.
+Retiring a snapshot retires the whole of it, and the whole of it includes the
+records the workbooks own. So the pull reads the current snapshot, carries
+forward every kind it is not authoritative for, replaces the three it is, and
+writes the result as one snapshot:
+
+```
+── Replacing what Mango owns, keeping what it does not
+   superseded from the workbooks: 1 receivable, 0 payable, 0 bank
+   carried forward unchanged:     1 income
+```
+
+Writing alongside instead would be the double count the reconciliation rules
+exist to catch: the same balances twice, once from here and once from the
+workbook that also carries them.
+
+```bash
+npm run anywhere:pull -- --company HAMONIA        # writes
+npm run anywhere:pull -- --company HAMONIA --dry-run   # looks
+```
+
+An identical pull is recognised by the hash of what Mango answered and refused
+as the duplicate it is; `--force` overrides. It goes through the same
+validation, snapshot, audit entry and rollback as any upload.
 
 And before any of it is scheduled: **ask Mango for the official API**, which
 this system already has a tokens page for. See

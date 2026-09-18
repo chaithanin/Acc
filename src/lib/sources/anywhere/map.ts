@@ -63,6 +63,8 @@ export interface AnywhereMapResult {
     bankAccounts: number;
     guaranteeAccounts: number;
   };
+  /** Bank balances grouped by the type Mango files them under. */
+  bankByType: Map<string, { count: number; amount: number }>;
 }
 
 /** Mango sends money as a number, a numeric string, or a string with commas. */
@@ -110,24 +112,29 @@ export function mapAnywhereBundle(
   let receivableOutstanding = 0;
   let arInconsistent = 0;
 
+  /**
+   * `balance_amt` is what is owed. `total_amt` is not what was invoiced.
+   *
+   * Read as invoiced-less-outstanding, the live answer had customers owing
+   * three times what had been billed to them, sixteen of twenty-seven of them
+   * individually impossible. What settles it is that the ageing bands total
+   * exactly the sum of `balance_amt` — 22,655,727 to the baht — so the balance
+   * is the balance, and `total_amt` beside a `total_inv` of one to four
+   * invoices is this period's billing rather than the account's history.
+   *
+   * So nothing here derives a payment. A balance is what is unpaid; that is
+   * what it is recorded as, and what was collected is a question these two
+   * columns cannot answer.
+   */
   arBalances.forEach((row, index) => {
-    const invoiced = money(row.total_amt);
     const outstanding = money(row.balance_amt);
-    if (invoiced === 0 && outstanding === 0) return;
+    const billedThisPeriod = money(row.total_amt);
+    if (outstanding === 0 && billedThisPeriod === 0) return;
+    if (outstanding === 0) return;
 
-    /**
-     * Collected is derived, not read.
-     *
-     * The answer carries what was invoiced and what is still owed, and nothing
-     * that says what came in. Subtracting is the only honest reading — and
-     * where the subtraction is impossible, the row says so rather than
-     * reporting a negative payment.
-     */
-    if (outstanding > invoiced + 1) {
-      arInconsistent += 1;
-    }
+    if (billedThisPeriod > 0 && outstanding > billedThisPeriod + 1) arInconsistent += 1;
 
-    receivableTotal = round2(receivableTotal + invoiced);
+    receivableTotal = round2(receivableTotal + billedThisPeriod);
     receivableOutstanding = round2(receivableOutstanding + outstanding);
 
     data.receivable.push({
@@ -138,8 +145,9 @@ export function mapAnywhereBundle(
       category: 'other_income',
       customer: text(row.customer_name) ?? text(row.customer_code),
       unit: null,
-      contractualAmount: round2(invoiced),
-      receiveAmount: round2(Math.max(0, invoiced - outstanding)),
+      // The whole of a balance is outstanding, by definition.
+      contractualAmount: round2(outstanding),
+      receiveAmount: 0,
       accrueAmount: round2(outstanding),
       dueDate: null,
     });
@@ -147,15 +155,13 @@ export function mapAnywhereBundle(
 
   if (arInconsistent > 0) {
     issues.push({
-      severity: 'warning',
-      code: 'ANYWHERE_AR_OUTSTANDING_EXCEEDS_INVOICED',
+      severity: 'info',
+      code: 'ANYWHERE_TOTAL_AMT_IS_NOT_THE_HISTORY',
       message:
-        (arInconsistent === 1
-          ? '1 customer owes more than was invoiced to them, which cannot be read as a payment.'
-          : `${arInconsistent} customers owe more than was invoiced to them, which cannot be read `
-            + 'as payments.')
-        + ' Either the two columns do not mean what they are taken to mean here, or the balances '
-        + 'carry something the invoices do not.',
+        `${arInconsistent} of ${arBalances.length} customers owe more than total_amt shows against `
+        + 'them, which is why total_amt is not treated as everything ever invoiced. Alongside a '
+        + 'total_inv of a handful of documents it reads as this period\u2019s billing. Only the '
+        + 'balance is used, and no figure here claims to say what was collected.',
       source: ref('arBalances', 0),
     });
   }
@@ -167,11 +173,11 @@ export function mapAnywhereBundle(
   let payableOutstanding = 0;
 
   apBalances.forEach((row, index) => {
-    const invoiced = money(row.total_amt);
     const outstanding = money(row.balance_amt);
-    if (invoiced === 0 && outstanding === 0) return;
+    const billedThisPeriod = money(row.total_amt);
+    if (outstanding === 0) return;
 
-    payableTotal = round2(payableTotal + invoiced);
+    payableTotal = round2(payableTotal + billedThisPeriod);
     payableOutstanding = round2(payableOutstanding + outstanding);
 
     data.payable.push({
@@ -187,8 +193,9 @@ export function mapAnywhereBundle(
       category: text(row.grade_vender),
       invoiceDate: null,
       dueDate: null,
-      invoiceAmount: round2(invoiced),
-      paidAmount: round2(Math.max(0, invoiced - outstanding)),
+      // A balance owed is wholly unpaid; nothing here knows what was paid.
+      invoiceAmount: round2(outstanding),
+      paidAmount: 0,
       statedOutstanding: round2(outstanding),
     });
   });
@@ -197,10 +204,29 @@ export function mapAnywhereBundle(
 
   const bankAccounts = bundle.bankAccounts ?? [];
   let cash = 0;
+  /**
+   * What kind of account each balance belongs to.
+   *
+   * The live answer summed to minus 112 million, which is not a cash position.
+   * Eleven accounts arrive from one endpoint and `account_type` distinguishes
+   * them, so the likeliest reading is that the list is not all cash — an
+   * overdraft or a loan account is a balance the other way round.
+   *
+   * Which types are cash is a question for whoever knows the chart of
+   * accounts, so the types are reported with their totals rather than guessed
+   * at, and a negative total is refused rather than published.
+   */
+  const bankByType = new Map<string, { count: number; amount: number }>();
 
   bankAccounts.forEach((row, index) => {
     const balance = money(row.balamt);
     cash = round2(cash + balance);
+
+    const kind = text(row.account_type) ?? '(no type)';
+    const held = bankByType.get(kind) ?? { count: 0, amount: 0 };
+    held.count += 1;
+    held.amount = round2(held.amount + balance);
+    bankByType.set(kind, held);
 
     data.bank.push({
       kind: 'bank',
@@ -213,6 +239,25 @@ export function mapAnywhereBundle(
       pendingExpense: round2(money(row.expenses)),
     });
   });
+
+  if (cash < 0) {
+    const types = [...bankByType.entries()]
+      .sort((a, b) => a[1].amount - b[1].amount)
+      .map(([kind, held]) => `${kind} ${held.count} account${held.count === 1 ? '' : 's'} `
+        + `${Math.round(held.amount).toLocaleString('en-US')}`)
+      .join('; ');
+
+    issues.push({
+      severity: 'error',
+      code: 'ANYWHERE_BANK_TOTAL_NEGATIVE',
+      message:
+        `The bank accounts sum to ${Math.round(cash).toLocaleString('en-US')}, which is not a cash `
+        + 'position. They come from one endpoint but are evidently not all cash — an overdraft or a '
+        + `loan account is a balance the other way round. By account_type: ${types}. Say which of `
+        + 'those are cash and the figure becomes usable; until then it is not.',
+      source: ref('bankAccounts', 0),
+    });
+  }
 
   /**
    * Guarantees are counted and kept out.
@@ -347,6 +392,7 @@ export function mapAnywhereBundle(
       cash,
       guarantees,
     },
+    bankByType,
     counts: {
       customers: data.receivable.length,
       vendors: data.payable.length,
