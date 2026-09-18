@@ -18,7 +18,8 @@
     "mango:pull": "node --import ./scripts/register-ts.mjs scripts/mango-pull.mjs",
     "booking:pull": "node --import ./scripts/register-ts.mjs scripts/booking-pull.mjs",
     "mango:probe": "node --import ./scripts/register-ts.mjs scripts/mango-anywhere-probe.mjs",
-    "anywhere:pull": "node scripts/mango-anywhere-pull.mjs"
+    "anywhere:pull": "node --import ./scripts/register-ts.mjs scripts/mango-anywhere-pull.mjs",
+    "anywhere:stub": "node --import ./scripts/register-ts.mjs scripts/anywhere-stub.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

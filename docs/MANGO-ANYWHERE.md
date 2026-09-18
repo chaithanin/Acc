@@ -152,12 +152,54 @@ The stub is three applications on one origin like the real one, and it refuses
 every service call without the header — so a pull that fails to obtain the
 token fails the test rather than passing it.
 
+## What the columns turned out to be
+
+Read off a live answer for MG2, and the mapping is written against these rather
+than against their names:
+
+| Answer | Columns |
+|---|---|
+| receivable balances (27 rows) | `maincode, customer_code, customer_name, total_inv, total_amt, balance_amt, grade_customer` |
+| payable balances (79 rows) | `mainname, acct_no, cust_name, total_inv, total_amt, balance_amt, grade_vender` |
+| receivables by month (143) | `maincode, rl_year, rl_month, receipt_net_amount` |
+| payables by month (31) | `maincode, pay_year, pay_month, pay_amount` |
+| receivable ageing (3) | `grade_inv, balamt` — one row per band |
+| payable ageing (1) | `Grade_A, Grade_B, Grade_C, Grade_D` — one row, a column per band |
+| bank balances (11, 25 columns) | `account_name, ac_code, name, name_eng, branch_name, account_code, expenses, income, suspense, balamt, begamt, begdate, …` |
+
+Four things in that list decide how it is read.
+
+**Nothing says what came in.** There is what was invoiced and what is still
+owed, so collected is the difference — the only honest reading available. Where
+a customer owes *more* than was invoiced the subtraction is impossible, and the
+row reports that rather than a negative payment.
+
+**The two ageing screens return different shapes.** One row per band for
+receivables, one row with a column per band for payables. Assuming they match
+is how one of them silently becomes empty.
+
+**A guarantee is not cash.** It comes from the same endpoint with one parameter
+changed, which makes adding it to the cash position the easy mistake. It is
+counted, kept out, and reported.
+
+**`total_inv` is not used in any figure**, and the run says so on every pull
+along with whether it looks like a count or an amount. That is the lesson from
+the estate side, where a column called `revise` beside `asking_price` was taken
+for a revised price, was the revision number, and priced 1,839 units at
+thirteen baht each.
+
+The monthly figures are **cash moved, not revenue raised**, and are deliberately
+not written into the income or expense ledgers: the balances already carry the
+invoiced amounts, and filing both would report the invoices plus the payments
+for those same invoices.
+
 ## What is not written yet
 
-The mapping into this system's records. The columns above are what it will be
-written against, and guessing at them before seeing the real ones is how the
-`revise` column came to be read as a price on the estate side. Run with
-`--save` and keep the file.
+Persisting into the database. These figures are a **position** — what is owed
+today — where the import pipeline stores a period's records, and where a
+balance belongs among the uploaded workbooks is a decision rather than a
+coercion. Writing them beside the GL exports that already carry the same
+balances is precisely the double count the reconciliation rules exist to catch.
 
 And before any of it is scheduled: **ask Mango for the official API**, which
 this system already has a tokens page for. See

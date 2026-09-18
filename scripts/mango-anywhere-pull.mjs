@@ -1,7 +1,10 @@
 /**
  * Read the accounting figures out of Mango Anywhere, through a real browser.
  *
- *   node scripts/mango-anywhere-pull.mjs --dry-run
+ *   npm run anywhere:pull -- --dry-run
+ *
+ * Run through the TypeScript loader, as the other pulls are — the mapper it
+ * imports lives in src/ and uses the @/ alias.
  *
  * Why a browser, when there is an API. There is one — production.service — and
  * its figures are reachable. But the calls that point a session at a company
@@ -97,16 +100,16 @@ try {
  * second exists to have an effect, and the third writes to an audit trail.
  */
 const READS = [
-  ['receivable balances', 'anywhereAPI/Dashboard/balanceArReadList', { startDate: '{date}', field: 'mainname', text: '' }],
-  ['payable balances', 'anywhereAPI/Dashboard/balanceApReadList', { startDate: '{date}', field: 'mainname', text: '' }],
-  ['receivables by month', 'anywhereAPI/Dashboard/viewArRead', { type: 'MONTH' }],
-  ['payables by month', 'anywhereAPI/Dashboard/viewApRead', { type: 'MONTH' }],
-  ['receivable ageing', 'anywhereAPI/Dashboard/BarchartArRead', { today: '{date}', startDate: '{date}' }],
-  ['payable ageing', 'anywhereAPI/Dashboard/BarchartAPRead', { today: '{date}', startDate: '{date}' }],
-  ['receivables, year to date', 'anywhereAPI/Dashboard/yearDetailARRead', {}],
-  ['payables, year to date', 'anywhereAPI/Dashboard/yearDetailAPRead', {}],
-  ['bank balances', 'anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'N', company_code: '{company}', chq_date: '{date}' }],
-  ['bank guarantees', 'anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'Y', company_code: '{company}', chq_date: '{date}' }],
+  ['arBalances', 'receivable balances', 'anywhereAPI/Dashboard/balanceArReadList', { startDate: '{date}', field: 'mainname', text: '' }],
+  ['apBalances', 'payable balances', 'anywhereAPI/Dashboard/balanceApReadList', { startDate: '{date}', field: 'mainname', text: '' }],
+  ['arByMonth', 'receivables by month', 'anywhereAPI/Dashboard/viewArRead', { type: 'MONTH' }],
+  ['apByMonth', 'payables by month', 'anywhereAPI/Dashboard/viewApRead', { type: 'MONTH' }],
+  ['arAgeing', 'receivable ageing', 'anywhereAPI/Dashboard/BarchartArRead', { today: '{date}', startDate: '{date}' }],
+  ['apAgeing', 'payable ageing', 'anywhereAPI/Dashboard/BarchartAPRead', { today: '{date}', startDate: '{date}' }],
+  ['arYear', 'receivables, year to date', 'anywhereAPI/Dashboard/yearDetailARRead', {}],
+  ['apYear', 'payables, year to date', 'anywhereAPI/Dashboard/yearDetailAPRead', {}],
+  ['bankAccounts', 'bank balances', 'anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'N', company_code: '{company}', chq_date: '{date}' }],
+  ['bankGuarantees', 'bank guarantees', 'anywhereAPI/Dashboard/view_bank_all_v2', { bank_guarantee: 'Y', company_code: '{company}', chq_date: '{date}' }],
 ];
 
 /** Column names and row counts. Never a value — this output gets pasted around. */
@@ -497,9 +500,9 @@ try {
     .replace('{company}', maincode);
 
   console.log(bold('\n── Reading'));
-  const answers = {};
+  const bundle = {};
 
-  for (const [label, endpoint, params] of READS) {
+  for (const [key, label, endpoint, params] of READS) {
     const query = Object.entries(params)
       .map(([key, value]) => `${key}=${encodeURIComponent(fill(value))}`)
       .join('&');
@@ -539,17 +542,23 @@ try {
       continue;
     }
 
-    answers[endpoint + (params.bank_guarantee ? `?guarantee=${params.bank_guarantee}` : '')] = payload;
+    // A grid wrapper where a list was expected is the shape the estate module
+    // answers with too, and unwrapping it here rather than in the mapper keeps
+    // the mapper reading one thing.
+    const rows = Array.isArray(payload) ? payload
+      : Array.isArray(payload?.data) ? payload.data
+        : payload && typeof payload === 'object' ? [payload] : [];
+    bundle[key] = rows;
     console.log(`   ${label.padEnd(28)} ${shapeOf(payload)}`);
   }
 
   if (savePath) {
     fs.mkdirSync(path.dirname(path.resolve(savePath)), { recursive: true });
-    fs.writeFileSync(savePath, JSON.stringify({ maincode, reportDate, answers }, null, 1), 'utf8');
+    fs.writeFileSync(savePath, JSON.stringify({ maincode, reportDate, bundle }, null, 1), 'utf8');
     console.log(`\n   written to ${savePath}`);
   }
 
-  const read = Object.keys(answers).length;
+  const read = Object.keys(bundle).length;
   console.log(bold(`\n── ${read} of ${READS.length} answered`));
 
   if (read === 0) {
@@ -558,11 +567,52 @@ try {
     process.exit(1);
   }
 
+  // ----------------------------------------------------------------- map
+
+  const { mapAnywhereBundle } = await import('../src/lib/sources/anywhere/map.ts');
+  const mapped = mapAnywhereBundle(bundle, { reportDate, maincode });
+
+  console.log(bold('\n── ' + maincode));
+  const line = (label, value) => console.log(`   ${label.padEnd(26)} ${money(value).padStart(18)}`);
+
+  line('invoiced to customers', mapped.totals.receivable);
+  line('still owed by them', mapped.totals.receivableOutstanding);
+  line('invoiced by suppliers', mapped.totals.payable);
+  line('still owed to them', mapped.totals.payableOutstanding);
+  line('in the bank', mapped.totals.cash);
+  if (mapped.totals.guarantees > 0) line('held as guarantees', mapped.totals.guarantees);
+
+  console.log(`\n   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
+    + `${mapped.counts.bankAccounts} bank accounts`);
+
+  if (mapped.ageing.receivable.length > 0) {
+    console.log('\n   receivable ageing:');
+    for (const band of mapped.ageing.receivable) {
+      console.log(`     ${band.band.padEnd(10)} ${money(band.amount).padStart(18)}`);
+    }
+  }
+
+  const months = [...mapped.collectedByMonth.entries()].sort().slice(-6);
+  if (months.length > 0) {
+    console.log('\n   collected by month (cash moved, not revenue raised):');
+    for (const [month, amount] of months) {
+      console.log(`     ${month}    ${money(amount).padStart(18)}`);
+    }
+  }
+
+  // Errors first: a figure that cannot be true should not be read after a
+  // dozen notes about columns.
+  const ordered = [...mapped.issues].sort((a, b) =>
+    (a.severity === 'error' ? 0 : a.severity === 'warning' ? 1 : 2)
+    - (b.severity === 'error' ? 0 : b.severity === 'warning' ? 1 : 2));
+  for (const issue of ordered) console.log(`\n   ${issue.severity}: ${issue.message}`);
+
   if (dryRun) {
     console.log(bold('\n   --dry-run: nothing was written.\n'));
   } else {
-    console.log('\n   Mapping into the dashboard is not written yet — the columns above are');
-    console.log('   what it will be written against. Run with --save and keep the file.\n');
+    console.log('\n   Writing into the dashboard is the next step and is not wired up yet:');
+    console.log('   these figures are a position rather than a period, and where they belong');
+    console.log('   among the uploaded workbooks is a decision, not a coercion.\n');
   }
 } finally {
   await context.close();

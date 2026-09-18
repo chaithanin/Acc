@@ -17,6 +17,17 @@
  */
 
 import http from 'node:http';
+
+/**
+ * The answers come from the same fixture the tests use, so the stub and the
+ * tests cannot drift into disagreeing about what Mango returns. Its columns are
+ * the ones a live answer carried, not a guess at them.
+ */
+const { anywhereFixture } = await import('../tests/fixtures/anywhere-bundle.ts');
+const FIXTURE = anywhereFixture();
+
+/** Mango wraps some lists in a grid envelope and returns others bare. */
+const grid = (rows) => ({ total: rows.length, data: rows });
 const PORT = 4380, USER = 'svc.dashboard', PASS = 'stub-password';
 const SESSION = 'sess-1', TOKEN = 'ab12cd34ef56ab78cd90ef12ab34cd56ef78ab90.9a26';
 const json = (r, b, s = 200) => { r.writeHead(s, {'content-type':'application/json; charset=utf-8'}); r.end(JSON.stringify(b)); };
@@ -83,16 +94,26 @@ http.createServer((req, res) => {
       return res.end('<html>Forbidden</html>');
     }
     if (p === 'anywhereAPI/Dashboard/balanceArReadList')
-      return json(res, { success: true, data: { total: 2, data: [
-        { mainname: 'ABC Co', amount: 1250000, overdue_days: 45 },
-        { mainname: 'XYZ Ltd', amount: 480000, overdue_days: 0 }] } });
+      return json(res, { success: true, data: grid(FIXTURE.arBalances) });
     if (p === 'anywhereAPI/Dashboard/balanceApReadList')
-      return json(res, { success: true, data: { total: 1, data: [{ mainname: 'Supplier A', amount: 890000, overdue_days: 12 }] } });
-    if (p === 'anywhereAPI/Dashboard/view_bank_all_v2')
-      return json(res, { success: true, data: [
-        { bank_name: 'SCB', acc_no: '111-2-33333-4', balance: 45200000, guarantee: u.searchParams.get('bank_guarantee') }] });
-    if (p.startsWith('anywhereAPI/Dashboard/'))
-      return json(res, { success: true, data: [{ period: '2026-09', amount: 1000000 }] });
+      return json(res, { success: true, data: grid(FIXTURE.apBalances) });
+    if (p === 'anywhereAPI/Dashboard/viewArRead')
+      return json(res, { success: true, data: grid(FIXTURE.arByMonth) });
+    if (p === 'anywhereAPI/Dashboard/viewApRead')
+      return json(res, { success: true, data: grid(FIXTURE.apByMonth) });
+    // Returned bare, not wrapped — as the live answers are.
+    if (p === 'anywhereAPI/Dashboard/BarchartArRead')
+      return json(res, { success: true, data: FIXTURE.arAgeing });
+    if (p === 'anywhereAPI/Dashboard/BarchartAPRead')
+      return json(res, { success: true, data: FIXTURE.apAgeing });
+    if (p === 'anywhereAPI/Dashboard/yearDetailARRead')
+      return json(res, { success: true, data: grid(FIXTURE.arYear) });
+    if (p === 'anywhereAPI/Dashboard/yearDetailAPRead')
+      return json(res, { success: true, data: grid(FIXTURE.apYear) });
+    if (p === 'anywhereAPI/Dashboard/view_bank_all_v2') {
+      const guarantee = u.searchParams.get('bank_guarantee') === 'Y';
+      return json(res, { success: true, data: guarantee ? FIXTURE.bankGuarantees : FIXTURE.bankAccounts });
+    }
     return json(res, { success: true, data: {} });
   }
   res.writeHead(404, {'content-type':'text/html'}); res.end('<html>404</html>');
