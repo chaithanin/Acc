@@ -64,16 +64,28 @@ MANGO_MAINCODE             the company to read — MG1..MG6, default MG1
 Flags: `--company <code>` for the dashboard company, `--date`, `--dry-run`,
 `--save <file>` to keep the raw answers, `--headed` to watch it work.
 
-It needs a Chromium. Playwright looks for the exact build its own version
-shipped with, so a machine that already has one usually has the wrong one —
-that is not a missing browser, and the error Playwright raises for it sends
-people to reinstall what they already have. The pull looks for a Chromium in
-the usual places first, prints which it chose, and takes `CHROMIUM_PATH` if it
-guesses wrong. Where there is genuinely none:
+It needs a Chromium, and finding one is where this fails first in practice.
+
+Playwright looks for the exact build its own version shipped with, so a machine
+that already has a Chromium usually has the wrong one — that is not a missing
+browser, and the error Playwright raises for it sends people to reinstall what
+they already have. And `npx playwright install` is itself the first thing to
+fail on a machine with a small disk or restricted egress, which is what happens
+in Cloud Shell.
+
+So the pull looks in three places, in order: where Playwright keeps its
+browsers, then **anything on `PATH`** — `chromium`, `chromium-browser`,
+`google-chrome`, Edge — and then Playwright's own default. It prints which it
+chose. A Chromium from the distribution's packages loads one page perfectly
+well:
 
 ```bash
-npx playwright install --with-deps chromium
+sudo apt-get update && sudo apt-get install -y chromium   # Debian, Ubuntu
+sudo dnf install -y chromium                              # Fedora, RHEL
 ```
+
+`CHROMIUM_PATH=/path/to/chrome` overrides all of it. `npx playwright install
+--with-deps chromium` is still the tidiest answer where it works.
 
 ## Keeping it to itself
 

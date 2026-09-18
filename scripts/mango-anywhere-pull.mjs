@@ -171,6 +171,32 @@ const findChromium = () => {
     }
   }
 
+  /**
+   * A browser the machine already has, installed the ordinary way.
+   *
+   * Playwright's own download is the first thing to fail on a machine with a
+   * small disk or restricted egress — and a Chromium from the distribution's
+   * packages works perfectly well for loading one page. Looking here turns
+   * "install a browser" into "you already have one".
+   */
+  const systemNames = [
+    'chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable',
+    'microsoft-edge', 'microsoft-edge-stable',
+  ];
+  const systemDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+
+  for (const name of systemNames) {
+    for (const dir of systemDirs) {
+      const candidate = path.join(dir, name);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {
+        // not here; keep looking
+      }
+    }
+  }
+
   // Let Playwright try its own; it may well be right.
   return undefined;
 };
@@ -216,8 +242,12 @@ try {
   browser = await chromium.launch({ headless: !has('headed'), executablePath, args: launchArgs });
 } catch (err) {
   console.error(`\n   Chromium would not start: ${err.message.split('\n')[0]}`);
-  console.error('   If none is installed: npx playwright install --with-deps chromium');
-  console.error('   If one is installed somewhere unusual: CHROMIUM_PATH=/path/to/chrome');
+  console.error('\n   No browser was found, and Playwright\u2019s own download is the first thing');
+  console.error('   to fail on a machine with a small disk or restricted egress. One from the');
+  console.error('   distribution\u2019s packages does this job just as well:');
+  console.error('     sudo apt-get update && sudo apt-get install -y chromium   # Debian, Ubuntu');
+  console.error('     sudo dnf install -y chromium                              # Fedora, RHEL');
+  console.error('   or point at one already installed:  CHROMIUM_PATH=/path/to/chrome');
   process.exit(2);
 }
 const context = await browser.newContext({ ignoreHTTPSErrors: false });
