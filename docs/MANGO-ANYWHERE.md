@@ -54,6 +54,21 @@ nothing about money and repeats forever; the print service's warm-up, which
 exists to have an effect; and `API/Public/UserInsertLogs`, which writes to
 somebody's audit trail.
 
+## When the token does not appear
+
+The run waits for the token rather than for a number of seconds, because how
+long the start-up takes depends on the network and on Mango. A run that waited
+three seconds and reported "no token went past" was reporting its own
+impatience: six endpoints had been called where a complete start-up calls about
+eighteen.
+
+If the shell settles without asking for anything, the run opens a screen that
+has to fetch to draw itself — `page/transaction/fin/v_fn_cash_on_hand` — and
+waits again. Failing after that, it says where the page ended up, what it was
+titled, how many endpoints were called, whether there is still a password box on
+it, and saves a full-page screenshot. A password box still there means the
+sign-in did not take, which is an account question rather than a timing one.
+
 ## Running it
 
 ```

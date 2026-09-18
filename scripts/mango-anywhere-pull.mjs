@@ -457,8 +457,12 @@ try {
   console.log('   opening the front end');
   await page.goto(`${anywhere}/page/`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
 
-  // The application redirects to its own sign-in when there is no session.
-  await page.waitForTimeout(2_000);
+  // The application redirects to its own sign-in when there is no session, and
+  // the redirect is not instant. Waiting for the field rather than for a moment
+  // means a slow hop is not mistaken for being signed in already.
+  await page.locator('input[type=password]').first()
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .catch(() => undefined);
 
   const signInNeeded = await page.locator('input[type=password]').count() > 0;
   if (signInNeeded) {
@@ -481,10 +485,35 @@ try {
     await page.waitForTimeout(3_000);
   }
 
-  // Let the application finish its own start-up: it is the start-up that mints
-  // the token and points the session at a company.
-  await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => undefined);
-  await page.waitForTimeout(2_000);
+  /**
+   * Wait for the token, not for a number of seconds.
+   *
+   * The start-up is what mints the token, and how long it takes depends on the
+   * network and on Mango. A run that waited three seconds and then reported "no
+   * token went past" was reporting its own impatience: six endpoints had been
+   * called where a complete start-up calls eighteen.
+   */
+  const waitForToken = async (seconds) => {
+    for (let waited = 0; waited < seconds * 4; waited += 1) {
+      if (authToken) return true;
+      await page.waitForTimeout(250);
+    }
+    return Boolean(authToken);
+  };
+
+  if (!(await waitForToken(30))) {
+    /**
+     * Nudge it, by opening a screen that needs figures.
+     *
+     * The shell can settle without asking for anything, and this is the screen
+     * the captured traffic came from — a screen that has to fetch to draw
+     * itself, which is what makes the application authenticate.
+     */
+    console.log('   nothing yet; opening a screen that needs figures');
+    await page.goto(`${anywhere}/page/transaction/fin/v_fn_cash_on_hand`,
+      { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
+    await waitForToken(30);
+  }
 
   if (blocked.size > 0) {
     const summary = [...blocked].map(([host, count]) => `${host}${count > 1 ? ` ×${count}` : ''}`).join(', ');
@@ -494,10 +523,17 @@ try {
   console.log(`   token: ${authToken ? 'taken off its own traffic' : 'not seen — the reads below will fail'}`);
 
   if (!authToken) {
-    console.error('\n   No x-mango-auth header went past. Either the sign-in did not complete or this');
-    console.error('   build does not use one. Run again with --headed to watch what happens.');
-    await page.screenshot({ path: 'mango-anywhere-signin.png' }).catch(() => undefined);
-    console.error('   A screenshot of where it stopped: mango-anywhere-signin.png');
+    console.error('\n   No x-mango-auth header went past in a minute of waiting.');
+    console.error(`   The page ended at ${page.url()}`);
+    console.error(`   titled "${await page.title().catch(() => '—')}"`);
+    console.error(`   and the application called ${seenEndpoints.size} endpoints; a complete `
+      + 'start-up calls about eighteen.');
+    if (await page.locator('input[type=password]').count() > 0) {
+      console.error('\n   There is still a password box on the page, so the sign-in did not take —');
+      console.error('   check the account, and whether it must change its password.');
+    }
+    await page.screenshot({ path: 'mango-anywhere-signin.png', fullPage: true }).catch(() => undefined);
+    console.error('\n   A screenshot of where it stopped: mango-anywhere-signin.png');
     process.exit(1);
   }
 
