@@ -143,26 +143,75 @@ console.log(`   as ${user} · company ${maincode}`);
  * something they already have.
  */
 /**
- * Is this a real browser, or a script standing where one should be?
+/**
+ * Is this an actual browser binary?
  *
- * On Ubuntu `chromium` and `chromium-browser` are transitional packages whose
- * binaries are shell scripts that hand off to a Snap. In a hosted shell the
- * Snap cannot run, and the failure arrives as "the browser has been closed" —
- * which reads as a crash rather than as the wrong file entirely. An executable
- * that begins with a shebang is not a browser, and saying so is worth more
- * than any amount of retrying.
+ * A launcher script is not a red flag by itself, and treating it as one cost a
+ * round: Google Chrome's own .deb installs `/usr/bin/google-chrome` as a small
+ * shell script that execs `/opt/google/chrome/chrome`, and that is a perfectly
+ * good browser. What is unusable is a script handing off to a Snap, because a
+ * Snap cannot run in a hosted shell. So the question is not "script or binary"
+ * but "does this lead to a binary that exists".
  */
-const looksLikeAScript = (file) => {
+const isElf = (file) => {
   try {
     const handle = fs.openSync(file, 'r');
-    const head = Buffer.alloc(2);
-    fs.readSync(handle, head, 0, 2, 0);
+    const head = Buffer.alloc(4);
+    fs.readSync(handle, head, 0, 4, 0);
     fs.closeSync(handle);
-    return head.toString('latin1') === '#!';
+    return head[0] === 0x7f && head.toString('latin1', 1, 4) === 'ELF';
   } catch {
     return false;
   }
 };
+
+/**
+ * Follow a launcher script to the binary it starts.
+ *
+ * Reads the paths the script mentions and returns the first that is a real
+ * executable. One pointing only into /snap is a dead end and says so rather
+ * than being followed.
+ */
+const resolveLauncher = (file) => {
+  let text;
+  try {
+    if (fs.statSync(file).size > 64_000) return { snap: false, target: null };
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return { snap: false, target: null };
+  }
+
+  const mentioned = [...text.matchAll(/(\/[\w./+-]{4,})/g)].map((match) => match[1]);
+  if (mentioned.some((candidate) => candidate.startsWith('/snap/'))) {
+    return { snap: true, target: null };
+  }
+
+  for (const candidate of mentioned) {
+    if (candidate === file) continue;
+    if (isElf(candidate)) return { snap: false, target: candidate };
+  }
+  return { snap: false, target: null };
+};
+
+/**
+ * Where the packages actually put the binary.
+ *
+ * Looked at before PATH, because this is the answer rather than a signpost to
+ * it: each of these is the real executable a launcher script on PATH would
+ * have started.
+ */
+const WELL_KNOWN = [
+  '/opt/google/chrome/chrome',
+  '/opt/google/chrome/google-chrome',
+  '/opt/google/chrome-beta/chrome',
+  '/opt/chromium.org/chromium/chromium',
+  '/opt/microsoft/msedge/msedge',
+  '/usr/lib/chromium/chromium',
+  '/usr/lib/chromium-browser/chromium-browser',
+  '/usr/lib64/chromium-browser/chromium-browser',
+];
+
+const deadEnds = [];
 
 const findChromium = () => {
   // Checked rather than trusted: an override naming a file that is not there
@@ -203,18 +252,21 @@ const findChromium = () => {
     }
   }
 
+  // The binaries the packages install, which is where a launcher on PATH would
+  // have sent us anyway.
+  for (const candidate of WELL_KNOWN) {
+    if (isElf(candidate)) return candidate;
+  }
+
   /**
    * A browser the machine already has, installed the ordinary way.
    *
    * Playwright's own download is the first thing to fail on a machine with a
-   * small disk or restricted egress — and a Chromium from the distribution's
-   * packages works perfectly well for loading one page. Looking here turns
-   * "install a browser" into "you already have one".
+   * small disk or restricted egress, and a browser from the distribution's
+   * packages loads one page perfectly well. Looking here turns "install a
+   * browser" into "you already have one".
    */
   const systemNames = [
-    // `chromium` before `chromium-browser`: on Debian and Ubuntu the latter is
-    // sometimes a wrapper around a Snap, which cannot run in a hosted shell and
-    // fails in a way that looks like the browser crashing.
     'chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable',
     'microsoft-edge', 'microsoft-edge-stable',
   ];
@@ -228,13 +280,15 @@ const findChromium = () => {
       } catch {
         continue;
       }
-      // A wrapper is remembered but not chosen: a real binary further down the
-      // list beats it, and it is only reported if nothing better turns up.
-      if (looksLikeAScript(candidate)) {
-        wrappers.push(candidate);
-        continue;
-      }
-      return candidate;
+
+      if (isElf(candidate)) return candidate;
+
+      // A launcher script: follow it. One leading to a real binary is as good
+      // as finding the binary; one leading only into /snap is remembered so it
+      // can be named if nothing better turns up.
+      const { snap, target } = resolveLauncher(candidate);
+      if (target) return target;
+      deadEnds.push({ path: candidate, snap });
     }
   }
 
@@ -242,18 +296,22 @@ const findChromium = () => {
   return undefined;
 };
 
-const wrappers = [];
 const executablePath = findChromium();
 
-if (!executablePath && wrappers.length > 0) {
-  console.error(`\n   The only browsers on this machine are wrappers, not browsers:`);
-  for (const wrapper of wrappers) console.error(`     ${wrapper}`);
-  console.error('\n   On Ubuntu these hand off to a Snap, and a Snap cannot run in a hosted');
-  console.error('   shell — apt-get install chromium reinstalls the same wrapper. Google Chrome');
-  console.error('   ships a real binary in a .deb, which does work:');
+if (!executablePath && deadEnds.length > 0) {
+  console.error('\n   Every browser on this machine is a launcher with nothing behind it:');
+  for (const dead of deadEnds) {
+    console.error(`     ${dead.path}${dead.snap ? '   → a Snap, which cannot run here' : ''}`);
+  }
+  if (deadEnds.some((dead) => dead.snap)) {
+    console.error('\n   On Ubuntu apt-get install chromium reinstalls the same Snap wrapper, so');
+    console.error('   there is no apt route to a real one. Google Chrome ships a real binary:');
+  } else {
+    console.error('\n   Install one that does:');
+  }
   console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
   console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
-  console.error('   then run this again — it will be found on PATH.');
+  console.error('   then run this again.');
   process.exit(2);
 }
 if (executablePath) console.log(`   browser: ${executablePath}`);
@@ -315,17 +373,9 @@ try {
       console.error(`\n   ${executablePath} would not start.`);
       console.error(`   ${err.message.split('\n').slice(0, 4).join('\n   ')}`);
       console.error('\n   It was found, so this is not a missing browser.');
-      if (looksLikeAScript(executablePath)) {
-        console.error(`   ${executablePath} is a shell script, not a browser — on Ubuntu it hands`);
-        console.error('   off to a Snap, which cannot run in a hosted shell. apt-get install');
-        console.error('   chromium reinstalls the same wrapper; Google Chrome ships a real binary:');
-        console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
-        console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
-      } else {
-        console.error('   Try another: CHROMIUM_PATH=/path/to/chrome, or install Google Chrome:');
-        console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
-        console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
-      }
+      console.error('   Try another: CHROMIUM_PATH=/path/to/chrome, or install Google Chrome:');
+      console.error('     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb');
+      console.error('     sudo apt-get install -y ./google-chrome-stable_current_amd64.deb');
     } else {
       console.error(`\n   No browser was found: ${err.message.split('\n')[0]}`);
       console.error('\n   Playwright\u2019s own download is the first thing to fail on a machine with');

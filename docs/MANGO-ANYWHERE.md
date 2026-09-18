@@ -101,10 +101,19 @@ Snap**, and a Snap cannot run in a hosted shell. `apt-get install chromium`
 reinstalls the same wrapper, so there is no apt route to a real Chromium there
 at all.
 
-The pull recognises this rather than retrying: an executable beginning with a
-shebang is not a browser, so wrappers are skipped in favour of any real binary
-further along `PATH`, and if wrappers are all there is it says so and names the
-way out. Google Chrome ships a real binary in a `.deb`:
+The pull tells that apart from the ordinary case, which matters because
+**Google Chrome's own launcher is a shell script too** — its `.deb` installs
+`/usr/bin/google-chrome` as a few lines that exec `/opt/google/chrome/chrome`,
+and that is a perfectly good browser. "Is it a script" is therefore the wrong
+question; "does it lead to a binary that exists" is the right one.
+
+So the lookup reads a launcher script and follows it, takes the binary it
+names, and only reports a dead end when a script leads nowhere — or into
+`/snap`, which it names as such. It also looks straight at where the packages
+put their binaries (`/opt/google/chrome/chrome` and friends) before consulting
+`PATH` at all, since that is the answer rather than a signpost to it.
+
+Google Chrome ships a real binary in a `.deb`:
 
 ```bash
 wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
