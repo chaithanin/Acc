@@ -324,3 +324,35 @@ describe('which way round the bank balances are', () => {
     assert.ok(mapped.totals.cash < 0, 'the sign was flipped without being asked');
   });
 });
+
+/**
+ * The balances have no dates and the ageing report is built from dates.
+ *
+ * Mango answers a balance per customer and a band per customer, and nothing
+ * saying when anything fell due. So these records land in the ageing report's
+ * undated bucket — correctly, and not silently — but replacing dated workbook
+ * receivables with them moves the whole report into one bucket. That is a
+ * consequence of the decision to make Mango the source, and it should be read
+ * rather than discovered.
+ */
+describe('balances without dates', () => {
+  it('says what that costs the ageing report, and names the bands it has instead', () => {
+    const issue = run().issues.find((i) => i.code === 'ANYWHERE_RECEIVABLES_UNDATED');
+    assert.ok(issue, 'a whole report changed behaviour without a word');
+    assert.equal(issue!.severity, 'warning');
+    assert.match(issue!.message, /undated bucket/);
+    assert.match(issue!.message, /loses\s+its buckets/);
+    // The bands Mango does have, so the information is visibly not lost.
+    assert.match(issue!.message, /A 1,250,000/);
+  });
+
+  it('leaves the due date empty rather than inventing one', () => {
+    assert.ok(run().data.receivable.every((row) => row.dueDate === null),
+      'a due date was invented to fill an ageing bucket');
+  });
+
+  it('says nothing when there are no balances to misplace', () => {
+    const mapped = mapAnywhereBundle({}, { reportDate: '2026-09-19', maincode: 'MG4' });
+    assert.equal(mapped.issues.find((i) => i.code === 'ANYWHERE_RECEIVABLES_UNDATED'), undefined);
+  });
+});

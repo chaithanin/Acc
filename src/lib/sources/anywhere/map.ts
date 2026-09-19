@@ -364,6 +364,35 @@ export function mapAnywhereBundle(
   }
 
   /**
+   * These balances carry no dates, and the ageing report is built from dates.
+   *
+   * Mango answers a balance per customer and a band per customer, and nothing
+   * that says when anything fell due. So every record written here lands in the
+   * ageing report's "undated" bucket — which is the right place for it and is
+   * not silent, but it does mean that replacing dated workbook receivables with
+   * these moves the whole report into one bucket.
+   *
+   * The information is not lost; it is in a different shape. Mango's own bands
+   * are the ageing it has, and they are returned separately. Inventing due
+   * dates to fill the buckets would make the report look right and mean
+   * nothing, which is worse than a report that says it does not know.
+   */
+  if (data.receivable.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'ANYWHERE_RECEIVABLES_UNDATED',
+      message:
+        `All ${data.receivable.length} customer balances arrive without dates — Mango answers a `
+        + 'balance and a grade, not a due date — so they sit in the ageing report\u2019s undated '
+        + 'bucket. Where these replace dated receivables from a workbook, the ageing report loses '
+        + `its buckets. Mango\u2019s own bands are reported instead: `
+        + `${receivableAgeing.map((band) => `${band.band} `
+          + `${Math.round(band.amount).toLocaleString('en-US')}`).join(', ') || 'none came back'}.`,
+      source: ref('arBalances', 0),
+    });
+  }
+
+  /**
    * Does the ageing agree with the balances?
    *
    * Two independent answers to the same question, so a gap between them is

@@ -248,6 +248,24 @@ not written into the income or expense ledgers: the balances already carry the
 invoiced amounts, and filing both would report the invoices plus the payments
 for those same invoices.
 
+## What making Mango the source costs the ageing report
+
+Worth knowing before it is noticed on a screen. Mango answers a balance per
+customer and a band per customer, and **nothing that says when anything fell
+due**. The ageing report here is built from dates, so every record written by
+this pull lands in its *undated* bucket — the right place for it, and not
+silent, but it means that where these replace dated receivables from a workbook
+the report loses its buckets.
+
+The information is not lost; it is in a different shape. Mango's own bands are
+the ageing it has, and the run reports them alongside the warning. Inventing due
+dates to fill the buckets would make the report look right and mean nothing,
+which is worse than a report saying it does not know.
+
+If the buckets matter more than the freshness, the answer is to keep the
+workbook as the source for receivables and take only payables and bank from
+here — a choice, not a defect, and one this says out loud on every pull.
+
 ## Mango is the source for three kinds of record, and only three
 
 Decided, and implemented as decided: **receivables, payables and bank balances
