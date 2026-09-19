@@ -35,7 +35,13 @@
  *                       sends, once that has been confirmed against one
  *                       account in Mango's own screen
  *   --date YYYY-MM-DD   the date to file it under (default: today)
- *   --all-companies     walk every company this account can open
+ *   --all-companies     walk every company this account can open, asking Mango
+ *                       which those are
+ *   --map MG2=HAMONIA,MG1=CHTN
+ *                       which company here each Mango company is. Needed to
+ *                       write more than one; the two systems spell the same
+ *                       company differently and a near-match would file one
+ *                       subsidiary's balances under another.
  *   --dry-run           fetch, map and report; write nothing
  *   --save <file>       write the raw answers to disk, for inspection
  *   --headed            show the browser, for watching it work
@@ -66,10 +72,16 @@ const savePath = flag('save');
 // Mango returns the bank balances the accounting way round. Confirmed against
 // one account in its own screen, this records the answer in the command.
 const flipBankSign = has('flip-bank-sign');
+const allCompanies = has('all-companies');
+// Which company here each Mango company is. Given rather than guessed: the two
+// systems spell the same company differently, and a near-match files one
+// subsidiary's balances under another.
+const companyMap = (flag('map') ?? '').split(',').map((pair) => pair.trim()).filter(Boolean);
 const maincode = (process.env.MANGO_MAINCODE ?? 'MG1').toUpperCase();
 
-if (!dryRun && !companyCode) {
-  console.error('Which company is this for? Pass --company <code>, or --dry-run to only look.');
+if (!dryRun && !companyCode && !has('all-companies')) {
+  console.error('Which company is this for? Pass --company <code>, or --all-companies with');
+  console.error('--map, or --dry-run to only look.');
   process.exit(2);
 }
 
@@ -571,231 +583,328 @@ try {
 
   // ------------------------------------------------------------------ read
 
-  const fill = (value) => String(value)
-    .replace('{date}', reportDate)
-    .replace('{company}', maincode);
+  /**
+   * Point the service session at a company.
+   *
+   * Signing in settles the company for the estate module; the service keeps its
+   * own, and this is what the front end calls to change it. Reading a second
+   * company without it returns the first one's figures under the second one's
+   * name, which is the worst available outcome — plausible, labelled, wrong.
+   */
+  const switchCompany = async (code) => {
+    const answer = await ask(`${service}/anywhere/center/Maincomp?maincode=${encodeURIComponent(code)}`);
+    if (answer.status !== 200) {
+      console.error(`   could not switch to ${code}: ${answer.status}`);
+      return false;
+    }
+    return true;
+  };
 
-  console.log(bold('\n── Reading'));
-  const bundle = {};
+  /** One request, made from inside the page: its origin, its cookies, its token. */
+  const ask = (url) => page.evaluate(async ([target, token]) => {
+    try {
+      const response = await fetch(target, {
+        headers: { 'x-mango-auth': token, accept: 'application/json, text/plain, */*' },
+        credentials: 'include',
+      });
+      return { status: response.status, text: (await response.text()).slice(0, 2_000_000) };
+    } catch (err) {
+      return { status: 0, text: String(err) };
+    }
+  }, [url, authToken]);
 
-  for (const [key, label, endpoint, params] of READS) {
-    const query = Object.entries(params)
-      .map(([key, value]) => `${key}=${encodeURIComponent(fill(value))}`)
-      .join('&');
-    const url = `${service}/${endpoint}${query ? `?${query}` : ''}`;
-
-    // Fetched from inside the page: its origin, its cookies, its token. The
-    // same request the application makes, which is the point.
-    const answer = await page.evaluate(async ([target, token]) => {
-      try {
-        const response = await fetch(target, {
-          headers: { 'x-mango-auth': token, accept: 'application/json, text/plain, */*' },
-          credentials: 'include',
-        });
-        const text = await response.text();
-        return { status: response.status, text: text.slice(0, 2_000_000) };
-      } catch (err) {
-        return { status: 0, text: String(err) };
-      }
-    }, [url, authToken]);
-
+  const unwrap = (answer, label) => {
     if (answer.status !== 200) {
       console.log(`   ${label.padEnd(28)} ${answer.status}`);
-      continue;
+      return null;
     }
-
     let body;
     try {
       body = JSON.parse(answer.text);
     } catch {
       console.log(`   ${label.padEnd(28)} answered something that is not JSON`);
-      continue;
+      return null;
     }
-
-    const payload = body && typeof body === 'object' && 'success' in body ? body.data : body;
     if (body?.success === false) {
       console.log(`   ${label.padEnd(28)} refused: ${body.error ?? 'no reason given'}`);
-      continue;
+      return null;
+    }
+    return body && typeof body === 'object' && 'success' in body ? body.data : body;
+  };
+
+  /** Read every endpoint for one company and map the answers. */
+  const readCompany = async (code) => {
+    const fill = (value) => String(value)
+      .replace('{date}', reportDate)
+      .replace('{company}', code);
+
+    const bundle = {};
+    for (const [key, label, endpoint, params] of READS) {
+      const query = Object.entries(params)
+        .map(([name, value]) => `${name}=${encodeURIComponent(fill(value))}`)
+        .join('&');
+
+      const payload = unwrap(await ask(`${service}/${endpoint}${query ? `?${query}` : ''}`), label);
+      if (payload === null) continue;
+
+      // A grid wrapper where a list was expected is the shape the estate module
+      // answers with too; unwrapping it here keeps the mapper reading one thing.
+      bundle[key] = Array.isArray(payload) ? payload
+        : Array.isArray(payload?.data) ? payload.data
+          : payload && typeof payload === 'object' ? [payload] : [];
+      console.log(`   ${label.padEnd(28)} ${shapeOf(payload)}`);
     }
 
-    // A grid wrapper where a list was expected is the shape the estate module
-    // answers with too, and unwrapping it here rather than in the mapper keeps
-    // the mapper reading one thing.
-    const rows = Array.isArray(payload) ? payload
-      : Array.isArray(payload?.data) ? payload.data
-        : payload && typeof payload === 'object' ? [payload] : [];
-    bundle[key] = rows;
-    console.log(`   ${label.padEnd(28)} ${shapeOf(payload)}`);
+    const read = Object.keys(bundle).length;
+    console.log(`   ${String(read).padStart(2)} of ${READS.length} answered`);
+
+    const { mapAnywhereBundle } = await import('../src/lib/sources/anywhere/map.ts');
+    return { bundle, read, mapped: mapAnywhereBundle(bundle, { reportDate, maincode: code, flipBankSign }) };
+  };
+
+  /** Print one company's position. */
+  const report = (code, mapped) => {
+    console.log(bold(`\n── ${code}`));
+    const line = (label, value) => console.log(`   ${label.padEnd(26)} ${money(value).padStart(18)}`);
+
+    // Only the balances. total_amt is this period's billing rather than a
+    // history, so a line called "invoiced" would be claiming more than it knows.
+    line('owed by customers', mapped.totals.receivableOutstanding);
+    line('owed to suppliers', mapped.totals.payableOutstanding);
+    line('billed this period, in', mapped.totals.receivable);
+    line('billed this period, out', mapped.totals.payable);
+    line('in the bank', mapped.totals.cash);
+    if (mapped.totals.guarantees > 0) line('held as guarantees', mapped.totals.guarantees);
+    if (flipBankSign) console.log('   (bank balances read as the negative of what Mango sends)');
+
+    console.log(`\n   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
+      + `${mapped.counts.bankAccounts} bank accounts`);
+
+    if (mapped.ageing.receivable.length > 0) {
+      console.log('\n   receivable ageing:');
+      for (const band of mapped.ageing.receivable) {
+        console.log(`     ${band.band.padEnd(10)} ${money(band.amount).padStart(18)}`);
+      }
+    }
+
+    const months = [...mapped.collectedByMonth.entries()].sort().slice(-6);
+    if (months.length > 0) {
+      console.log('\n   collected by month (cash moved, not revenue raised):');
+      for (const [month, amount] of months) {
+        console.log(`     ${month}    ${money(amount).padStart(18)}`);
+      }
+    }
+
+    // Errors first: a figure that cannot be true should not be read after a
+    // dozen notes about columns.
+    const ordered = [...mapped.issues].sort((a, b) =>
+      (a.severity === 'error' ? 0 : a.severity === 'warning' ? 1 : 2)
+      - (b.severity === 'error' ? 0 : b.severity === 'warning' ? 1 : 2));
+    for (const issue of ordered) console.log(`\n   ${issue.severity}: ${issue.message}`);
+  };
+
+  /**
+   * Which companies to read.
+   *
+   * `--all-companies` asks Mango which ones the account can open rather than
+   * being told, because the answer is the authority on it — and an account that
+   * has lost a company should shrink the run rather than fail one of them.
+   */
+  let targets = [maincode];
+
+  if (allCompanies) {
+    const payload = unwrap(
+      await ask(`${service}/api/public/LoginCompaniesByUserID?userid=${encodeURIComponent(user)}`),
+      'companies',
+    );
+    const rows = Array.isArray(payload) ? payload : payload?.data;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      console.error('\n   Could not find out which companies this account can open.');
+      process.exit(1);
+    }
+
+    targets = rows
+      .map((row) => String(row.maincode ?? '').trim().toUpperCase())
+      .filter(Boolean);
+
+    console.log(bold(`\n── ${targets.length} companies this account can open`));
+    for (const row of rows) {
+      console.log(`   ${String(row.maincode ?? '').padEnd(6)} ${row.mainname ?? row.compname ?? ''}`);
+    }
+  }
+
+  const results = [];
+  for (const code of targets) {
+    console.log(bold(`\n── Reading ${code}`));
+    if (targets.length > 1 && !(await switchCompany(code))) continue;
+
+    const { bundle, read, mapped } = await readCompany(code);
+    if (read === 0) {
+      console.error(`   nothing answered for ${code}; skipping it rather than writing an empty position`);
+      continue;
+    }
+    report(code, mapped);
+    results.push({ code, bundle, mapped });
+  }
+
+  if (results.length === 0) {
+    console.error('\n   Nothing answered for any company. The token went past, so the session is');
+    console.error('   signed in and not pointed at a company.');
+    process.exit(1);
   }
 
   if (savePath) {
     fs.mkdirSync(path.dirname(path.resolve(savePath)), { recursive: true });
-    fs.writeFileSync(savePath, JSON.stringify({ maincode, reportDate, bundle }, null, 1), 'utf8');
+    fs.writeFileSync(savePath, JSON.stringify({ reportDate, companies: results.map(
+      ({ code, bundle }) => ({ maincode: code, bundle })) }, null, 1), 'utf8');
     console.log(`\n   written to ${savePath}`);
   }
-
-  const read = Object.keys(bundle).length;
-  console.log(bold(`\n── ${read} of ${READS.length} answered`));
-
-  if (read === 0) {
-    console.error('\n   Nothing answered. The token went past but the reads were refused, which');
-    console.error('   means the session is signed in and not pointed at a company.');
-    process.exit(1);
-  }
-
-  // ----------------------------------------------------------------- map
-
-  const { mapAnywhereBundle } = await import('../src/lib/sources/anywhere/map.ts');
-  const mapped = mapAnywhereBundle(bundle, { reportDate, maincode, flipBankSign });
-
-  console.log(bold('\n── ' + maincode));
-  const line = (label, value) => console.log(`   ${label.padEnd(26)} ${money(value).padStart(18)}`);
-
-  // Only the balances. total_amt is this period's billing rather than a
-  // history, so a line called "invoiced" would be claiming more than it knows.
-  line('owed by customers', mapped.totals.receivableOutstanding);
-  line('owed to suppliers', mapped.totals.payableOutstanding);
-  line('billed this period, in', mapped.totals.receivable);
-  line('billed this period, out', mapped.totals.payable);
-  line('in the bank', mapped.totals.cash);
-  if (mapped.totals.guarantees > 0) line('held as guarantees', mapped.totals.guarantees);
-  if (flipBankSign) console.log('   (bank balances read as the negative of what Mango sends)');
-
-  console.log(`\n   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
-    + `${mapped.counts.bankAccounts} bank accounts`);
-
-  if (mapped.ageing.receivable.length > 0) {
-    console.log('\n   receivable ageing:');
-    for (const band of mapped.ageing.receivable) {
-      console.log(`     ${band.band.padEnd(10)} ${money(band.amount).padStart(18)}`);
-    }
-  }
-
-  const months = [...mapped.collectedByMonth.entries()].sort().slice(-6);
-  if (months.length > 0) {
-    console.log('\n   collected by month (cash moved, not revenue raised):');
-    for (const [month, amount] of months) {
-      console.log(`     ${month}    ${money(amount).padStart(18)}`);
-    }
-  }
-
-  // Errors first: a figure that cannot be true should not be read after a
-  // dozen notes about columns.
-  const ordered = [...mapped.issues].sort((a, b) =>
-    (a.severity === 'error' ? 0 : a.severity === 'warning' ? 1 : 2)
-    - (b.severity === 'error' ? 0 : b.severity === 'warning' ? 1 : 2));
-  for (const issue of ordered) console.log(`\n   ${issue.severity}: ${issue.message}`);
 
   if (dryRun) console.log(bold('\n   --dry-run: nothing was written.\n'));
 
   // --------------------------------------------------------------- persist
 
   if (!dryRun) {
-
     const companies = await import('../src/lib/db/repositories/companies.ts');
     const imports = await import('../src/lib/db/repositories/imports.ts');
     const snapshots = await import('../src/lib/db/repositories/snapshots.ts');
     const { indexSourceRefs } = await import('../src/lib/calc/aggregate.ts');
     const { mergeDatasets } = await import('../src/lib/types.ts');
 
-    const company = companies.listAllCompanies().find((c) => c.companyCode === companyCode);
-    if (!company) {
-      console.error(`\n   No company with code ${companyCode}. Add it in Settings › Companies first.`);
-      process.exit(1);
+    const known = companies.listAllCompanies();
+
+    /**
+     * Which company here each Mango company is.
+     *
+     * Not guessed from the names. The two systems spell the same company
+     * differently — "มารีน่า โกลเด้น เบย์ วิกตอเรีย" here against "มาริน่า
+     * โกลเด้น เบย์ วิคทอเรีย" there — and a near-match that picks the wrong
+     * company files one subsidiary's balances under another. So the mapping is
+     * given, and a company without one is skipped and named.
+     */
+    const mapping = new Map();
+    for (const pair of companyMap) {
+      const [from, to] = pair.split('=').map((part) => part.trim());
+      if (from && to) mapping.set(from.toUpperCase(), to);
+    }
+    if (companyCode && targets.length === 1) mapping.set(targets[0], companyCode);
+
+    const unmapped = results.filter(({ code }) => !mapping.has(code)).map(({ code }) => code);
+    if (unmapped.length > 0) {
+      console.error(`\n   No company here is named for ${unmapped.join(', ')}.`);
+      console.error('   Say which, and nothing is guessed:');
+      console.error(`     --map ${unmapped.map((code) => `${code}=CODE`).join(',')}`);
+      console.error(`\n   The companies here are: ${known.map((c) => c.companyCode).join(', ')}`);
+      if (unmapped.length === results.length) process.exit(1);
     }
 
     /**
-     * Mango is the source for these three, and the workbooks stay the source for
-     * the rest.
+     * Mango is the source for these three, and the workbooks stay the source
+     * for the rest.
      *
      * Replacing a snapshot retires the whole of it, and the whole of it is more
-     * than receivables, payables and bank — the general ledger, the cash flow and
-     * the BOQ arrive from uploaded files and would go with it. So the records
-     * this pull does not own are read out of the current snapshot and carried
-     * forward, and only the three kinds Mango is authoritative for are replaced.
+     * than receivables, payables and bank — the general ledger, the cash flow
+     * and the BOQ arrive from uploaded files and would go with it. So the
+     * records this pull does not own are read out of the current snapshot and
+     * carried forward, and only the three kinds Mango is authoritative for are
+     * replaced.
      *
-     * The alternative, writing this alongside, is the double count the
-     * reconciliation rules exist to catch: the same balances twice, once from
-     * here and once from the workbook.
+     * Writing alongside instead is the double count the reconciliation rules
+     * exist to catch: the same balances twice, once from each source.
      */
     const OWNED = ['receivable', 'payable', 'bank'];
 
-    const current = snapshots.getCurrentSnapshot(company.id);
-    let carried = null;
+    let written = 0;
+    for (const { code, bundle, mapped } of results) {
+      const target = mapping.get(code);
+      if (!target) continue;
 
-    if (current) {
-      const existing = snapshots.loadDataset(company.id, current.id);
-      carried = { ...existing.data };
-      for (const kind of OWNED) carried[kind] = [];
+      const company = known.find((c) => c.companyCode === target);
+      if (!company) {
+        console.error(`\n   ${code} → ${target}, and there is no company here with that code.`);
+        continue;
+      }
 
-      const dropped = OWNED.map((kind) => `${existing.data[kind]?.length ?? 0} ${kind}`).join(', ');
-      const kept = Object.entries(carried)
-        .filter(([, rows]) => Array.isArray(rows) && rows.length > 0)
-        .map(([kind, rows]) => `${rows.length} ${kind}`)
-        .join(', ');
+      console.log(bold(`\n── ${code} → ${company.displayName}`));
 
-      console.log(bold('\n── Replacing what Mango owns, keeping what it does not'));
-      console.log(`   superseded from the workbooks: ${dropped || 'nothing'}`);
-      console.log(`   carried forward unchanged:     ${kept || 'nothing'}`);
-    } else {
-      console.log(bold('\n── First import for this company'));
+      const current = snapshots.getCurrentSnapshot(company.id);
+      let carried = null;
+
+      if (current) {
+        const existing = snapshots.loadDataset(company.id, current.id);
+        carried = { ...existing.data };
+        for (const kind of OWNED) carried[kind] = [];
+
+        const superseded = OWNED
+          .map((kind) => `${existing.data[kind]?.length ?? 0} ${kind}`)
+          .join(', ');
+        const kept = Object.entries(carried)
+          .filter(([, rows]) => Array.isArray(rows) && rows.length > 0)
+          .map(([kind, rows]) => `${rows.length} ${kind}`)
+          .join(', ');
+
+        console.log(`   superseded from the workbooks: ${superseded}`);
+        console.log(`   carried forward unchanged:     ${kept || 'nothing'}`);
+      } else {
+        console.log('   first import for this company');
+      }
+
+      const combined = carried ? mergeDatasets(carried, mapped.data) : mapped.data;
+      indexSourceRefs(combined);
+
+      const payload = JSON.stringify({ maincode: code, reportDate, bundle });
+      const file = {
+        fileName: `mango-anywhere-${code}-${reportDate}.json`,
+        originalName: `Mango Anywhere ${code} — ${reportDate}`,
+        containerFile: null,
+        filePath: `mango://${service}/anywhereAPI/Dashboard`,
+        // The hash of what Mango answered, so an identical pull is recognised
+        // as the duplicate it is rather than filed twice.
+        hash: createHash('sha256').update(payload).digest('hex'),
+        size: Buffer.byteLength(payload),
+        fileType: 'json',
+        project: { projectId: null, projectCode: null, projectName: null, matchedAlias: null, matchedIn: 'api', confidence: 1 },
+        reportDate,
+        reportType: 'receivable',
+        reportTypeLabel: `Mango Anywhere — ${code}`,
+        sheetCount: 1,
+        sheets: [],
+        data: combined,
+        rowCount: mapped.data.receivable.length + mapped.data.payable.length + mapped.data.bank.length,
+        issues: mapped.issues,
+        status: 'parsed',
+        error: null,
+      };
+
+      const duplicates = imports.findDuplicates(company.id, [{
+        fileName: file.fileName, hash: file.hash, reportDate,
+        projectId: null, reportType: 'receivable',
+      }]);
+
+      if (duplicates.length > 0 && !has('force')) {
+        console.log(`   identical to the pull imported on ${duplicates[0].importedAt.slice(0, 10)}; `
+          + 'skipped. --force to import it again.');
+        continue;
+      }
+
+      const outcome = imports.persistImport({
+        companyId: company.id,
+        reportDate,
+        label: `Mango Anywhere ${code} ${reportDate}`,
+        userId: null,
+        files: [file],
+        issues: [],
+        mode: 'replace',
+      });
+
+      console.log(`   import ${outcome.importId}`);
+      console.log(`   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
+        + `${mapped.counts.bankAccounts} bank accounts written`);
+      written += 1;
     }
 
-    const combined = carried ? mergeDatasets(carried, mapped.data) : mapped.data;
-    indexSourceRefs(combined);
-
-    const payload = JSON.stringify({ maincode, reportDate, bundle });
-    const file = {
-      fileName: `mango-anywhere-${maincode}-${reportDate}.json`,
-      originalName: `Mango Anywhere ${maincode} — ${reportDate}`,
-      containerFile: null,
-      filePath: `mango://${service}/anywhereAPI/Dashboard`,
-      // The hash of what Mango answered, so an identical pull is recognised as
-      // the duplicate it is rather than filed twice.
-      hash: createHash('sha256').update(payload).digest('hex'),
-      size: Buffer.byteLength(payload),
-      fileType: 'json',
-      project: { projectId: null, projectCode: null, projectName: null, matchedAlias: null, matchedIn: 'api', confidence: 1 },
-      reportDate,
-      reportType: 'receivable',
-      reportTypeLabel: `Mango Anywhere — ${maincode}`,
-      sheetCount: 1,
-      sheets: [],
-      data: combined,
-      rowCount: mapped.data.receivable.length + mapped.data.payable.length + mapped.data.bank.length,
-      issues: mapped.issues,
-      status: 'parsed',
-      error: null,
-    };
-
-    const duplicates = imports.findDuplicates(company.id, [{
-      fileName: file.fileName, hash: file.hash, reportDate,
-      projectId: null, reportType: 'receivable',
-    }]);
-
-    if (duplicates.length > 0 && !has('force')) {
-      console.error(`\n   This pull is identical to one already imported on `
-        + `${duplicates[0].importedAt.slice(0, 10)}. Nothing was written; --force to import anyway.`);
-      process.exit(1);
-    }
-
-    const outcome = imports.persistImport({
-      companyId: company.id,
-      reportDate,
-      label: `Mango Anywhere ${maincode} ${reportDate}`,
-      userId: null,
-      files: [file],
-      issues: [],
-      // Replace, because Mango is now the source for these three: writing them
-      // alongside the workbook's own would report the same balances twice.
-      mode: 'replace',
-    });
-
-    console.log(`\n   import   ${outcome.importId}`);
-    console.log(`   snapshot ${outcome.snapshotId}`);
-    console.log(`   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
-      + `${mapped.counts.bankAccounts} bank accounts written`);
-    console.log(bold('\n   Done.\n'));
+    console.log(bold(`\n   ${written} of ${results.length} companies written.\n`));
   }
 } finally {
   await context.close();

@@ -28,6 +28,14 @@ const FIXTURE = anywhereFixture();
 
 /** Mango wraps some lists in a grid envelope and returns others bare. */
 const grid = (rows) => ({ total: rows.length, data: rows });
+
+/** Which company the service session is pointed at. */
+let current = 'MG1';
+
+/** MG2's balances are scaled, so a run that forgets to switch is obvious. */
+const scaled = (rows) => (current === 'MG2'
+  ? rows.map((row) => ({ ...row, balance_amt: Number(String(row.balance_amt ?? 0).replace(/,/g, '')) * 2 }))
+  : rows);
 const PORT = 4380, USER = 'svc.dashboard', PASS = 'stub-password';
 const SESSION = 'sess-1', TOKEN = 'ab12cd34ef56ab78cd90ef12ab34cd56ef78ab90.9a26';
 const json = (r, b, s = 200) => { r.writeHead(s, {'content-type':'application/json; charset=utf-8'}); r.end(JSON.stringify(b)); };
@@ -93,8 +101,20 @@ http.createServer((req, res) => {
       res.writeHead(403, {'content-type':'text/html'});
       return res.end('<html>Forbidden</html>');
     }
+    if (p === 'api/public/LoginCompaniesByUserID')
+      return json(res, { success: true, data: [
+        { maincode: 'MG1', mainname: 'บริษัท ไชยธนินทร์ จำกัด', default_login: 'Y' },
+        { maincode: 'MG2', mainname: 'บริษัท เดอะ ซัน ไลท์ เรสซิเด้นซ์ 9 จำกัด' }] });
+    // Switching company: refused for a company the account cannot open, so a
+    // run that ignores the answer writes the wrong company's figures.
+    if (p === 'anywhere/center/Maincomp') {
+      const asked = u.searchParams.get('maincode');
+      if (!['MG1', 'MG2'].includes(asked)) return json(res, { success: false, error: 'no' }, 403);
+      current = asked;
+      return json(res, { success: true, data: { maincode: asked } });
+    }
     if (p === 'anywhereAPI/Dashboard/balanceArReadList')
-      return json(res, { success: true, data: grid(FIXTURE.arBalances) });
+      return json(res, { success: true, data: grid(scaled(FIXTURE.arBalances)) });
     if (p === 'anywhereAPI/Dashboard/balanceApReadList')
       return json(res, { success: true, data: grid(FIXTURE.apBalances) });
     if (p === 'anywhereAPI/Dashboard/viewArRead')

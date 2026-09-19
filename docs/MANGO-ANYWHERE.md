@@ -271,9 +271,30 @@ exist to catch: the same balances twice, once from here and once from the
 workbook that also carries them.
 
 ```bash
-npm run anywhere:pull -- --company HAMONIA        # writes
 npm run anywhere:pull -- --company HAMONIA --dry-run   # looks
+npm run anywhere:pull -- --company HAMONIA             # writes
 ```
+
+## All six companies in one run
+
+The group is six companies and the sign-in reaches all of them, so
+`--all-companies` asks Mango which ones the account can open and walks them.
+Between companies it calls `anywhere/center/Maincomp` to point the service
+session at the next one — without which the second company's figures are the
+first company's, under the second one's name, which is the worst available
+outcome: plausible, labelled, and wrong.
+
+Writing more than one needs the mapping given rather than guessed:
+
+```bash
+npm run anywhere:pull -- --all-companies --dry-run
+npm run anywhere:pull -- --all-companies --map MG1=CHTN,MG2=HAMONIA,MG4=GTG
+```
+
+The two systems spell the same company differently — "มารีน่า โกลเด้น เบย์
+วิกตอเรีย" here against "มาริน่า โกลเด้น เบย์ วิคทอเรีย" there — so a
+near-match would file one subsidiary's balances under another. A company with no
+mapping is named and skipped, and the run says how many of how many it wrote.
 
 An identical pull is recognised by the hash of what Mango answered and refused
 as the duplicate it is; `--force` overrides. It goes through the same
