@@ -1,0 +1,44 @@
+# Pulls Mango and Booking into the dashboard, once.
+#
+# Installed by install-pull-timer.sh and deliberately left disabled: see
+# docs/SCHEDULED-PULLS.md for why, and for what has to be true before it is
+# turned on.
+[Unit]
+Description=Pull Mango and Booking into the GTG dashboard
+Documentation=file:///opt/gtg/Acc/docs/SCHEDULED-PULLS.md
+# No point starting before the machine can reach Mango.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gtg/Acc/deploy/pull-all.sh
+
+# A morning pull that hangs must not still be holding the lock the next
+# morning, and the browser pull is the one that could.
+TimeoutStartSec=30min
+
+# The secrets file is read by the script rather than declared here, so its
+# contents stay out of `systemctl show` and the journal.
+
+# Nothing here needs to be root, but the pull writes to the data directory and
+# reads /opt/gtg, so it runs as whoever owns those. Set by the installer.
+User=root
+WorkingDirectory=/opt/gtg/Acc
+
+# Modest hardening: this reaches the internet and parses what it finds there.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+# Nice, because the application serving the dashboard matters more than a
+# background pull on a machine this size.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

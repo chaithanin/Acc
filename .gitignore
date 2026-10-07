@@ -24,3 +24,6 @@ coverage/
 
 # Real client workbooks used for local verification — never committed
 samples/
+
+# The scheduled pull’s credentials live only on the VM.
+pull-secrets.env

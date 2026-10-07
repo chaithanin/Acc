@@ -1,0 +1,26 @@
+# Daily, early, before anybody reads the dashboard.
+#
+# Installed disabled. `systemctl enable --now gtg-pull.timer` starts it, and
+# pull-all.sh still refuses to do anything until the two gates in
+# /opt/gtg/pull-secrets.env are set — so enabling the timer by accident is
+# harmless.
+[Unit]
+Description=Daily Mango and Booking pull
+Documentation=file:///opt/gtg/Acc/docs/SCHEDULED-PULLS.md
+
+[Timer]
+# 06:00 Bangkok. The VM runs UTC, so 23:00 the previous day.
+OnCalendar=*-*-* 23:00:00 UTC
+
+# If the machine was asleep or rebooting at the hour, run when it comes back
+# rather than skipping a day quietly.
+Persistent=yes
+
+# Not on the minute: Mango serves every company in the group from one host, and
+# a fleet of timers all striking at once is a thundering herd of one.
+RandomizedDelaySec=15min
+
+Unit=gtg-pull.service
+
+[Install]
+WantedBy=timers.target

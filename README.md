@@ -274,4 +274,5 @@ and has not been verified.
 * [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE
 * [`docs/BOOKING-API.md`](docs/BOOKING-API.md) — reading the unit inventory from the Booking API
 * [`docs/MANGO-ANYWHERE.md`](docs/MANGO-ANYWHERE.md) — reading the accounting figures through a browser, and why that is necessary
+* [`docs/SCHEDULED-PULLS.md`](docs/SCHEDULED-PULLS.md) — the daily pull, and why it is installed switched off
 * [`docs/MANGO-API-REQUEST.md`](docs/MANGO-API-REQUEST.md) — what to ask Mango for, and why
