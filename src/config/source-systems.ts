@@ -78,3 +78,150 @@ export const CUSTOMER_CARD_SOURCE: SourceReportGuide = {
     'งวด · วันครบกำหนดชำระเงินตามสัญญา · จำนวนเงินที่ต้องชำระ · …',
   ],
 };
+
+
+// ---------------------------------------------------------------------------
+// What the import needs, and where each piece now comes from
+// ---------------------------------------------------------------------------
+
+/**
+ * One kind of data the dashboard runs on.
+ *
+ * The list exists because the answer changed and nobody would know. Three of
+ * these used to be exported by hand every month and are now read straight out
+ * of Mango; uploading them as well would file the same balances twice, which is
+ * the double count the reconciliation rules exist to catch. The rest still come
+ * out of somebody's hands, and which report to run is the single most common
+ * way an import goes wrong.
+ *
+ * Where a report's exact name has been read off a real export it is given.
+ * Where it has not, that is said rather than guessed: a plausible-looking menu
+ * path that turns out to be the next report down produces a file that parses
+ * and is wrong.
+ */
+export interface ImportSource {
+  /** What the dashboard needs. */
+  data: string;
+  /** Which screens depend on it. */
+  feeds: string;
+  /** How it arrives now. */
+  via:
+    | { kind: 'pull'; command: string; system: string; note?: string }
+    | { kind: 'upload'; system: string; reportName?: string; menuPath?: string; note?: string };
+}
+
+export const IMPORT_SOURCES: ImportSource[] = [
+  // ----------------------------------------------- no longer uploaded by hand
+  {
+    data: 'Customer balances — what each customer owes',
+    feeds: 'Receivables, the group view, liquidity',
+    via: {
+      kind: 'pull',
+      command: 'npm run anywhere:pull -- --company <code>',
+      system: 'Mango Anywhere',
+      note: 'Replaces the receivable workbook. Mango answers a balance and an ageing '
+        + 'grade but no due dates, so these sit in the ageing report\u2019s undated bucket — '
+        + 'if the buckets matter more than the freshness, keep uploading the workbook '
+        + 'instead and take only the other two from Mango.',
+    },
+  },
+  {
+    data: 'Supplier balances — what the company owes',
+    feeds: 'Payables, liquidity ratios',
+    via: {
+      kind: 'pull',
+      command: 'npm run anywhere:pull -- --company <code>',
+      system: 'Mango Anywhere',
+      note: 'Replaces the payable workbook.',
+    },
+  },
+  {
+    data: 'Bank balances',
+    feeds: 'Cash position, the balance sheet',
+    via: {
+      kind: 'pull',
+      command: 'npm run anywhere:pull -- --company <code>',
+      system: 'Mango Anywhere',
+      note: 'Guarantees are reported separately and are not counted as cash. Mango returns '
+        + 'these the accounting way round, so the sign has to be confirmed once against one '
+        + 'account in its own screen — pass --flip-bank-sign after that.',
+    },
+  },
+  {
+    data: 'The sales ledger — bookings, contracts, transfers, receipts',
+    feeds: 'Revenue recognition, the customer card, sales targets',
+    via: {
+      kind: 'pull',
+      command: 'npm run mango:pull -- --company <code>',
+      system: 'Mango RE',
+      note: 'Which receipt kinds count as payment of the contract price is an accounting '
+        + 'decision the pull asks for and will not guess: --payment-kinds B,C,D,T.',
+    },
+  },
+  {
+    data: 'Unit inventory and list prices',
+    feeds: 'Total sale value per project, take-up',
+    via: {
+      kind: 'pull',
+      command: 'npm run booking:pull -- --company <code>',
+      system: 'Booking',
+      note: 'Needs an API key for this system only. Until then the total sale value is '
+        + 'typed in by hand in Settings \u203a Projects.',
+    },
+  },
+
+  // --------------------------------------------------- still exported by hand
+  {
+    data: 'General ledger',
+    feeds: 'Income and expense, the income statement, every account-level figure',
+    via: {
+      kind: 'upload',
+      system: 'Mango Anywhere',
+      reportName: 'Posted and Unposted GL Report',
+      note: 'The period is read from the report\u2019s own Date range, not from the print '
+        + 'timestamp, so a report printed today for last month files itself correctly. '
+        + 'The ledger is stored in full for the audit trail and summarised by account '
+        + 'for the figures, so it is never counted twice.',
+    },
+  },
+  {
+    data: 'Cash flow statement',
+    feeds: 'Cash flow by kind, the projection',
+    via: {
+      kind: 'upload',
+      system: 'Mango Anywhere',
+      note: 'Either shape is read: one row per month, or months across the columns with '
+        + 'INFLOW / OUTFLOW / CASH BALANCE blocks down the side. Where the sheet states '
+        + 'its own totals those are used rather than the sum of the lines.',
+    },
+  },
+  {
+    data: 'BOQ — the bill of quantities',
+    feeds: 'Construction cost, committed cost, project profitability',
+    via: {
+      kind: 'upload',
+      system: 'the quantity surveyor, or Mango Anywhere',
+      note: 'Item lists and month-per-column matrices are both read. The report name has '
+        + 'not been recorded from a real export yet.',
+    },
+  },
+  {
+    data: 'WIP — work in progress',
+    feeds: 'Construction progress against cost',
+    via: {
+      kind: 'upload',
+      system: 'the quantity surveyor, or Mango Anywhere',
+      note: 'The report name has not been recorded from a real export yet.',
+    },
+  },
+  {
+    data: 'Budget — the cost budget per project',
+    feeds: 'Budget variance, revenue recognition',
+    via: {
+      kind: 'upload',
+      system: 'typed in by hand',
+      note: 'Settings \u203a Projects & Aliases. No source system returns it, so nothing '
+        + 'overwrites it: both pulls leave the cost budget alone deliberately.',
+    },
+  },
+];
