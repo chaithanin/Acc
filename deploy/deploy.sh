@@ -131,10 +131,43 @@ elif [[ "$BUILD_MODE" == "local" ]]; then
   retry 4 5 docker push "$IMAGE"
 else
   say "Building the image with Cloud Build"
+
+  # Tags the image with the commit as well as :latest, so a running VM can be
+  # traced back to source. Cloud Build's own $SHORT_SHA is empty here -- it is
+  # only set for builds started by a repository trigger -- so it is computed
+  # and passed in. A tree with uncommitted changes says so in the tag rather
+  # than claiming to be that commit.
+  SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  if [[ -z "$SHA" ]]; then
+    SHA=manual
+  elif ! git diff --quiet HEAD 2>/dev/null; then
+    SHA="${SHA}-dirty"
+  fi
+
+  BUILD_LOG="$(mktemp)"
+  trap 'rm -f "$BUILD_LOG"' EXIT
+
   if ! gcloud builds submit \
       --config deploy/cloudbuild.yaml \
-      --substitutions="_REGION=${REGION},_REPO=${REPO},_IMAGE=${IMAGE_NAME}" \
-      --quiet; then
+      --substitutions="_REGION=${REGION},_REPO=${REPO},_IMAGE=${IMAGE_NAME},_SHA=${SHA}" \
+      --quiet 2>&1 | tee "$BUILD_LOG"; then
+
+    # Only a refusal to let the submission through is an IAM problem. Printing
+    # the IAM remedy after, say, a malformed image name sends the reader to
+    # fix something that was never broken.
+    if ! grep -qiE 'permission|denied|forbidden|403|does not have' "$BUILD_LOG"; then
+      cat >&2 <<'MSG'
+
+Cloud Build ran but the build failed. The error above is the one to read --
+this is not a permissions problem. If it is unclear, the same build runs
+locally, where the output is easier to follow:
+
+  ./deploy/deploy.sh --local-build
+
+MSG
+      exit 1
+    fi
+
     cat >&2 <<'MSG'
 
 Cloud Build refused the submission. Read which principal the error above

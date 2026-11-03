@@ -11,6 +11,11 @@ substitutions:
   _REPO: gtg
   _IMAGE: financial-dashboard
   _TAG: latest
+  # The commit this image was built from. Passed in by deploy.sh, because
+  # the built-in $SHORT_SHA is only populated for builds started by a
+  # repository trigger -- under `gcloud builds submit` it is empty, which
+  # produced an image name ending in a bare colon and no build at all.
+  _SHA: manual
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -19,12 +24,12 @@ steps:
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
       - -t
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
       - .
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
-  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
 
 options:
   # The default worker is ample; the build is CPU-bound for a couple of minutes.
