@@ -399,10 +399,26 @@ $(printf '\033[1mDeployed.\033[0m')
 
 Caddy issues the certificate on the first HTTPS request, which takes a moment.
 
-The first start creates an administrator account and prints the password to
-the container log exactly once:
+The first administrator is created from /opt/gtg/secrets.env, which a deploy
+creates empty and never overwrites. The password is NOT generated and NOT
+printed anywhere -- in production the app refuses to start rather than create
+an account whose security rests on a log line. So on a fresh database, set it
+before the app can come up:
 
-  gcloud compute ssh ${VM} --zone=${ZONE} --command 'sudo docker logs gtg-app-1 | head -40'
+  gcloud compute ssh ${VM} --zone=${ZONE} --command '
+    sudo grep -q GTG_ADMIN_PASSWORD /opt/gtg/secrets.env && { echo "already set"; exit; }
+    PW=\$(openssl rand -base64 24)
+    printf "GTG_ADMIN_EMAIL=%s\\nGTG_ADMIN_PASSWORD=%s\\n" you@example.com "\$PW" \\
+      | sudo tee -a /opt/gtg/secrets.env >/dev/null
+    echo "Save this now, it is not stored anywhere else: \$PW"'
+
+then start the app with it:
+
+  ./deploy/deploy.sh --update --skip-build
+
+Check whether it is up, and why if not:
+
+  gcloud compute ssh ${VM} --zone=${ZONE} --command 'sudo docker logs gtg-app-1 --tail 30'
 
 If HTTPS does not come up, the cause is almost always DNS. Check what Caddy
 is doing:
