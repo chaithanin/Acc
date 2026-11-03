@@ -137,15 +137,27 @@ else
       --quiet; then
     cat >&2 <<'MSG'
 
-Cloud Build refused the submission. That is almost always the caller's IAM
-rather than anything about this project's setup. Check which roles you hold:
+Cloud Build refused the submission. Read which principal the error above
+names — it decides the fix, and the two cases are unrelated.
+
+If it ends in -compute@developer.gserviceaccount.com, it is the build
+service account, not you. Builds run as the Compute Engine default account,
+which starts with no access to the source bucket. Grant it the build role:
+
+  PROJECT=$(gcloud config get-value project)
+  NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+  gcloud projects add-iam-policy-binding "$PROJECT" \
+    --member="serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com" \
+    --role=roles/cloudbuild.builds.builder
+
+If it names your own address, it is your IAM. Check what you hold:
 
   gcloud projects get-iam-policy "$(gcloud config get-value project)" \
     --flatten='bindings[].members' \
     --filter="bindings.members:$(gcloud config get-value account)" \
     --format='table(bindings.role)'
 
-Grant yourself the build role if you are an Owner:
+and grant yourself the build role if you are an Owner:
 
   gcloud projects add-iam-policy-binding "$(gcloud config get-value project)" \
     --member="user:$(gcloud config get-value account)" \
