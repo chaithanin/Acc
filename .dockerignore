@@ -18,3 +18,7 @@ coverage
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo
+
+# Design sources for the icons. scripts/make-icons.mjs reads them by hand;
+# the build never does, and the master is larger than everything it produces.
+assets

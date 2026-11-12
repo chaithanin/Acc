@@ -76,6 +76,25 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
+          {/*
+            The application's own mark. The sidebar carries the logo of
+            whichever company is being viewed, so this is the only place the
+            product itself is branded — and the one screen where nobody has
+            chosen a company yet.
+
+            A plain img, not next/image: this is one fixed-size asset already
+            sized for the page, and next/image would route it through Next's
+            optimiser, which needs sharp — an optional dependency the traced
+            standalone build does not promise to carry. The dimensions are
+            stated so the card does not jump when the image lands.
+          */}
+          <img
+            src="/brand/logo.png"
+            alt=""
+            width={320}
+            height={258}
+            className="mx-auto mb-4 h-24 w-auto"
+          />
           <h1 className="text-lg font-semibold tracking-tight text-ink">Global Top Group</h1>
           <p className="mt-1 text-sm text-ink-secondary">Financial Management Dashboard</p>
         </div>

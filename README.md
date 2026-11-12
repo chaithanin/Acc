@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (490, plus more when `samples/` is present) |
+| `npm test` | unit and integration tests (508, plus more when `samples/` is present) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
@@ -230,17 +230,54 @@ Enforced server-side on every route; the navigation filter is convenience only.
 
 ---
 
+## Branding, and installing it as an app
+
+`assets/brand/logo.png` is the master mark and the only file to replace. It
+lives outside `public/` because nothing should serve it: it is larger than
+everything drawn from it. After changing it, run
+
+```bash
+node scripts/make-icons.mjs
+```
+
+which rewrites the favicon, the app icons and the sign-in logo, and commit
+what it produced. The outputs are committed so that neither the build nor the
+deployed image needs an image library to have icons.
+
+Each derived icon makes its own decision about background, because the
+surfaces differ: the plain icons stay transparent for the browser to
+composite, the maskable ones are opaque and inset to survive Android cropping
+them to a circle, and iOS gets an opaque one of its own because it composites
+transparency against black. The script derives the maskable inset from the
+artwork's aspect ratio rather than guessing it.
+
+The app installs to a home screen and keeps working offline — as far as it
+honestly can. **The service worker caches no page and no API response.** Every
+page is rendered for one signed-in user and full of one company's figures, so
+a cached page would be served to whoever opens the app next on a shared
+machine, showing last week's balances as current. What it does cache is build
+output under `/_next/static`, which is addressed by content hash and cannot go
+stale, plus the icons. Offline, navigation falls back to a static page that
+says so. `tests/pwa.test.ts` holds that line.
+
+---
+
 ## Tests
 
 ```bash
 npm test
 ```
 
-490 tests covering text normalisation and alias resolution, header detection and
+508 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its
 mapping against a schema-faithful fixture.
+
+`tests/pwa.test.ts` loads the service worker and drives its fetch handler with
+real requests, because its one dangerous mistake would be remembering a page:
+every page here is rendered for one signed-in user and full of one company's
+figures.
 
 `tests/samples.test.ts` runs the **real** client workbooks end to end when
 `samples/` is present, and asserts that our independently computed closing

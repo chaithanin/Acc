@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline — GTG Finance</title>
+    <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0f12" media="(prefers-color-scheme: dark)" />
+    <style>
+      /*
+        Self-contained on purpose: this page is shown precisely when nothing
+        else can be fetched, so it may not reference a stylesheet or a font.
+      */
+      :root {
+        --plane: #f4f5f7;
+        --surface: #ffffff;
+        --ink: #0b0b0b;
+        --ink-secondary: #4a4f57;
+        --border: #e3e5e9;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --plane: #0d0f12;
+          --surface: #1e1e1d;
+          --ink: #f2f3f5;
+          --ink-secondary: #a8aeb8;
+          --border: #2c2d31;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: var(--plane);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .card {
+        width: 100%;
+        max-width: 26rem;
+        padding: 2rem 1.75rem;
+        text-align: center;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      img { width: 88px; height: 88px; margin: 0 auto 1rem; display: block; }
+      h1 { margin: 0 0 0.5rem; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; }
+      p { margin: 0 0 1.5rem; font-size: 0.875rem; line-height: 1.6; color: var(--ink-secondary); }
+      button {
+        font: inherit;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #ffffff;
+        background: #1c5cab;
+        border: 0;
+        border-radius: 6px;
+        padding: 0.5rem 1.25rem;
+        cursor: pointer;
+      }
+      button:hover { opacity: 0.9; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img src="/icons/icon-192.png" alt="" />
+      <h1>No connection</h1>
+      <p>
+        Financial figures are never stored on this device, so there is nothing
+        to show until the connection is back. Nothing you were working on has
+        been lost.
+      </p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </div>
+  </body>
+</html>

@@ -72,6 +72,12 @@ RUN mkdir -p /data && chown -R node:node /data
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 
+# Standalone output does not include public/, and nothing warns that it is
+# missing: the server simply answers 404 for every file in it. That is the
+# favicon, the app icons, the service worker and the company logos, each of
+# which fails quietly enough to look like a design choice.
+COPY --from=build --chown=node:node /app/public ./public
+
 # Read at runtime rather than imported, so neither is traced automatically.
 COPY --from=build --chown=node:node /app/src/lib/db/schema.sql ./src/lib/db/schema.sql
 COPY --from=build --chown=node:node /app/workers ./workers
@@ -92,6 +98,9 @@ RUN node -e "require('xlsx');" \
  && node -e "const D=require('better-sqlite3'); const d=new D(':memory:'); d.prepare('SELECT 1').get(); d.close();" \
  && test -f ./src/lib/db/schema.sql \
  && test -f ./workers/excel-parse.worker.mjs \
+ && test -f ./public/favicon.ico \
+ && test -f ./public/sw.js \
+ && test -f ./public/icons/icon-512.png \
  && echo 'image self-check passed'
 
 USER node
