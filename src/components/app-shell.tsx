@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Role, User } from '@/lib/types';
 import { FALLBACK_ICON, NAV_ICONS } from './nav-icons';
 import { cx } from './ui/primitives';
@@ -359,12 +359,27 @@ function UserMenu({ user }: { user: User }) {
   // Any navigation closes it, including a click on one of its own entries.
   useEffect(() => setOpen(false), [pathname]);
 
+  const root = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     // Escape and a click elsewhere both close it, which is what a menu is
     // expected to do and what a bare dropdown does not do on its own.
+    //
+    // "Elsewhere" has to mean outside the menu. This used to close it on every
+    // click and rely on the wrapper's stopPropagation to shield its own
+    // contents, which cannot work: React listens on the document itself, the
+    // same node as this listener, and stopPropagation does not stop other
+    // listeners on the node it is already at. So the menu closed on a click
+    // inside it. For a link that is invisible, because the navigation has
+    // already started. For Log out it was fatal: a submit button's form is
+    // sent as the click's default action, after dispatch, by which time the
+    // menu — and the form — had been unmounted, and the browser dropped the
+    // submission ("the form is not connected"). Signing out never happened.
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    const onClick = () => setOpen(false);
+    const onClick = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener('keydown', onKey);
     document.addEventListener('click', onClick);
     return () => {
@@ -381,7 +396,7 @@ function UserMenu({ user }: { user: User }) {
     .toUpperCase();
 
   return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
+    <div ref={root} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

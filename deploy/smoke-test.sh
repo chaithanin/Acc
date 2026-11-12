@@ -122,5 +122,29 @@ for header in "strict-transport-security" "x-content-type-options" "x-frame-opti
     || bad "Header ${header} missing"
 done
 
+# ------------------------------------------------------- 9. signing out
+# Where a sign-out sends the browser. The redirect used to be built from the
+# address the container bound to, so a real sign-out ended the session and then
+# sent the visitor to https://0.0.0.0:8080/login — a page that cannot load, which
+# reads from the chair as "log out does nothing". Nothing about the app being up
+# would reveal it: the route answered 303 and the session was gone. It only
+# shows from outside, behind the proxy, which is why it is checked here.
+#
+# Posted without a session on purpose: the route is safe to call anonymously,
+# and this check should not need anybody's password.
+logout=$(curl -sS -o /dev/null -D - --max-time 20 -X POST "https://${DOMAIN}/api/auth/logout" 2>/dev/null)
+location=$(grep -i '^location:' <<<"$logout" | head -1 | sed 's/^[Ll]ocation: *//' | tr -d '\r')
+if [[ -z "$location" ]]; then
+  bad "Sign-out did not redirect"
+  note "got: $(head -1 <<<"$logout")"
+elif [[ "$location" == /* ]]; then
+  ok "Sign-out redirects to $location, on whatever host the visitor used"
+elif [[ "$location" == "https://${DOMAIN}/"* ]]; then
+  ok "Sign-out redirects back to this site ($location)"
+else
+  bad "Sign-out redirects to $location, which is not this site"
+  note "The session ends but the visitor lands somewhere that cannot load."
+fi
+
 printf '\n%d passed, %d failed\n\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
