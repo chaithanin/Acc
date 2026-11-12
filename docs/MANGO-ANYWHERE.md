@@ -89,7 +89,10 @@ sign-in did not take, which is an account question rather than a timing one.
 
 ```
 MANGO_USER, MANGO_PASS     a service account, not a person's login
-MANGO_MAINCODE             the company to read — MG1..MG6, default MG1
+MANGO_MAINCODE             the company to READ — MG1..MG6. Defaults to MG1
+                           for a --dry-run; naming it is required before
+                           anything is written, because --company says only
+                           where to write and nothing checks the pair.
 ```
 
 Flags: `--company <code>` for the dashboard company, `--date`, `--dry-run`,

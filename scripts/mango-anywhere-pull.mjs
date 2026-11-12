@@ -77,11 +77,40 @@ const allCompanies = has('all-companies');
 // systems spell the same company differently, and a near-match files one
 // subsidiary's balances under another.
 const companyMap = (flag('map') ?? '').split(',').map((pair) => pair.trim()).filter(Boolean);
-const maincode = (process.env.MANGO_MAINCODE ?? 'MG1').toUpperCase();
+// Whether a company to read was actually named, as opposed to defaulted. The
+// default is fine for looking; it is not fine for writing, see below.
+const maincodeGiven = (process.env.MANGO_MAINCODE ?? '').trim() !== '';
+const maincode = (maincodeGiven ? process.env.MANGO_MAINCODE : 'MG1').toUpperCase();
 
 if (!dryRun && !companyCode && !has('all-companies')) {
   console.error('Which company is this for? Pass --company <code>, or --all-companies with');
   console.error('--map, or --dry-run to only look.');
+  process.exit(2);
+}
+
+/*
+ * --company says where to WRITE. MANGO_MAINCODE says what to READ. Nothing
+ * connects them, and the default made the pairing silently: `--company GTG`
+ * alone read MG1 and would have filed it under GTG.
+ *
+ * A wrong pairing is not a visible failure. It writes one subsidiary's
+ * receivables, payables and bank balances under another subsidiary's name,
+ * corrupting both at once, and the dashboard then presents the result as
+ * fact. The --all-companies path has always demanded an explicit --map for
+ * exactly this reason; the single-company path was left guessing.
+ */
+if (!dryRun && companyCode && !maincodeGiven) {
+  console.error(`--company ${companyCode} says where to write. It does not say what to read.`);
+  console.error('');
+  console.error('That is MANGO_MAINCODE, which is not set, so this would read MG1 and file it');
+  console.error(`under ${companyCode}. Nothing checks that those are the same company, and if`);
+  console.error("they are not, both companies' figures end up wrong with nothing to show it.");
+  console.error('');
+  console.error('Name the one to read:');
+  console.error(`  MANGO_MAINCODE=MG1 npm run anywhere:pull -- --company ${companyCode}`);
+  console.error('');
+  console.error("To see Mango's own name for each code first:");
+  console.error('  npm run anywhere:pull -- --all-companies --dry-run');
   process.exit(2);
 }
 
