@@ -90,6 +90,10 @@ COPY --from=build --chown=node:node /worker-modules/ ./node_modules/
 # passwords are stored only as hashes.
 COPY --from=build --chown=node:node /app/scripts/users.mjs ./scripts/users.mjs
 
+# Reads what the pulls from Mango left in the database and says what looks
+# wrong. Read-only, and plain JavaScript for the same reason as users.mjs.
+COPY --from=build --chown=node:node /app/scripts/audit-pulls.mjs ./scripts/audit-pulls.mjs
+
 # Prove the image actually works before it ships. Each of these has already
 # been a real defect; a failure here costs seconds, whereas the same failure
 # in production costs a crash-looping container or an import that dies on
@@ -101,6 +105,7 @@ RUN node -e "require('xlsx');" \
  && test -f ./public/favicon.ico \
  && test -f ./public/sw.js \
  && test -f ./public/icons/icon-512.png \
+ && test -f ./scripts/audit-pulls.mjs \
  && echo 'image self-check passed'
 
 USER node

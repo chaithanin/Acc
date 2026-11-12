@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { mapAnywhereBundle } from '@/lib/sources/anywhere/map';
+import { mapAnywhereBundle, withheldKinds } from '@/lib/sources/anywhere/map';
 import { anywhereFixture } from './fixtures/anywhere-bundle';
 
 const run = (projectId: string | null = null) =>
@@ -322,6 +322,58 @@ describe('which way round the bank balances are', () => {
   it('is not applied by default', () => {
     const mapped = mapAnywhereBundle(allNegative(), { reportDate: '2026-09-18', maincode: 'MG2' });
     assert.ok(mapped.totals.cash < 0, 'the sign was flipped without being asked');
+  });
+});
+
+/**
+ * A figure the pull has said it cannot believe is not published.
+ *
+ * The bank finding is of error severity and its message says a cash position
+ * with the wrong sign is "worse than none". The write path ignored severity
+ * and published the figure anyway, so a company's cash read -126 million on the
+ * dashboard beside a validation page saying not to trust it.
+ */
+describe('what is withheld from the dashboard', () => {
+  const run = (bundle = anywhereFixture(), flipBankSign = false) =>
+    mapAnywhereBundle(bundle, { reportDate: '2026-09-18', maincode: 'MG2', flipBankSign });
+
+  it('withholds the bank when the balances mix assets and liabilities', () => {
+    assert.deepEqual(withheldKinds(run().issues), ['bank']);
+  });
+
+  it('withholds the bank when every balance is negative and nobody has said why', () => {
+    const bundle = anywhereFixture();
+    bundle.bankAccounts = (bundle.bankAccounts ?? []).map((a) => ({
+      ...a,
+      balamt: -Math.abs(Number(String(a.balamt).replace(/[,\s]/g, ''))),
+    }));
+    assert.deepEqual(withheldKinds(run(bundle).issues), ['bank']);
+  });
+
+  it('releases it once the sign has been decided', () => {
+    const bundle = anywhereFixture();
+    bundle.bankAccounts = (bundle.bankAccounts ?? []).map((a) => ({
+      ...a,
+      balamt: -Math.abs(Number(String(a.balamt).replace(/[,\s]/g, ''))),
+    }));
+    assert.deepEqual(withheldKinds(run(bundle, true).issues), []);
+  });
+
+  it('never withholds receivables or payables, which the bank question says nothing about', () => {
+    for (const kind of withheldKinds(run().issues)) {
+      assert.notEqual(kind, 'receivable');
+      assert.notEqual(kind, 'payable');
+    }
+    assert.ok(run().data.receivable.length > 0, 'the receivables were not mapped at all');
+  });
+
+  it('withholds nothing for a position with nothing wrong with it', () => {
+    assert.deepEqual(withheldKinds([]), []);
+    assert.deepEqual(
+      withheldKinds([{ severity: 'warning', code: 'ANYWHERE_BANK_SOMETHING', message: 'x', source: undefined as never }]),
+      [],
+      'a warning about the bank must not withhold it',
+    );
   });
 });
 

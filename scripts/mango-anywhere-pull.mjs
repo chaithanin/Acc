@@ -693,12 +693,13 @@ try {
     const read = Object.keys(bundle).length;
     console.log(`   ${String(read).padStart(2)} of ${READS.length} answered`);
 
-    const { mapAnywhereBundle } = await import('../src/lib/sources/anywhere/map.ts');
-    return { bundle, read, mapped: mapAnywhereBundle(bundle, { reportDate, maincode: code, flipBankSign }) };
+    const { mapAnywhereBundle, withheldKinds } = await import('../src/lib/sources/anywhere/map.ts');
+    const mapped = mapAnywhereBundle(bundle, { reportDate, maincode: code, flipBankSign });
+    return { bundle, read, mapped, withheld: withheldKinds(mapped.issues) };
   };
 
   /** Print one company's position. */
-  const report = (code, mapped) => {
+  const report = (code, mapped, withheld = []) => {
     console.log(bold(`\n── ${code}`));
     const line = (label, value) => console.log(`   ${label.padEnd(26)} ${money(value).padStart(18)}`);
 
@@ -736,6 +737,13 @@ try {
       (a.severity === 'error' ? 0 : a.severity === 'warning' ? 1 : 2)
       - (b.severity === 'error' ? 0 : b.severity === 'warning' ? 1 : 2));
     for (const issue of ordered) console.log(`\n   ${issue.severity}: ${issue.message}`);
+
+    if (withheld.includes('bank')) {
+      console.log(bold(`\n   bank balances: WITHHELD. ${dryRun ? 'They would not be written.' : 'They are not written.'}`));
+      console.log('   The error above says the figure cannot be believed, and a cash position that is');
+      console.log('   wrong is worse than none. Receivables and payables are not affected and are written.');
+      console.log('   Decide the sign (--flip-bank-sign) once it is checked against one account in Mango.');
+    }
   };
 
   /**
@@ -774,13 +782,13 @@ try {
     console.log(bold(`\n── Reading ${code}`));
     if (targets.length > 1 && !(await switchCompany(code))) continue;
 
-    const { bundle, read, mapped } = await readCompany(code);
+    const { bundle, read, mapped, withheld } = await readCompany(code);
     if (read === 0) {
       console.error(`   nothing answered for ${code}; skipping it rather than writing an empty position`);
       continue;
     }
-    report(code, mapped);
-    results.push({ code, bundle, mapped });
+    report(code, mapped, withheld);
+    results.push({ code, bundle, mapped, withheld });
   }
 
   if (results.length === 0) {
@@ -851,7 +859,7 @@ try {
     const OWNED = ['receivable', 'payable', 'bank'];
 
     let written = 0;
-    for (const { code, bundle, mapped } of results) {
+    for (const { code, bundle, mapped, withheld } of results) {
       const target = mapping.get(code);
       if (!target) continue;
 
@@ -863,15 +871,20 @@ try {
 
       console.log(bold(`\n── ${code} → ${company.displayName}`));
 
+      // A kind that was withheld is not this pull's to replace: whatever the
+      // company already had stays, and on a first import there is simply none.
+      const owned = OWNED.filter((kind) => !withheld.includes(kind));
+      const fresh = withheld.includes('bank') ? { ...mapped.data, bank: [] } : mapped.data;
+
       const current = snapshots.getCurrentSnapshot(company.id);
       let carried = null;
 
       if (current) {
         const existing = snapshots.loadDataset(company.id, current.id);
         carried = { ...existing.data };
-        for (const kind of OWNED) carried[kind] = [];
+        for (const kind of owned) carried[kind] = [];
 
-        const superseded = OWNED
+        const superseded = owned
           .map((kind) => `${existing.data[kind]?.length ?? 0} ${kind}`)
           .join(', ');
         const kept = Object.entries(carried)
@@ -885,7 +898,7 @@ try {
         console.log('   first import for this company');
       }
 
-      const combined = carried ? mergeDatasets(carried, mapped.data) : mapped.data;
+      const combined = carried ? mergeDatasets(carried, fresh) : fresh;
       indexSourceRefs(combined);
 
       const payload = JSON.stringify({ maincode: code, reportDate, bundle });
@@ -906,7 +919,7 @@ try {
         sheetCount: 1,
         sheets: [],
         data: combined,
-        rowCount: mapped.data.receivable.length + mapped.data.payable.length + mapped.data.bank.length,
+        rowCount: fresh.receivable.length + fresh.payable.length + fresh.bank.length,
         issues: mapped.issues,
         status: 'parsed',
         error: null,
@@ -935,7 +948,9 @@ try {
 
       console.log(`   import ${outcome.importId}`);
       console.log(`   ${mapped.counts.customers} customers · ${mapped.counts.vendors} suppliers · `
-        + `${mapped.counts.bankAccounts} bank accounts written`);
+        + (withheld.includes('bank')
+          ? 'bank balances withheld (not written)'
+          : `${mapped.counts.bankAccounts} bank accounts written`));
       written += 1;
     }
 

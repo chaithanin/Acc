@@ -326,3 +326,40 @@ this system already has a tokens page for. See
 [`MANGO-API-REQUEST.md`](MANGO-API-REQUEST.md). A browser holding a session open
 is a reasonable way to obtain figures nobody can otherwise reach; it is not a
 reasonable thing to depend on every morning at six.
+
+## What is withheld, and checking what was written
+
+**The bank balances are not written while the pull says it cannot believe
+them.** The one finding of error severity this pull raises is the bank's — all
+accounts negative (a sign convention to confirm) or a mixture (loan accounts
+among the cash) — and its own message says a cash position that is wrong is
+"worse than none". An earlier version wrote the figure anyway, so a company's
+cash read -126 million on the dashboard beside a validation page saying not to
+believe it. Now the bank kind is left out for that company, with the reason
+printed, and receivables and payables are written as usual. The decision is
+`withheldKinds()` in `src/lib/sources/anywhere/map.ts`. What releases it is
+deciding the sign (`--flip-bank-sign`), once checked against one account in
+Mango's own screen. If the company already has bank records — from a workbook,
+or from an earlier pull — they are kept, not replaced.
+
+**`audit-pulls.mjs` says what the pulls left in the database.** It is read-only
+and runs inside the container:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
+  --command 'sudo docker exec gtg-app-1 node scripts/audit-pulls.mjs'
+```
+
+It prints, per company, which Mango company the rows came from, how many
+customers and suppliers, what is owed each way and what is in the bank, and
+then lists anything to fix: bank balances published despite the pull flagging
+them, a negative cash position, one Mango company filed under two companies,
+two companies with identical positions (one company read twice), rows from more
+than one Mango company in a snapshot. It exits 1 when it found something.
+
+What it cannot do is check Mango's numbers, because Mango is not reachable from
+the server. For that, put the "owed by customers" and "owed to suppliers" lines
+of a `--dry-run` for a Mango company beside the same company's row in the audit.
+They are computed the same way and must match to the baht.
+
+To undo a wrong import: Import History → Roll back, then pull again.

@@ -77,6 +77,29 @@ export interface AnywhereMapResult {
   bankByType: Map<string, { count: number; amount: number }>;
 }
 
+/**
+ * Which record kinds this pull found it cannot stand behind, and so must not
+ * publish.
+ *
+ * The bank balances carry the only finding of error severity, and its own
+ * message says what follows from it: a cash position with the sign wrong is
+ * "worse than none", and a list that mixes loan accounts among the assets is
+ * "not a cash position" until somebody says which are cash. A pull that wrote
+ * the figure anyway put a company's cash at -126 million on the dashboard
+ * beside a validation page saying it should not be believed, which is the wrong
+ * way round: the dashboard is what people read.
+ *
+ * So the decision is made here, from the findings, rather than left to each
+ * caller to remember. Receivables and payables are not affected: the bank
+ * question says nothing about them, and withholding them too would turn one
+ * open decision into a company with no data at all.
+ */
+export function withheldKinds(issues: ImportIssue[]): Array<'bank'> {
+  return issues.some((issue) => issue.severity === 'error' && issue.code.startsWith('ANYWHERE_BANK_'))
+    ? ['bank']
+    : [];
+}
+
 /** Mango sends money as a number, a numeric string, or a string with commas. */
 function money(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
