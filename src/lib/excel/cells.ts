@@ -152,7 +152,11 @@ export function parseDateCell(cell: RawCell | null): string | null {
   if (!cell) return null;
   if (cell.t === 'd' && typeof cell.v === 'string') {
     const d = new Date(cell.v);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    if (Number.isNaN(d.getTime())) return null;
+    // Through buildDate like every other path, so a Buddhist-era year stored as
+    // if it were Gregorian (2569) is read as 2026 rather than filed in 2569,
+    // and a year no report can have is not a date at all.
+    return buildDate(normalizeYear(d.getUTCFullYear()), d.getUTCMonth() + 1, d.getUTCDate());
   }
   if (typeof cell.v === 'number' && Number.isFinite(cell.v)) {
     // Excel serial date (1900 system, accounting for the 1900 leap-year bug).
@@ -190,7 +194,7 @@ export function parseDateText(input: string): string | null {
   if (!text) return null;
 
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
-  if (iso) return buildDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  if (iso) return buildDate(normalizeYear(Number(iso[1])), Number(iso[2]), Number(iso[3]));
 
   // 31/08/2026, 31-08-2026, 31.08.2569
   const dmy = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(text);
@@ -217,8 +221,8 @@ export function parseDateText(input: string): string | null {
   }
 
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() > 1950) {
-    return parsed.toISOString().slice(0, 10);
+  if (!Number.isNaN(parsed.getTime())) {
+    return buildDate(normalizeYear(parsed.getUTCFullYear()), parsed.getUTCMonth() + 1, parsed.getUTCDate());
   }
   return null;
 }
@@ -247,6 +251,9 @@ export function normalizeYear(year: number): number {
 function buildDate(y: number, m: number, d: number): string | null {
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
   if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  // The same window the numeric path always applied. Without it any four digits
+  // were a year, and 4710-05-31 was filed as the newest report there will ever be.
+  if (y < 1950 || y > 2200) return null;
   const date = new Date(Date.UTC(y, m - 1, d));
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 10);

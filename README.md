@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (565, plus more when `samples/` is present) |
+| `npm test` | unit and integration tests (575, plus more when `samples/` is present) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
@@ -268,7 +268,7 @@ says so. `tests/pwa.test.ts` holds that line.
 npm test
 ```
 
-565 tests covering text normalisation and alias resolution, header detection and
+575 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its

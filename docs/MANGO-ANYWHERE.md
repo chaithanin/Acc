@@ -350,12 +350,24 @@ gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
   --command 'sudo docker exec gtg-app-1 node scripts/audit-pulls.mjs'
 ```
 
-It prints, per company, which Mango company the rows came from, how many
-customers and suppliers, what is owed each way and what is in the bank, and
-then lists anything to fix: bank balances published despite the pull flagging
-them, a negative cash position, one Mango company filed under two companies,
-two companies with identical positions (one company read twice), rows from more
-than one Mango company in a snapshot. It exits 1 when it found something.
+It starts with how many pulls from Mango this database has ever recorded —
+counted from the imports themselves, so it does not matter which snapshot is
+current. "None" is a finding in its own right: a pull run on another machine
+writes to THAT machine's database, and without `GTG_DATA_DIR` pointing at the
+server's it goes to `./data` beside the code. It then lists EVERY current
+snapshot, not only the newest, with which Mango company its rows came from, how
+many customers, suppliers and bank accounts, what is owed each way and what is in
+the bank, and marks the one the dashboard opens. Then it lists anything to fix:
+a snapshot with a report date no report can have (the dashboard ranks snapshots
+newest first, so one dated 4710 is "current" for ever and sits in front of every
+real period), bank balances published despite the pull flagging them, a negative
+cash position, one Mango company filed under two companies, two companies with
+identical positions (one company read twice), rows from more than one Mango
+company in a snapshot. It exits 1 when it found something.
+
+Looking at every snapshot matters. An earlier version read only the newest, which
+was the impossible one, and so reported "nothing from Mango" about a database
+that had a pull sitting behind it.
 
 What it cannot do is check Mango's numbers, because Mango is not reachable from
 the server. For that, put the "owed by customers" and "owed to suppliers" lines

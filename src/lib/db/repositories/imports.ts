@@ -1,3 +1,4 @@
+import { reportDateProblem } from '@/lib/import/report-date';
 import { calculateMetrics } from '@/lib/calc/kpi';
 import { CounterpartyResolver } from '@/lib/consolidate/counterparty';
 import { filterByProject, indexSourceRefs, projectIdsIn } from '@/lib/calc/aggregate';
@@ -49,6 +50,11 @@ export interface PersistImportResult {
 }
 
 export function persistImport(args: PersistImportArgs): PersistImportResult {
+  // Refused here, before anything is written, whoever is calling. See
+  // report-date.ts for what a date like 4710-05-31 did to a live dashboard.
+  const dateProblem = reportDateProblem(args.reportDate);
+  if (dateProblem) throw new Error(dateProblem);
+
   const db = getDb();
 
   return transaction(() => {

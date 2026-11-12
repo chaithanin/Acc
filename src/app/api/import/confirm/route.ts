@@ -1,3 +1,4 @@
+import { reportDateProblem } from '@/lib/import/report-date';
 import { NextResponse } from 'next/server';
 
 import { activeCompany, can, currentUser } from '@/lib/auth';
@@ -122,8 +123,9 @@ export async function POST(request: Request) {
   }));
 
   const reportDate = (body.reportDate ?? payload.reportDate).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
-    return NextResponse.json({ error: 'The report date is not a valid date.' }, { status: 400 });
+  const dateProblem = reportDateProblem(reportDate);
+  if (dateProblem) {
+    return NextResponse.json({ error: dateProblem }, { status: 400 });
   }
 
   // Only this company's projects can be matched. A file naming another
