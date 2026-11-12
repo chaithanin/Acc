@@ -43,7 +43,13 @@
  *                       company differently and a near-match would file one
  *                       subsidiary's balances under another.
  *   --dry-run           fetch, map and report; write nothing
- *   --save <file>       write the raw answers to disk, for inspection
+ *   --save <file>       write the raw answers to disk, for inspection. This
+ *                       is live data — customer names, balances, supplier
+ *                       names, bank accounts — so write it somewhere that is
+ *                       not the working tree: /tmp, not ./anywhere.json. A
+ *                       file here is one `git add .` from being published and
+ *                       is uploaded to the build's source bucket on every
+ *                       deploy.
  *   --headed            show the browser, for watching it work
  *
  * Needs Chromium. Where Playwright's own is not installed:

@@ -27,3 +27,15 @@ samples/
 
 # The scheduled pull’s credentials live only on the VM.
 pull-secrets.env
+
+# Saved answers from the source-system scripts: live customer names, balances
+# and bank accounts. The scripts now point --save at /tmp, but a file written
+# here before that change, or by hand, must never be committed.
+anywhere.json
+menus.json
+mango-*.json
+mango-*.png
+
+# Installers fetched while setting a machine up. One of these is 100 MB and
+# was being uploaded to the build's source bucket on every deploy.
+*.deb

@@ -22,3 +22,12 @@ npm-debug.log*
 # Design sources for the icons. scripts/make-icons.mjs reads them by hand;
 # the build never does, and the master is larger than everything it produces.
 assets
+
+# Never in the build context: saved source-system answers hold live financial
+# data, and the archive Cloud Build uploads is readable by anyone who can read
+# the project.
+anywhere.json
+menus.json
+mango-*.json
+mango-*.png
+*.deb

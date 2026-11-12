@@ -999,7 +999,7 @@ if (menus.length > 0) {
   const total = menus.reduce((sum, m) => sum + (Array.isArray(m.payload) ? m.payload.length : 0), 0);
   console.log(bold(`\n── ${menus.length} modules described themselves, ${total} menu entries in all`));
   console.log('   That is the system saying what it holds, rather than this guessing at it.');
-  console.log('   Run again with --save menus.json to keep the whole answer.');
+  console.log('   Run again with --save /tmp/menus.json to keep the whole answer.');
 }
 
 console.log('\n   Paste the section above back and the mapping can be written against it.\n');
