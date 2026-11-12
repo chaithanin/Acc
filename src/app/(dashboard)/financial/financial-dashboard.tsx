@@ -84,7 +84,7 @@ export function FinancialDashboard({
           action={
             <Link
               href="/import"
-              className="inline-flex rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="inline-flex rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Go to Data Import
             </Link>
@@ -258,13 +258,13 @@ export function FinancialDashboard({
             ))}
             <div className="flex items-baseline justify-between gap-4 pt-1">
               <dt className="font-medium text-ink">Working capital</dt>
-              <dd className={`font-semibold tabular-nums ${(m('working_capital')?.current ?? 0) < 0 ? 'text-critical' : 'text-ink'}`}>
+              <dd className={`font-semibold tabular-nums ${(m('working_capital')?.current ?? 0) < 0 ? 'text-critical-ink' : 'text-ink'}`}>
                 {formatTHB(m('working_capital')?.current ?? null)}
               </dd>
             </div>
           </dl>
           {(m('working_capital')?.current ?? 0) < 0 ? (
-            <p className="mt-3 text-sm text-critical">
+            <p className="mt-3 text-sm text-critical-ink">
               Today&rsquo;s obligations exceed today&rsquo;s assets. The business needs a facility or
               a collection before the next round of payments falls due.
             </p>
@@ -286,7 +286,7 @@ export function FinancialDashboard({
               return (
                 <div key={label} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
                   <dt className="text-ink-secondary">{label}</dt>
-                  <dd className={`tabular-nums ${value === null ? 'text-ink-muted' : value < 0 ? 'text-critical' : 'text-ink'}`}>
+                  <dd className={`tabular-nums ${value === null ? 'text-ink-muted' : value < 0 ? 'text-critical-ink' : 'text-ink'}`}>
                     {value === null ? 'not calculable' : formatTHB(value)}
                   </dd>
                 </div>
@@ -359,7 +359,7 @@ function placeholder(key: string): MetricComparison {
 function StaleSnapshotNotice({ keys }: { keys: string[] }) {
   if (keys.length === 0) return null;
   return (
-    <div className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
+    <div className="mb-4 rounded-lg border border-warning/40 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-xs text-ink">
       <p className="font-medium">
         {keys.length} figure{keys.length === 1 ? '' : 's'} on this page were added after this snapshot
         was imported.
@@ -385,7 +385,9 @@ function negate(value: number | null | undefined): number | null {
  */
 function NoBudgetYet({ month, canEdit }: { month: string; canEdit: boolean }) {
   return (
-    <Card>
+    // self-start: it sits in a grid row beside the chart, and stretching three
+    // lines of text to the chart's height reads as missing content.
+    <Card className="self-start">
       <p className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
         Budget for the month
       </p>

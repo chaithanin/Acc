@@ -3,51 +3,99 @@
 /* ==========================================================================
    Design tokens
 
-   An executive financial dashboard: quiet chrome, generous space, and numbers
-   carrying the emphasis. Colours are declared once here as roles, so light and
-   dark swap in a single place and no component hard-codes a hex value.
+   Frosted glass on an aurora, after the Room Management reference
+   (docs/DESIGN.md): translucent sheets float over a soft field of colour
+   instead of boxing the data in with borders. The colours are declared once
+   here as roles, so light and dark swap in a single place and no component
+   hard-codes a hex value. Token NAMES are the ones the app already used —
+   restyling is a change of values.
 
-   The chart palette is the validated three-slot categorical set plus the fixed
-   status colours; see docs/DESIGN.md for the validator output.
+   The one departure from the reference is how much of the sheet is see-through.
+   Its data cards are 62% white; here they are 90%, because these cards hold
+   chart marks whose contrast was validated against a plain surface, and the
+   worst point of the aurora behind a 62% sheet takes five of the eight marks
+   below 3:1. The numbers are in docs/DESIGN.md.
    ========================================================================== */
 
-@theme {
-  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Noto Sans Thai', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+/* Digits only. Urbanist has no tabular figures — the shipped file carries no
+   `tnum`, so a column of amounts in it does not line up — and Manrope does.
+   This face covers 0-9 and the separators and nothing else, so it is first in
+   the stack and everything else falls through to Urbanist. It is a 3 kB subset
+   of Manrope (SIL OFL, see ./fonts/OFL-Manrope.txt) that keeps `tnum`. */
+@font-face {
+  font-family: 'GTG Figures';
+  src: url('./fonts/figures.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0030-0039, U+002C, U+002E, U+0025, U+002B, U+002D, U+2212;
+}
 
-  --radius-card: 0.625rem;
+@theme {
+  --font-sans: 'GTG Figures', 'Urbanist Variable', 'Noto Sans Thai Variable', system-ui,
+    -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo,
+    monospace;
+
+  /* Softer corners across the board: controls 12px, panels 16-20px, cards 22px. */
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.625rem;
+  --radius-card: 1.375rem;
+
+  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 :root {
   color-scheme: light;
 
-  --plane: #f4f5f7;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-sunken: #f4f5f7;
-  --surface-hover: #eff1f4;
+  /* Canvas, and the four blurred pools of colour that sit on it. Each pool is
+     at 60% of the strength the Room Management reference uses: the figures
+     here are read, not glanced at, and a stronger tint behind a card lowers
+     the contrast of every chart mark on it (see docs/DESIGN.md). */
+  --plane: #e7ecf3;
+  --pool-1: rgba(10, 132, 255, 0.3);
+  --pool-2: rgba(90, 200, 250, 0.3);
+  --pool-3: rgba(52, 199, 160, 0.23);
+  --pool-4: rgba(255, 176, 64, 0.25);
 
-  /* Dark sidebar, per the brief. Its own ink tokens because it sits on a dark
-     plane while the rest of the light theme sits on a pale one. */
-  --sidebar: #14181f;
-  --sidebar-hover: #1e242e;
-  --sidebar-active: #0d9488;
-  --sidebar-ink: #e6e8ec;
-  --sidebar-ink-muted: #8b93a1;
-  --sidebar-border: #232a35;
+  /* Three tiers of sheet. Data cards are nearly opaque; floating chrome that
+     carries only navigation is the glassy one; overlays are nearly solid. */
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-raised: rgba(255, 255, 255, 0.96);
+  --surface-sunken: rgba(15, 25, 45, 0.05);
+  --surface-hover: rgba(15, 25, 45, 0.06);
+  --field: rgba(255, 255, 255, 0.96);
+  --glass-hi: rgba(255, 255, 255, 0.64);
+  --pop: rgba(250, 251, 254, 0.97);
+
+  --edge: rgba(255, 255, 255, 0.95);
+  --rim: rgba(15, 25, 45, 0.1);
+  --blur: blur(30px) saturate(180%);
+  --blur-card: blur(16px) saturate(140%);
+  --shadow: 0 1px 1px rgba(15, 30, 60, 0.04), 0 18px 40px -22px rgba(15, 30, 60, 0.38);
+  --shadow-lg: 0 2px 6px rgba(15, 30, 60, 0.08), 0 40px 80px -28px rgba(15, 30, 60, 0.45);
+
+  --sidebar: rgba(255, 255, 255, 0.64);
+  --sidebar-hover: rgba(15, 25, 45, 0.06);
+  --sidebar-active: #0b63c9;
+  --sidebar-ink: #2f3a4d;
+  --sidebar-ink-muted: #566277;
+  --sidebar-border: rgba(15, 25, 45, 0.08);
 
   /* Financial accents. Validated in docs/DESIGN.md. */
   --income: #0d9488;
   --expense: #e5484d;
   --cash: #b07c0a;
-  --dial-track: #e6e8ec;
+  --dial-track: rgba(15, 25, 45, 0.09);
 
-  --ink: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #898781;
+  --ink: #0b1220;
+  --ink-secondary: #2f3a4d;
+  --ink-muted: #566277;
 
-  --border: #e1e0d9;
-  --border-strong: #c3c2b7;
+  --border: rgba(15, 25, 45, 0.09);
+  --border-strong: rgba(15, 25, 45, 0.26);
 
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -58,102 +106,156 @@
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
 
+  /* The same three, at TEXT weight. The status colours above are tuned for
+     marks (3:1); words set in them were failing contrast, and amber on an
+     amber tint was close to unreadable. These carry 4.5:1 on the worst point
+     of the aurora. */
+  --good-ink: #0f6b24;
+  --warning-ink: #8a4b00;
+  --critical-ink: #b3261e;
+
   /* Text-weight variants of the delta colours, which need WCAG text contrast
      rather than the 3:1 mark contrast the status steps are tuned for. */
   --delta-up: #006300;
   --delta-down: #b02222;
 
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
+  --grid: rgba(15, 25, 45, 0.08);
+  --axis: rgba(15, 25, 45, 0.24);
 
-  --accent: #1c5cab;
-  --accent-soft: #e8f0fc;
+  /* One interactive colour. --accent is for text, links and focus; --accent-fill
+     is what a filled control is painted with, and is the same blue in light. */
+  --accent: #0b63c9;
+  --accent-fill: #0b63c9;
+  --accent-soft: rgba(11, 99, 201, 0.1);
+  --accent-glow: rgba(11, 99, 201, 0.3);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
 
-    --plane: #0d0f12;
-    --surface: #1e1e1d;
-    --surface-raised: #26262a;
-    --surface-sunken: #17181b;
-    --surface-hover: #26272b;
+    --plane: #04070d;
+    --pool-1: rgba(10, 132, 255, 0.2);
+    --pool-2: rgba(100, 210, 255, 0.12);
+    --pool-3: rgba(48, 209, 160, 0.11);
+    --pool-4: rgba(255, 159, 10, 0.08);
 
-    --sidebar: #0a0c0f;
-    --sidebar-hover: #171c24;
-    --sidebar-active: #12a897;
-    --sidebar-ink: #e6e8ec;
-    --sidebar-ink-muted: #7d8593;
-    --sidebar-border: #1c222b;
+    --surface: rgba(26, 29, 36, 0.86);
+    --surface-raised: rgba(32, 36, 45, 0.92);
+    --surface-sunken: rgba(255, 255, 255, 0.05);
+    --surface-hover: rgba(255, 255, 255, 0.07);
+    --field: rgba(255, 255, 255, 0.07);
+    --glass-hi: rgba(30, 34, 44, 0.6);
+    --pop: rgba(24, 28, 37, 0.97);
+
+    --edge: rgba(255, 255, 255, 0.2);
+    --rim: rgba(255, 255, 255, 0.1);
+    --blur: blur(30px) saturate(165%);
+    --blur-card: blur(16px) saturate(130%);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 20px 44px -22px rgba(0, 0, 0, 0.75);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 40px 90px -28px rgba(0, 0, 0, 0.9);
+
+    --sidebar: rgba(30, 34, 44, 0.6);
+    --sidebar-hover: rgba(255, 255, 255, 0.07);
+    --sidebar-active: #1a6fd9;
+    --sidebar-ink: #ced5e1;
+    --sidebar-ink-muted: #9ea8b9;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
 
     --income: #12a897;
     --expense: #e5535a;
     --cash: #bd8a18;
-    --dial-track: #2c2f36;
+    --dial-track: rgba(255, 255, 255, 0.1);
 
-    --ink: #ffffff;
-    --ink-secondary: #c3c2b7;
-    --ink-muted: #898781;
+    --ink: #f2f5fa;
+    --ink-secondary: #ced5e1;
+    --ink-muted: #9ea8b9;
 
-    --border: #2c2c2a;
-    --border-strong: #383835;
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.22);
 
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
 
+    --good-ink: #4fdc78;
+    --warning-ink: #ffb340;
+    --critical-ink: #ff6f66;
+
     --delta-up: #0ca30c;
     --delta-down: #e66767;
 
-    --grid: #2c2c2a;
-    --axis: #383835;
+    --grid: rgba(255, 255, 255, 0.08);
+    --axis: rgba(255, 255, 255, 0.22);
 
-    --accent: #3987e5;
-    --accent-soft: #16283f;
+    --accent: #5aa3f5;
+    --accent-fill: #1a6fd9;
+    --accent-soft: rgba(90, 163, 245, 0.16);
+    --accent-glow: rgba(10, 132, 255, 0.4);
   }
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --plane: #0d0f12;
-  --surface: #1e1e1d;
-  --surface-raised: #26262a;
-  --surface-sunken: #17181b;
-  --surface-hover: #26272b;
+  --plane: #04070d;
+  --pool-1: rgba(10, 132, 255, 0.2);
+  --pool-2: rgba(100, 210, 255, 0.12);
+  --pool-3: rgba(48, 209, 160, 0.11);
+  --pool-4: rgba(255, 159, 10, 0.08);
 
-  --sidebar: #0a0c0f;
-  --sidebar-hover: #171c24;
-  --sidebar-active: #12a897;
-  --sidebar-ink: #e6e8ec;
-  --sidebar-ink-muted: #7d8593;
-  --sidebar-border: #1c222b;
+  --surface: rgba(26, 29, 36, 0.86);
+  --surface-raised: rgba(32, 36, 45, 0.92);
+  --surface-sunken: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --field: rgba(255, 255, 255, 0.07);
+  --glass-hi: rgba(30, 34, 44, 0.6);
+  --pop: rgba(24, 28, 37, 0.97);
+
+  --edge: rgba(255, 255, 255, 0.2);
+  --rim: rgba(255, 255, 255, 0.1);
+  --blur: blur(30px) saturate(165%);
+  --blur-card: blur(16px) saturate(130%);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 20px 44px -22px rgba(0, 0, 0, 0.75);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 40px 90px -28px rgba(0, 0, 0, 0.9);
+
+  --sidebar: rgba(30, 34, 44, 0.6);
+  --sidebar-hover: rgba(255, 255, 255, 0.07);
+  --sidebar-active: #1a6fd9;
+  --sidebar-ink: #ced5e1;
+  --sidebar-ink-muted: #9ea8b9;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 
   --income: #12a897;
   --expense: #e5535a;
   --cash: #bd8a18;
-  --dial-track: #2c2f36;
+  --dial-track: rgba(255, 255, 255, 0.1);
 
-  --ink: #ffffff;
-  --ink-secondary: #c3c2b7;
-  --ink-muted: #898781;
+  --ink: #f2f5fa;
+  --ink-secondary: #ced5e1;
+  --ink-muted: #9ea8b9;
 
-  --border: #2c2c2a;
-  --border-strong: #383835;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.22);
 
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
 
+  --good-ink: #4fdc78;
+  --warning-ink: #ffb340;
+  --critical-ink: #ff6f66;
+
   --delta-up: #0ca30c;
   --delta-down: #e66767;
 
-  --grid: #2c2c2a;
-  --axis: #383835;
+  --grid: rgba(255, 255, 255, 0.08);
+  --axis: rgba(255, 255, 255, 0.22);
 
-  --accent: #3987e5;
-  --accent-soft: #16283f;
+  --accent: #5aa3f5;
+  --accent-fill: #1a6fd9;
+  --accent-soft: rgba(90, 163, 245, 0.16);
+  --accent-glow: rgba(10, 132, 255, 0.4);
 }
 
 @theme inline {
@@ -162,6 +264,8 @@
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
   --color-surface-hover: var(--surface-hover);
+  --color-field: var(--field);
+  --color-pop: var(--pop);
   --color-ink: var(--ink);
   --color-ink-secondary: var(--ink-secondary);
   --color-ink-muted: var(--ink-muted);
@@ -174,9 +278,13 @@
   --color-warning: var(--status-warning);
   --color-serious: var(--status-serious);
   --color-critical: var(--status-critical);
+  --color-good-ink: var(--good-ink);
+  --color-warning-ink: var(--warning-ink);
+  --color-critical-ink: var(--critical-ink);
   --color-delta-up: var(--delta-up);
   --color-delta-down: var(--delta-down);
   --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
   --color-accent-soft: var(--accent-soft);
   --color-income: var(--income);
   --color-expense: var(--expense);
@@ -197,20 +305,36 @@ body {
   background: var(--plane);
   color: var(--ink);
   font-family: var(--font-sans);
+  /* Urbanist reads light at 400; the reference sets the whole UI at 500. */
+  font-weight: 500;
+  /* Every figure is tabular unless it opts out. A column of amounts that fails
+     to line up is a defect in a financial app, and "remember to add the class"
+     is how one would get through. The face behind the digits (see the
+     @font-face above) is the one that has the feature. */
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Columns of figures must line up; standalone hero numbers should not be
-   forced into tabular widths. */
+/* Kept for the places that already say so. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* A hero figure on its own line is read, not scanned down a column, and
+   proportional digits sit better at that size. */
+.pnum {
+  font-variant-numeric: proportional-nums;
 }
 
 /* Recharts draws its own focus outlines; keep ours consistent instead. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: 8px;
+}
+
+::selection {
+  background: var(--accent-soft);
 }
 
 ::-webkit-scrollbar {
@@ -222,14 +346,173 @@ body {
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 5px;
+  border-radius: 9999px;
 }
 
-/* Print / PDF export: drop the chrome and let the report fill the page. */
+@keyframes glass-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer components {
+  /* The aurora: four blurred pools of colour behind everything. Fixed, so cards
+     scroll over it and the blur has something to refract. */
+  .aurora {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--plane);
+  }
+  .aurora i {
+    position: absolute;
+    border-radius: 9999px;
+  }
+  .aurora i:nth-child(1) {
+    width: 62vmax;
+    height: 62vmax;
+    top: -24vmax;
+    left: -18vmax;
+    background: radial-gradient(closest-side, var(--pool-1), transparent);
+  }
+  .aurora i:nth-child(2) {
+    width: 54vmax;
+    height: 54vmax;
+    top: -10vmax;
+    right: -16vmax;
+    background: radial-gradient(closest-side, var(--pool-2), transparent);
+  }
+  .aurora i:nth-child(3) {
+    width: 58vmax;
+    height: 58vmax;
+    bottom: -30vmax;
+    left: 8vmax;
+    background: radial-gradient(closest-side, var(--pool-3), transparent);
+  }
+  .aurora i:nth-child(4) {
+    width: 46vmax;
+    height: 46vmax;
+    bottom: -18vmax;
+    right: -8vmax;
+    background: radial-gradient(closest-side, var(--pool-4), transparent);
+  }
+
+  /* A card: the data tier. Nearly opaque, so the figures on it keep the
+     contrast they were validated at; the glass shows in the edge and the rim
+     rather than in what is behind it. A bright 1px top edge, a hairline rim
+     and a soft drop shadow do the separating a border used to. */
+  .glass {
+    background: var(--surface);
+    -webkit-backdrop-filter: var(--blur-card);
+    backdrop-filter: var(--blur-card);
+    box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--rim), var(--shadow);
+  }
+
+  /* Floating chrome that carries navigation and nothing numeric: the sidebar,
+     the top bar. This is the one that is genuinely see-through. */
+  .glass-bar {
+    background: var(--glass-hi);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
+    box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--rim), var(--shadow);
+  }
+
+  /* Overlays that can sit over anything: menus, tooltips, dialogs. */
+  .glass-pop {
+    background: var(--pop);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
+    box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--rim), var(--shadow-lg);
+  }
+
+  /* Hover for a clickable card: a wash laid OVER the sheet. `hover:bg-*` on a
+     .glass replaces its background outright — the utility outranks the
+     component — and the card would go see-through the moment it was pointed at. */
+  .glass-hover {
+    transition: background-image 0.2s var(--ease-glass), transform 0.2s var(--ease-glass);
+  }
+  .glass-hover:hover {
+    background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
+  }
+
+  /* A wash of --tint over whatever background-color the element has. Used so a
+     tinted chip keeps its solid base instead of being a see-through colour. */
+  .tint {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--tint) 14%, transparent),
+      color-mix(in srgb, var(--tint) 14%, transparent)
+    );
+  }
+
+  .glass-rise {
+    animation: glass-rise 0.45s var(--ease-glass) both;
+  }
+
+  /* Slim scrollbar that stays out of the way on glass. */
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .thin-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glass-rise {
+      animation: none;
+    }
+  }
+
+  /* A person who has asked for less transparency gets none: the blur goes and
+     every sheet falls back to the near-solid overlay tier, so text never
+     depends on what happens to be behind it. */
+  @media (prefers-reduced-transparency: reduce) {
+    .glass,
+    .glass-bar,
+    .glass-pop {
+      background: var(--pop);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  /* Browsers without backdrop-filter get a more solid sheet instead of a
+     see-through one with nothing refracted behind it. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass,
+    .glass-bar {
+      background: var(--pop);
+    }
+  }
+}
+
+/* Print / PDF export: drop the chrome and the glass and let the report fill the
+   page. A report that prints with a pale blue field behind it, or sheets that
+   are 90% white over nothing, is a worse report. */
 @media print {
   :root {
     --plane: #ffffff;
     --surface: #ffffff;
+    --glass-hi: #ffffff;
+    --pop: #ffffff;
+    --field: #ffffff;
+    --blur: none;
+    --blur-card: none;
+    --shadow: none;
+    --shadow-lg: none;
+    --edge: transparent;
+    --rim: rgba(15, 25, 45, 0.18);
+  }
+
+  .aurora {
+    display: none;
   }
 
   .no-print {

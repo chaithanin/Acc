@@ -152,7 +152,7 @@ export function DataTable<T>({
               Columns
             </Button>
             {showColumnPicker ? (
-              <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border bg-surface p-2 shadow-lg">
+              <div className="absolute right-0 z-20 mt-1 w-56 glass-pop rounded-md p-2">
                 {columns.map((column) => (
                   <label
                     key={column.key}

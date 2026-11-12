@@ -110,7 +110,7 @@ export default async function InspectorPage({
               href={`/inspector?importId=${row.id}`}
               className={
                 row.id === selected.id
-                  ? 'rounded-md border border-accent/40 bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent'
+                  ? 'rounded-md border border-accent/40 tint bg-field [--tint:var(--accent)] px-2.5 py-1 text-xs font-medium text-accent'
                   : 'rounded-md border border-border px-2.5 py-1 text-xs text-ink-secondary hover:bg-surface-hover'
               }
             >

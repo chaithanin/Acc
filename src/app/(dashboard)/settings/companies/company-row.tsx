@@ -92,7 +92,7 @@ export function CompanyRow({
         </label>
         <button
           type="submit"
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
         >
           Upload
         </button>
@@ -116,14 +116,14 @@ export function CompanyRow({
               <input
                 name="displayName"
                 defaultValue={company.displayName}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
             <Field label="Code">
               <input
                 name="companyCode"
                 defaultValue={company.companyCode}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
             <Field label="Order">
@@ -131,7 +131,7 @@ export function CompanyRow({
                 name="sortOrder"
                 type="number"
                 defaultValue={company.sortOrder}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
             <Field label="Status">
@@ -149,7 +149,7 @@ export function CompanyRow({
 
           <button
             type="submit"
-            className="mt-3 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="mt-3 rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Save changes
           </button>

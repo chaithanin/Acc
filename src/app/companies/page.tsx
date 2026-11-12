@@ -79,13 +79,13 @@ export default async function SelectCompanyPage({
         ) : null}
 
         {error ? (
-          <p className="mx-auto mb-6 max-w-md rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-center text-sm text-critical">
+          <p className="mx-auto mb-6 max-w-md rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-center text-sm text-critical-ink">
             That company is not available to your account.
           </p>
         ) : null}
 
         {companies.length === 0 ? (
-          <div className="mx-auto max-w-md rounded-[var(--radius-card)] border border-border bg-surface p-6 text-center">
+          <div className="mx-auto max-w-md glass rounded-[var(--radius-card)] p-6 text-center">
             <p className="font-medium text-ink">No companies are assigned to your account.</p>
             <p className="mt-2 text-sm text-ink-secondary">
               An administrator grants access per company. Until then there is nothing here to

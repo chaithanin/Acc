@@ -29,22 +29,24 @@ export function KpiTile({
       type="button"
       onClick={onOpen}
       className={cx(
-        'group flex w-full flex-col rounded-xl border border-border bg-surface px-4 py-3.5 text-left',
-        'transition-colors hover:bg-surface-hover',
+        'group flex w-full flex-col glass glass-hover rounded-xl px-4 py-3.5 text-left',
       )}
     >
       <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
         {title ?? metric.label}
       </span>
 
-      <span className="mt-1.5 text-2xl font-semibold tracking-tight text-ink">
+      <span className="pnum mt-1.5 text-2xl font-bold tracking-tight text-ink">
         {formatByUnit(metric.current, metric.unit)}
       </span>
 
-      <span className="mt-1.5 flex items-baseline gap-1.5 text-xs">
+      {/* flex-wrap and nowrap: the two halves move as units. Without it the
+          narrow tile broke "▲ +25.0%" onto two lines and cut the caption
+          mid-phrase. */}
+      <span className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 text-xs">
         <span
           className={cx(
-            'font-medium',
+            'whitespace-nowrap font-semibold',
             sentiment === 'positive' && 'text-delta-up',
             sentiment === 'negative' && 'text-delta-down',
             sentiment === 'neutral' && 'text-ink-muted',
@@ -55,7 +57,7 @@ export function KpiTile({
             ? '—'
             : `${metric.differencePct > 0 ? '▲' : metric.differencePct < 0 ? '▼' : '■'} ${formatPercent(metric.differencePct, 1)}`}
         </span>
-        <span className="text-ink-muted">vs previous period</span>
+        <span className="whitespace-nowrap text-ink-muted">vs previous period</span>
       </span>
     </button>
   );
@@ -82,7 +84,7 @@ export function RatioTile({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full flex-col items-center rounded-xl border border-border bg-surface px-4 py-3.5 text-center transition-colors hover:bg-surface-hover"
+      className="flex w-full flex-col items-center glass glass-hover rounded-xl px-4 py-3.5 text-center"
     >
       <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
         {metric.label}

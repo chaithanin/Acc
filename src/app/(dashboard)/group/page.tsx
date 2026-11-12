@@ -70,7 +70,7 @@ export default async function GroupPage() {
       ) : (
         <>
           {group.newestReportDate !== group.oldestReportDate ? (
-            <p className="mb-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+            <p className="mb-4 rounded-md border border-warning/30 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-sm text-warning-ink">
               These companies are not all reporting the same month. The oldest is{' '}
               {formatDate(group.oldestReportDate!)} and the newest is{' '}
               {formatDate(group.newestReportDate!)}, so this total mixes periods. Import the missing
@@ -79,7 +79,7 @@ export default async function GroupPage() {
           ) : null}
 
           {group.withoutData.length > 0 ? (
-            <p className="mb-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+            <p className="mb-4 rounded-md border border-warning/30 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-sm text-warning-ink">
               Not in this total: {group.withoutData.map((c) => c.displayName).join(', ')}. Nothing
               has been imported for {group.withoutData.length === 1 ? 'it' : 'them'}.
             </p>
@@ -164,7 +164,7 @@ export default async function GroupPage() {
                       <tr key={e.metricKey} className="border-b border-border/60">
                         <td className="py-2 pr-3 text-ink">{e.metricKey}</td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-secondary">{formatTHB(e.gross)}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums text-critical">−{formatTHB(e.amount)}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-critical-ink">−{formatTHB(e.amount)}</td>
                         <td className="py-2 pr-3 text-right font-medium tabular-nums text-ink">{formatTHB(e.net)}</td>
                       </tr>
                     ))}
@@ -198,7 +198,7 @@ export default async function GroupPage() {
                         <td className="py-2 pr-3 text-ink">{m.toCompany}</td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-secondary">{formatTHB(m.receivable)}</td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-secondary">{formatTHB(m.payable)}</td>
-                        <td className="py-2 pr-3 text-right font-medium tabular-nums text-critical">{formatTHB(m.difference)}</td>
+                        <td className="py-2 pr-3 text-right font-medium tabular-nums text-critical-ink">{formatTHB(m.difference)}</td>
                       </tr>
                     ))}
                   </tbody>

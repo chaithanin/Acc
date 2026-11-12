@@ -113,7 +113,7 @@ export function UserRow({
               <input
                 name="name"
                 defaultValue={user.name}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
 
@@ -122,7 +122,7 @@ export function UserRow({
                 name="email"
                 type="email"
                 defaultValue={user.email}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
 
@@ -130,7 +130,7 @@ export function UserRow({
               <select
                 name="role"
                 defaultValue={user.role}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               >
                 {roles.map((role) => (
                   <option key={role} value={role}>
@@ -145,7 +145,7 @@ export function UserRow({
                 name="expiresAt"
                 type="date"
                 defaultValue={user.expiresAt ?? ''}
-                className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
 
@@ -191,7 +191,7 @@ export function UserRow({
           <div className="mt-3 flex gap-2">
             <button
               type="submit"
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Save changes
             </button>
@@ -214,12 +214,12 @@ export function UserRow({
                 minLength={minPassword}
                 required
                 autoComplete="new-password"
-                className="w-72 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="w-72 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </Field>
             <button
               type="submit"
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Set password
             </button>
@@ -228,7 +228,7 @@ export function UserRow({
           <p
             className={cx(
               'mt-2 text-xs',
-              isSelf ? 'text-critical' : 'text-ink-muted',
+              isSelf ? 'text-critical-ink' : 'text-ink-muted',
             )}
           >
             {isSelf

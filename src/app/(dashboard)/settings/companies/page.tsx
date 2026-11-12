@@ -178,12 +178,12 @@ export default async function CompanySettingsPage({
       />
 
       {error ? (
-        <p className="mb-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+        <p className="mb-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mb-4 rounded-md border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">
+        <p className="mb-4 rounded-md border border-good/30 tint bg-field [--tint:var(--status-good)] px-3 py-2 text-sm text-good-ink">
           {notice}
         </p>
       ) : null}
@@ -213,7 +213,7 @@ export default async function CompanySettingsPage({
               name="companyCode"
               placeholder="e.g. MGBSR"
               required
-              className="w-32 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm uppercase text-ink"
+              className="w-32 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm uppercase text-ink"
             />
           </label>
           <label className="flex min-w-64 flex-1 flex-col gap-1">
@@ -222,7 +222,7 @@ export default async function CompanySettingsPage({
               name="legalName"
               placeholder="บริษัท ... จำกัด"
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -230,12 +230,12 @@ export default async function CompanySettingsPage({
             <input
               name="displayName"
               placeholder="Shown on screen"
-              className="w-56 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-56 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
           </label>
           <button
             type="submit"
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Add company
           </button>

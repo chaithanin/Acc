@@ -56,6 +56,22 @@ function Movement({
         ? 'text-delta-down'
         : 'text-ink-secondary';
 
+  // "฿0.00M (N/A)" is four tokens to say nothing moved, and the N/A is a
+  // division by a zero that is not a fault. Say it in words.
+  if (metric.difference === 0) {
+    return (
+      <p className="mt-2 flex flex-wrap items-baseline gap-x-1.5 text-xs">
+        <span className="font-semibold text-ink-secondary">No change</span>
+        <span className="text-ink-muted">
+          vs{' '}
+          <span className="tnum">
+            {isCount ? formatNumber(metric.previous) : formatCompactTHB(metric.previous)}
+          </span>
+        </span>
+      </p>
+    );
+  }
+
   const amount = isCount
     ? formatNumber(metric.difference)
     : formatDelta(metric.difference, 'millions');
@@ -66,7 +82,11 @@ function Movement({
         <Direction difference={metric.difference} />
         {amount}
       </span>
-      <span className={cx('tnum', tone)}>({formatPercent(metric.differencePct)})</span>
+      {/* No percentage when there is no earlier figure to divide by — "(N/A)"
+          after a movement from nothing is noise, not information. */}
+      {metric.differencePct === null ? null : (
+        <span className={cx('tnum', tone)}>({formatPercent(metric.differencePct)})</span>
+      )}
       <span className="text-ink-muted">
         vs{' '}
         <span className="tnum">
@@ -128,7 +148,7 @@ export function KpiCard({ metric, snapshotId, projectId, emphasis }: KpiCardProp
           <p className="text-xs font-medium text-ink-secondary">{metric.label}</p>
           <p
             className={cx(
-              'mt-2 font-semibold tracking-tight text-ink',
+              'pnum mt-2 font-bold tracking-tight text-ink',
               emphasis ? 'text-3xl' : 'text-2xl',
             )}
           >

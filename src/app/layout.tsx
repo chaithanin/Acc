@@ -1,5 +1,12 @@
 import type { Metadata, Viewport } from 'next';
 import { PwaRegister } from '@/components/pwa-register';
+// Self-hosted through npm rather than next/font/google: nothing is fetched from
+// Google at build time or by a visitor's browser. Each package's CSS declares
+// its subsets with unicode-range, so Thai text pulls the Thai file and a page of
+// Latin pulls neither it nor the mono face.
+import '@fontsource-variable/urbanist/wght.css';
+import '@fontsource-variable/noto-sans-thai/wght.css';
+import '@fontsource-variable/jetbrains-mono/wght.css';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -35,8 +42,8 @@ export const viewport: Viewport = {
   // app without a seam. The manifest can only carry one value; this is what
   // browsers read per colour scheme.
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f4f5f7' },
-    { media: '(prefers-color-scheme: dark)', color: '#0d0f12' },
+    { media: '(prefers-color-scheme: light)', color: '#e7ecf3' },
+    { media: '(prefers-color-scheme: dark)', color: '#04070d' },
   ],
   // Installed as an app, the layout should reach under the rounded corners
   // and notches rather than letterbox itself.
@@ -58,6 +65,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
+        {/* Four blurred pools of colour behind everything; see globals.css. */}
+        <div className="aurora" aria-hidden>
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
         {children}
         <PwaRegister />
       </body>

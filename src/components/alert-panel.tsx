@@ -11,8 +11,8 @@ import type { Alert, AlertSeverity } from '@/lib/alerts';
  */
 
 const TONE: Record<AlertSeverity, { border: string; text: string; label: string }> = {
-  critical:    { border: 'border-critical/40 bg-critical/5', text: 'text-critical', label: 'Critical' },
-  high:        { border: 'border-warning/40 bg-warning/5',   text: 'text-warning',  label: 'High' },
+  critical:    { border: 'border-critical/40 bg-critical/5', text: 'text-critical-ink', label: 'Critical' },
+  high:        { border: 'border-warning/40 bg-warning/5',   text: 'text-warning-ink',  label: 'High' },
   medium:      { border: 'border-border bg-surface-sunken',  text: 'text-ink',      label: 'Medium' },
   information: { border: 'border-border bg-surface-sunken',  text: 'text-ink-secondary', label: 'Information' },
 };

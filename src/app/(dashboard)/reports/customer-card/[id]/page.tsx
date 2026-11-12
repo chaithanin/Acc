@@ -61,12 +61,12 @@ export default async function CustomerCardReportDetail({
         {report.fileExists ? (
           <a
             href={`/api/reports/customer-card/${report.id}`}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Download the workbook
           </a>
         ) : (
-          <span className="rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning">
+          <span className="rounded-md border border-warning/40 tint bg-field [--tint:var(--status-warning)] px-3 py-1.5 text-sm text-warning-ink">
             The workbook is no longer on disk — run it again from the card.
           </span>
         )}
@@ -120,7 +120,7 @@ export default async function CustomerCardReportDetail({
         <ul className="space-y-1.5 text-sm text-ink-secondary">
           {report.needsConfirmation.map((note) => (
             <li key={note} className="flex gap-2">
-              <span aria-hidden className="text-warning">●</span>
+              <span aria-hidden className="text-warning-ink">●</span>
               <span>{note}</span>
             </li>
           ))}

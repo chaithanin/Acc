@@ -111,7 +111,7 @@ export default async function ProjectsPage({
             ))}
           </dl>
           {budget.utilisation !== null ? (
-            <p className={`mt-3 border-t border-border pt-3 text-sm ${budget.utilisation > 100 ? 'text-critical' : 'text-ink-secondary'}`}>
+            <p className={`mt-3 border-t border-border pt-3 text-sm ${budget.utilisation > 100 ? 'text-critical-ink' : 'text-ink-secondary'}`}>
               {budget.utilisation}% of the budget in force is spent or committed.
               {budget.utilisation > 100 ? ' This project is over its budget.' : ''}
             </p>

@@ -55,7 +55,7 @@ export function HistoryTable({
         action={
           <Link
             href="/import"
-            className="inline-flex rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="inline-flex rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Go to Data Import
           </Link>
@@ -67,7 +67,7 @@ export function HistoryTable({
   return (
     <>
       {message ? (
-        <p className="mb-4 rounded-md border border-accent/30 bg-accent-soft px-3 py-2 text-sm text-accent">
+        <p className="mb-4 rounded-md border border-accent/30 tint bg-field [--tint:var(--accent)] px-3 py-2 text-sm text-accent">
           {message}
         </p>
       ) : null}

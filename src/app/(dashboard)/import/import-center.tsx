@@ -137,7 +137,7 @@ export function ImportCenter() {
           onDrop={onDrop}
           className={cx(
             'flex flex-col items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed px-6 py-14 text-center transition-colors',
-            dragging ? 'border-accent bg-accent-soft' : 'border-border-strong',
+            dragging ? 'border-accent tint bg-field [--tint:var(--accent)]' : 'border-border-strong',
           )}
         >
           <p className="text-base font-medium text-ink">Upload Financial Excel Files</p>
@@ -179,7 +179,7 @@ export function ImportCenter() {
         ) : null}
 
         {error ? (
-          <p className="mt-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+          <p className="mt-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
             {error}
           </p>
         ) : null}

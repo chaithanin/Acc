@@ -96,7 +96,7 @@ export default async function AccountPage({
           />
 
           {error ? (
-            <p className="mb-3 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+            <p className="mb-3 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
               {error}
             </p>
           ) : null}
@@ -108,7 +108,7 @@ export default async function AccountPage({
               placeholder="Current password"
               autoComplete="current-password"
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <input
               name="newPassword"
@@ -117,7 +117,7 @@ export default async function AccountPage({
               autoComplete="new-password"
               minLength={MIN_PASSWORD}
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <input
               name="confirmPassword"
@@ -126,11 +126,11 @@ export default async function AccountPage({
               autoComplete="new-password"
               minLength={MIN_PASSWORD}
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <button
               type="submit"
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Change password
             </button>

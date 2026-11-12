@@ -61,7 +61,7 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
 
   return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2 shadow-lg">
+    <div className="glass-pop rounded-md px-3 py-2">
       <p className="mb-1 text-xs font-medium text-ink">
         {labelFormatter ? labelFormatter(String(label)) : String(label ?? '')}
       </p>

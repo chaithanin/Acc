@@ -60,7 +60,7 @@ export function ReportHistory({
       />
 
       {error ? (
-        <p className="mb-3 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+        <p className="mb-3 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
           {error}
         </p>
       ) : null}

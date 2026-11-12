@@ -37,8 +37,8 @@ export function ImportProgress({ current }: { current: Stage }) {
             key={stage.key}
             className={cx(
               'flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
-              done && 'border-good/30 bg-good/10 text-good',
-              active && 'border-accent/40 bg-accent-soft text-accent',
+              done && 'border-good/30 tint bg-field [--tint:var(--status-good)] text-good-ink',
+              active && 'border-accent/40 tint bg-field [--tint:var(--accent)] text-accent',
               !done && !active && 'border-border text-ink-muted',
             )}
           >

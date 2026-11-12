@@ -47,10 +47,10 @@ export function CheckTable({ checks, issues }: { checks: CheckRow[]; issues: Rep
           className={cx(
             'rounded px-1.5 py-0.5 text-[11px] font-medium',
             r.status === 'ERROR'
-              ? 'bg-critical/15 text-critical'
+              ? 'bg-critical/15 text-critical-ink'
               : r.status === 'CHECK'
-                ? 'bg-warning/15 text-warning'
-                : 'bg-good/15 text-good',
+                ? 'bg-warning/15 text-warning-ink'
+                : 'bg-good/15 text-good-ink',
           )}
         >
           {r.status}
@@ -104,9 +104,9 @@ export function CheckTable({ checks, issues }: { checks: CheckRow[]; issues: Rep
                   className={cx(
                     'mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase',
                     issue.severity === 'error'
-                      ? 'bg-critical/15 text-critical'
+                      ? 'bg-critical/15 text-critical-ink'
                       : issue.severity === 'warning'
-                        ? 'bg-warning/15 text-warning'
+                        ? 'bg-warning/15 text-warning-ink'
                         : 'bg-surface-sunken text-ink-muted',
                   )}
                 >

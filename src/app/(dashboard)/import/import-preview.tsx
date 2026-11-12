@@ -186,7 +186,7 @@ export function ImportPreview({
         </div>
 
         {preview.mismatches.length > 0 ? (
-          <div className="mb-4 rounded-md border border-critical/40 bg-critical/10 px-3 py-3 text-xs">
+          <div className="mb-4 rounded-md border border-critical/40 tint bg-field [--tint:var(--status-critical)] px-3 py-3 text-xs">
             <p className="text-sm font-medium text-ink">
               <span aria-hidden>▲</span> Company mismatch detected
             </p>
@@ -210,7 +210,7 @@ export function ImportPreview({
             <div className="mt-3 flex gap-2">
               <a
                 href="/companies"
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
               >
                 Change company
               </a>
@@ -225,7 +225,7 @@ export function ImportPreview({
         ) : null}
 
         {emptySheets.length > 0 ? (
-          <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          <div className="mb-4 rounded-md border border-warning/40 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-xs">
             <p className="font-medium text-ink">
               <span aria-hidden>◆</span> {emptySheets.length}{' '}
               {emptySheets.length === 1 ? 'sheet was' : 'sheets were'} read but produced no records
@@ -247,7 +247,7 @@ export function ImportPreview({
         ) : null}
 
         {preview.rejected.length > 0 ? (
-          <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          <div className="mb-4 rounded-md border border-warning/40 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-xs">
             <p className="font-medium text-ink">Some uploads were not accepted</p>
             <ul className="mt-1 space-y-0.5 text-ink-secondary">
               {preview.rejected.map((r) => (
@@ -348,7 +348,7 @@ export function ImportPreview({
         </div>
 
         {preview.files.some((f) => f.status === 'failed') ? (
-          <div className="mt-3 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-xs text-ink">
+          <div className="mt-3 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-xs text-ink">
             <p className="font-medium">Unreadable files will be recorded but contribute no data.</p>
             <ul className="mt-1 space-y-0.5 text-ink-secondary">
               {preview.files

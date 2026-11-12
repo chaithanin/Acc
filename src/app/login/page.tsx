@@ -95,13 +95,13 @@ export default async function LoginPage({
             height={258}
             className="mx-auto mb-4 h-24 w-auto"
           />
-          <h1 className="text-lg font-semibold tracking-tight text-ink">Global Top Group</h1>
+          <h1 className="text-xl font-bold tracking-tight text-ink">Global Top Group</h1>
           <p className="mt-1 text-sm text-ink-secondary">Financial Management Dashboard</p>
         </div>
 
         <form
           action={authenticate}
-          className="rounded-[var(--radius-card)] border border-border bg-surface p-6"
+          className="glass-bar glass-rise rounded-[var(--radius-card)] p-6"
         >
           <div className="space-y-4">
             <label className="block">
@@ -114,7 +114,7 @@ export default async function LoginPage({
                 required
                 autoComplete="username"
                 autoFocus
-                className="mt-1 w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-ink"
+                className="mt-1 w-full rounded-md border border-border-strong bg-field px-3 py-2 text-sm text-ink"
               />
             </label>
 
@@ -127,32 +127,32 @@ export default async function LoginPage({
                 type="password"
                 required
                 autoComplete="current-password"
-                className="mt-1 w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-ink"
+                className="mt-1 w-full rounded-md border border-border-strong bg-field px-3 py-2 text-sm text-ink"
               />
             </label>
           </div>
 
           {changed ? (
-            <p className="mb-4 rounded-md border border-good/30 bg-good/10 px-3 py-2 text-xs text-good">
+            <p className="mb-4 rounded-md border border-good/30 tint bg-field [--tint:var(--status-good)] px-3 py-2 text-xs text-good-ink">
               Your password was changed. Sign in with the new one.
             </p>
           ) : null}
 
           {error ? (
-            <p className="mt-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-xs text-critical">
+            <p className="mt-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-xs text-critical-ink">
               Those details were not recognised.
             </p>
           ) : null}
 
           {wait ? (
-            <p className="mt-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <p className="mt-4 rounded-md border border-warning/30 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-xs text-warning-ink">
               Too many attempts. Try again in {wait}.
             </p>
           ) : null}
 
           <button
             type="submit"
-            className="mt-5 w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="mt-5 w-full rounded-md bg-accent-fill px-3 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             Sign in
           </button>

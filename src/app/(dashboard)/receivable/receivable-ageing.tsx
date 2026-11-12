@@ -15,12 +15,12 @@ import type { MetricComparison } from "@/lib/types";
 
 /** Later buckets are worse. The scale is the severity, not a decoration. */
 const TONE: Record<string, { bar: string; text: string }> = {
-  receivable_aged_current: { bar: "bg-good", text: "text-good" },
+  receivable_aged_current: { bar: "bg-good", text: "text-good-ink" },
   receivable_aged_1_30: { bar: "bg-good/60", text: "text-ink" },
-  receivable_aged_31_60: { bar: "bg-warning", text: "text-warning" },
-  receivable_aged_61_90: { bar: "bg-warning", text: "text-warning" },
-  receivable_aged_91_120: { bar: "bg-critical/70", text: "text-critical" },
-  receivable_aged_120_plus: { bar: "bg-critical", text: "text-critical" },
+  receivable_aged_31_60: { bar: "bg-warning", text: "text-warning-ink" },
+  receivable_aged_61_90: { bar: "bg-warning", text: "text-warning-ink" },
+  receivable_aged_91_120: { bar: "bg-critical/70", text: "text-critical-ink" },
+  receivable_aged_120_plus: { bar: "bg-critical", text: "text-critical-ink" },
 };
 
 export function ReceivableAgeing({
@@ -60,7 +60,7 @@ export function ReceivableAgeing({
         action={
           overdue?.current ? (
             <div className="text-right">
-              <div className="text-lg font-semibold tabular-nums text-critical">
+              <div className="text-lg font-semibold tabular-nums text-critical-ink">
                 {formatTHB(overdue.current)}
               </div>
               <div className="text-[11px] uppercase tracking-wide text-ink-muted">
@@ -69,7 +69,7 @@ export function ReceivableAgeing({
               </div>
             </div>
           ) : (
-            <span className="text-sm text-good">Nothing is overdue</span>
+            <span className="text-sm text-good-ink">Nothing is overdue</span>
           )
         }
       />
@@ -138,7 +138,7 @@ export function ReceivableAgeing({
           <dt className="text-[11px] uppercase tracking-wide text-ink-muted">
             Reconciles
           </dt>
-          <dd className={foots ? "text-good" : "text-critical"}>
+          <dd className={foots ? "text-good-ink" : "text-critical-ink"}>
             {foots
               ? "Yes — every bucket foots to the balance"
               : "No — investigate before using"}
@@ -147,7 +147,7 @@ export function ReceivableAgeing({
       </dl>
 
       {undated?.current ? (
-        <p className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+        <p className="mt-3 rounded-md border border-warning/30 tint bg-field [--tint:var(--status-warning)] px-3 py-2 text-sm text-warning-ink">
           {formatTHB(undated.current)} is owed on rows whose file carries no due
           date, so nothing can say whether it is late. It is counted in the
           balance and in no bucket. An amount that cannot be aged is an amount

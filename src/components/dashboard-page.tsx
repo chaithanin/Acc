@@ -42,7 +42,7 @@ export function DashboardPage({
           action={
             <Link
               href="/import"
-              className="inline-flex rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="inline-flex rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Go to Data Import
             </Link>

@@ -78,13 +78,13 @@ export function PayableView({
           action={
             overdue?.current ? (
               <div className="text-right">
-                <div className="text-lg font-semibold tabular-nums text-critical">
+                <div className="text-lg font-semibold tabular-nums text-critical-ink">
                   {formatTHB(overdue.current)}
                 </div>
                 <div className="text-[11px] uppercase tracking-wide text-ink-muted">overdue</div>
               </div>
             ) : (
-              <span className="text-sm text-good">Nothing is overdue</span>
+              <span className="text-sm text-good-ink">Nothing is overdue</span>
             )
           }
         />
@@ -112,7 +112,7 @@ export function PayableView({
           })}
         </div>
 
-        <p className={`mt-4 border-t border-border pt-3 text-sm ${foots ? 'text-ink-secondary' : 'text-critical'}`}>
+        <p className={`mt-4 border-t border-border pt-3 text-sm ${foots ? 'text-ink-secondary' : 'text-critical-ink'}`}>
           {foots
             ? `Every bucket foots to the ${formatTHB(payable)} owed.`
             : `The buckets total ${formatTHB(bucketTotal)} against ${formatTHB(payable)} owed. Investigate before using.`}

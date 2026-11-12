@@ -212,12 +212,12 @@ export default async function UserSettingsPage({
       />
 
       {error ? (
-        <p className="mb-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+        <p className="mb-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mb-4 rounded-md border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">
+        <p className="mb-4 rounded-md border border-good/30 tint bg-field [--tint:var(--status-good)] px-3 py-2 text-sm text-good-ink">
           {notice}
         </p>
       ) : null}
@@ -258,14 +258,14 @@ export default async function UserSettingsPage({
               name="name"
               placeholder="Full name"
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <input
               name="email"
               type="email"
               placeholder="Email"
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <input
               name="password"
@@ -273,7 +273,7 @@ export default async function UserSettingsPage({
               placeholder="Initial password"
               minLength={MIN_PASSWORD}
               required
-              className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="w-full rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
             />
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
@@ -281,7 +281,7 @@ export default async function UserSettingsPage({
                 <select
                   name="role"
                   defaultValue="viewer"
-                  className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                  className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
                 >
                   {ROLES.map((role) => (
                     <option key={role} value={role}>
@@ -297,7 +297,7 @@ export default async function UserSettingsPage({
                 <input
                   name="expiresAt"
                   type="date"
-                  className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                  className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
                 />
               </label>
             </div>
@@ -322,7 +322,7 @@ export default async function UserSettingsPage({
 
             <button
               type="submit"
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
             >
               Create user
             </button>

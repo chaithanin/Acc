@@ -45,7 +45,7 @@ export function FilterBar({
   };
 
   return (
-    <div className="no-print mb-6 flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-border bg-surface px-4 py-3">
+    <div className="no-print mb-6 flex flex-wrap items-end gap-3 glass rounded-[var(--radius-card)] px-4 py-3">
       <Select
         label="Report Date"
         value={snapshot?.id ?? ''}

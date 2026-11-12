@@ -6,8 +6,8 @@ import { cx } from './primitives';
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-white hover:opacity-90 border-transparent',
-  secondary: 'bg-surface text-ink border-border-strong hover:bg-surface-hover',
+  primary: 'bg-accent-fill text-white hover:opacity-90 border-transparent',
+  secondary: 'bg-field text-ink border-border-strong hover:bg-surface-hover',
   ghost: 'bg-transparent text-ink-secondary border-transparent hover:bg-surface-hover',
   danger: 'bg-critical text-white hover:opacity-90 border-transparent',
 };
@@ -51,7 +51,7 @@ export function Select({
       <select
         {...props}
         className={cx(
-          'rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink',
+          'rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink',
           'hover:bg-surface-hover',
           className,
         )}
@@ -77,7 +77,7 @@ export function TextInput({
       <input
         {...props}
         className={cx(
-          'rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink',
+          'rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink',
           'placeholder:text-ink-muted',
           className,
         )}
@@ -116,7 +116,7 @@ export function Modal({
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
         className={cx(
-          'relative w-full rounded-[var(--radius-card)] border border-border bg-surface shadow-xl',
+          'glass-pop relative w-full rounded-[var(--radius-card)]',
           wide ? 'max-w-5xl' : 'max-w-2xl',
         )}
       >

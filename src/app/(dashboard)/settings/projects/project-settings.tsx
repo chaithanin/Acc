@@ -3,7 +3,7 @@ import { REVENUE_BASIS_LABELS, REVENUE_BASIS_NOTES, POLICY } from '@/config/acco
 import type { ProjectFinancials } from '@/lib/db/repositories/project-financials';
 import type { Project } from '@/lib/types';
 
-const money = 'w-40 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink tabular-nums';
+const money = 'w-40 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink tabular-nums';
 const fieldLabel = 'text-[11px] font-medium uppercase tracking-wide text-ink-muted';
 
 /**
@@ -37,7 +37,7 @@ export function ProjectSettings({
   return (
     <>
       {error ? (
-        <p className="mb-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+        <p className="mb-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
           {error}
         </p>
       ) : null}
@@ -88,7 +88,7 @@ export function ProjectSettings({
                   <button
                     type="submit"
                     aria-label={`Remove alias ${alias}`}
-                    className="rounded px-1 text-ink-muted hover:bg-surface-hover hover:text-critical"
+                    className="rounded px-1 text-ink-muted hover:bg-surface-hover hover:text-critical-ink"
                   >
                     ✕
                   </button>
@@ -102,7 +102,7 @@ export function ProjectSettings({
                 name="alias"
                 placeholder="Add another spelling, English or Thai"
                 required
-                className="min-w-64 flex-1 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="min-w-64 flex-1 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
               <button
                 type="submit"
@@ -125,22 +125,22 @@ export function ProjectSettings({
             name="code"
             placeholder="Code, e.g. MARINA_ELYA"
             required
-            className="w-52 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+            className="w-52 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
           />
           <input
             name="name"
             placeholder="Project name"
             required
-            className="w-56 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+            className="w-56 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
           />
           <input
             name="company"
             placeholder="Legal entity (optional)"
-            className="min-w-64 flex-1 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+            className="min-w-64 flex-1 rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
           />
           <button
             type="submit"
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Create project
           </button>
@@ -229,7 +229,7 @@ export function ProjectSettings({
                 {canEdit ? (
                   <button
                     type="submit"
-                    className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                    className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
                   >
                     Save
                   </button>

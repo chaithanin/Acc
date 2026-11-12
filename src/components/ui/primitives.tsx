@@ -18,7 +18,7 @@ export function Card({
   return (
     <section
       className={cx(
-        'rounded-[var(--radius-card)] border border-border bg-surface',
+        'glass rounded-[var(--radius-card)]',
         padded && 'p-5',
         className,
       )}
@@ -70,12 +70,19 @@ export function PageHeader({
 
 type Tone = 'neutral' | 'good' | 'warning' | 'critical' | 'info';
 
+/*
+ * Every tone sits on the same near-white base, with the colour laid over it by
+ * the `tint` utility. A badge used to be a 10% wash of its colour and nothing
+ * else, which reads fine on a card and not at all on the page behind one: the
+ * ones in a page header float straight over the aurora, where blue text on a
+ * blue wash is 3:1.
+ */
 const TONE_CLASSES: Record<Tone, string> = {
-  neutral: 'border-border bg-surface-sunken text-ink-secondary',
-  good: 'border-good/30 bg-good/10 text-good',
-  warning: 'border-warning/40 bg-warning/10 text-ink',
-  critical: 'border-critical/30 bg-critical/10 text-critical',
-  info: 'border-accent/30 bg-accent-soft text-accent',
+  neutral: 'border-border bg-field text-ink-secondary',
+  good: 'tint border-good/30 bg-field text-good-ink [--tint:var(--status-good)]',
+  warning: 'tint border-warning/50 bg-field text-warning-ink [--tint:var(--status-warning)]',
+  critical: 'tint border-critical/30 bg-field text-critical-ink [--tint:var(--status-critical)]',
+  info: 'tint border-accent/30 bg-field text-accent [--tint:var(--accent)]',
 };
 
 export function Badge({
@@ -160,7 +167,7 @@ export function Divider() {
 /** Section label used to group cards on the overview. */
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+    <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-secondary">
       {children}
     </h2>
   );

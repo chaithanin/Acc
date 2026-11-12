@@ -100,7 +100,7 @@ export function InspectorView({
             className={cx(
               'rounded-md border px-3 py-1.5 text-sm',
               tab === t.key
-                ? 'border-accent/40 bg-accent-soft font-medium text-accent'
+                ? 'border-accent/40 tint bg-field [--tint:var(--accent)] font-medium text-accent'
                 : 'border-border text-ink-secondary hover:bg-surface-hover',
             )}
           >
@@ -116,7 +116,7 @@ export function InspectorView({
             onClick={() => setSelectedFile(null)}
             className={cx(
               'rounded-md border px-2.5 py-1 text-xs',
-              selectedFile === null ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border text-ink-secondary',
+              selectedFile === null ? 'border-accent/40 tint bg-field [--tint:var(--accent)] text-accent' : 'border-border text-ink-secondary',
             )}
           >
             All files
@@ -129,7 +129,7 @@ export function InspectorView({
               className={cx(
                 'rounded-md border px-2.5 py-1 text-xs',
                 selectedFile === f.id
-                  ? 'border-accent/40 bg-accent-soft text-accent'
+                  ? 'border-accent/40 tint bg-field [--tint:var(--accent)] text-accent'
                   : 'border-border text-ink-secondary hover:bg-surface-hover',
               )}
             >
@@ -179,7 +179,7 @@ function FilesTab({ files }: { files: InspectorFile[] }) {
             <Field label="SHA-256" value={file.fileHash.slice(0, 16)} mono />
           </dl>
           {file.error ? (
-            <p className="mt-3 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-xs text-critical">
+            <p className="mt-3 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-xs text-critical-ink">
               {file.error}
             </p>
           ) : null}

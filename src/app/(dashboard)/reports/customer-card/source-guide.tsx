@@ -23,7 +23,7 @@ export function SourceGuide({ guide }: { guide: SourceReportGuide }) {
             href={guide.url}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Open {guide.system} ↗
           </a>
@@ -52,8 +52,8 @@ export function SourceGuide({ guide }: { guide: SourceReportGuide }) {
               </p>
             )}
             {guide.notThis ? (
-              <p className="mt-1.5 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-xs text-ink-secondary">
-                <span className="font-medium text-warning">Not</span>{' '}
+              <p className="mt-1.5 rounded-md border border-warning/30 tint bg-field [--tint:var(--status-warning)] px-2.5 py-1.5 text-xs text-ink-secondary">
+                <span className="font-medium text-warning-ink">Not</span>{' '}
                 <span className="font-medium text-ink">{guide.notThis.name}</span> — {guide.notThis.why}
               </p>
             ) : null}
@@ -125,7 +125,7 @@ function Step({ n }: { n: number }) {
   return (
     <span
       aria-hidden
-      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11px] font-medium text-accent"
+      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full tint bg-field [--tint:var(--accent)] text-[11px] font-medium text-accent"
     >
       {n}
     </span>

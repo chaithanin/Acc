@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `npm run build` / `npm start` | production build and server |
-| `npm test` | unit and integration tests (511, plus more when `samples/` is present) |
+| `npm test` | unit and integration tests (560, plus more when `samples/` is present) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run db:reset` | delete the local database and uploads, then re-seed |
 | `npm run mango:pull -- --company GTG --dry-run` | read the sales ledger straight out of Mango RE |
@@ -268,11 +268,17 @@ says so. `tests/pwa.test.ts` holds that line.
 npm test
 ```
 
-511 tests covering text normalisation and alias resolution, header detection and
+560 tests covering text normalisation and alias resolution, header detection and
 sheet classification, every normalizer, the KPI and cash-flow engines,
 comparison arithmetic, reconciliation rules, the income statement and liquidity
 ratios, budget utilisation, THB formatting, and the Mango RE client and its
 mapping against a schema-faithful fixture.
+
+`tests/design-tokens.test.ts` reads the colours out of `globals.css` and checks
+them as arithmetic: every text colour keeps 4.5:1 and every chart mark 3:1 over
+the worst point of the aurora, so nobody can make the sheets "more like glass"
+by lowering an opacity without finding out what it costs. It also fails if the
+two copies of the dark theme drift apart.
 
 `tests/pwa.test.ts` loads the service worker and drives its fetch handler with
 real requests, because its one dangerous mistake would be remembering a page:
@@ -307,7 +313,7 @@ and has not been verified.
 
 * [`docs/DEPLOY.md`](docs/DEPLOY.md) — deploying to Google Cloud, and the cost reasoning
 * [`docs/DATABASE.md`](docs/DATABASE.md) — schema and the PostgreSQL migration path
-* [`docs/DESIGN.md`](docs/DESIGN.md) — the chart palette and its validation record
+* [`docs/DESIGN.md`](docs/DESIGN.md) — the visual direction (frosted glass on an aurora, after Room Management), why it departs from that reference, the contrast arithmetic, and the chart palette's validation record
 * [`docs/MANGO-RE.md`](docs/MANGO-RE.md) — reading the sales ledger out of Mango RE
 * [`docs/BOOKING-API.md`](docs/BOOKING-API.md) — reading the unit inventory from the Booking API
 * [`docs/MANGO-ANYWHERE.md`](docs/MANGO-ANYWHERE.md) — reading the accounting figures through a browser, and why that is necessary

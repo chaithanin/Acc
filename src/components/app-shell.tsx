@@ -24,6 +24,33 @@ interface NavItem {
 /** What is reachable while the session is looking at the group. */
 const GROUP_PAGES = new Set(['/group', '/account']);
 
+/**
+ * Sections whose pages are siblings of one another — things used together, not
+ * separate destinations. Each is one entry in the sidebar, and its pages are
+ * a strip of pills above whichever of them is open. Twenty entries do not fit
+ * in a sidebar the height of a laptop screen; eleven do.
+ *
+ * Dashboards stay as individual entries: they are the destinations.
+ */
+const STRIP_SECTIONS = new Set(['Data', 'Settings']);
+
+/**
+ * The page the visitor is on: the MOST specific href that matches. A plain
+ * `startsWith` made /import/history count as a visit to /import as well, so
+ * two entries lit up at once.
+ */
+function activeItem(pathname: string, items: NavItem[]): NavItem | undefined {
+  let best: NavItem | undefined;
+  for (const item of items) {
+    const hit =
+      item.href === '/'
+        ? pathname === '/'
+        : pathname === item.href || pathname.startsWith(`${item.href}/`);
+    if (hit && (!best || item.href.length > best.href.length)) best = item;
+  }
+  return best;
+}
+
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Dashboards',
@@ -86,13 +113,11 @@ export function AppShell({
   // render it do not each have to know whether it is a company or the group.
   const scope = company
     ? {
-        initial: company.companyCode.slice(0, 1),
         name: company.displayName,
         code: company.companyCode,
         detail: `${company.projectCount} ${company.projectCount === 1 ? 'project' : 'projects'}`,
       }
     : {
-        initial: 'G',
         name: 'Group',
         code: 'ALL',
         detail: `${group?.companyCount ?? 0} companies, consolidated`,
@@ -119,90 +144,132 @@ export function AppShell({
     });
   };
 
+  // The remembered rail is a preference for a desktop sidebar. On a phone the
+  // sidebar is a drawer that is open to read, so every `rail` rule below is
+  // scoped to `lg:` and the drawer always shows its labels.
+  const rail = collapsed;
+
+  const visibleSections = NAV_GROUPS.map((section) => ({
+    section,
+    items: section.items
+      .filter((item) => item.roles.includes(user.role))
+      // The group view is a consolidation, not a company: the pages that read
+      // one company's snapshot have nothing to show while it is on, so they
+      // are not offered.
+      .filter((item) => !group || GROUP_PAGES.has(item.href)),
+  })).filter(({ items }) => items.length > 0);
+
+  // The strip of siblings for whichever sibling section the visitor is in.
+  const strip = visibleSections.find(
+    ({ section, items }) =>
+      STRIP_SECTIONS.has(section.title) && items.length > 1 && activeItem(pathname, items),
+  );
+
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-plane"
+      >
+        Skip to content
+      </a>
+
+      {mobileOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileOpen(false)}
+          className="no-print fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden"
+        />
+      ) : null}
+
+      {/* A floating glass sheet rather than a wall: inset from the edges so the
+          aurora shows round it. */}
       <aside
         className={cx(
-          'no-print fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar',
-          'transition-[transform,width] duration-200 lg:static lg:translate-x-0',
-          collapsed ? 'w-[4.5rem]' : 'w-60',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+          // An open drawer is an overlay, so it takes the near-solid tier: the
+          // scrim behind it greys whatever the glass sits over, and muted text
+          // on a 64% sheet over a dimmed page is 4.2:1; on the near-solid tier it is 6.0:1.
+          'no-print fixed bottom-4 left-4 top-4 z-40 flex w-64 flex-col rounded-[var(--radius-card)] p-3',
+          mobileOpen ? 'glass-pop' : 'glass-bar',
+          'transition-[width,transform] duration-300 ease-[var(--ease-glass)]',
+          rail && 'lg:w-[5.25rem]',
+          mobileOpen ? 'translate-x-0' : '-translate-x-[120%] lg:translate-x-0',
         )}
       >
         <div
           className={cx(
-            'flex items-center gap-2.5 border-b border-sidebar-border py-4',
-            collapsed ? 'justify-center px-2' : 'px-4',
+            'flex items-center gap-2.5 px-1 pb-3 pt-1',
+            rail && 'lg:justify-center lg:px-0',
           )}
         >
-          <span
-            aria-hidden
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sidebar-active text-sm font-bold text-white"
-          >
-            {scope.initial}
-          </span>
-          {collapsed ? null : (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold leading-tight text-sidebar-ink">
-                {scope.name}
-              </p>
-              <p className="mt-0.5 truncate text-[11px] text-sidebar-ink-muted">
-                {scope.code} · Financial Management
-              </p>
-            </div>
-          )}
+          {/* The application's own mark. Which COMPANY is open is in the top bar
+              and in the card at the foot, where it already was twice. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/logo.png"
+            alt=""
+            width={320}
+            height={258}
+            className={cx('h-10 w-auto shrink-0', rail && 'lg:h-9')}
+          />
+          <div className={cx('min-w-0', rail && 'lg:hidden')}>
+            <p className="truncate text-[15px] font-bold leading-tight tracking-tight text-ink">
+              Global Top Group
+            </p>
+            <p className="mt-0.5 truncate text-[11px] leading-tight text-sidebar-ink-muted">
+              Financial Management
+            </p>
+          </div>
         </div>
 
-        <nav className="flex-1 px-2 py-3">
-          {NAV_GROUPS.map((section) => {
-            const items = section.items
-              .filter((item) => item.roles.includes(user.role))
-              // The group view is a consolidation, not a company: the pages
-              // that read one company's snapshot have nothing to show while it
-              // is on, so they are not offered.
-              .filter((item) => !group || GROUP_PAGES.has(item.href));
-            if (items.length === 0) return null;
+        <nav aria-label="Primary" className="thin-scroll -mx-1 flex-1 overflow-y-auto px-1 py-1">
+          {visibleSections.map(({ section, items }) => {
+            // A sibling section is one entry here and a strip on the page.
+            if (STRIP_SECTIONS.has(section.title) && items.length > 1) {
+              const first = items[0]!;
+              const active = Boolean(activeItem(pathname, items));
+              return (
+                <div key={section.title} className="mb-1">
+                  <div
+                    className={cx('mx-3 mb-2 mt-2 border-t border-sidebar-border', rail && 'lg:mx-2')}
+                  />
+                  <NavEntry
+                    href={first.href}
+                    label={section.title}
+                    icon={NAV_ICONS[first.href] ?? FALLBACK_ICON}
+                    active={active}
+                    rail={rail}
+                  />
+                </div>
+              );
+            }
 
             return (
-              <div key={section.title} className="mb-4">
-                {collapsed ? (
-                  // A rule instead of a word: the grouping still reads, and a
-                  // truncated label would read as a mistake.
-                  <div className="mx-2 mb-2 border-t border-sidebar-border" />
-                ) : (
-                  <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-ink-muted">
-                    {section.title}
-                  </p>
-                )}
-                {items.map((item) => {
-                  const active =
-                    item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={active ? 'page' : undefined}
-                      // The label is the accessible name whether or not it is
-                      // drawn, so a collapsed rail is still navigable by
-                      // screen reader, and it doubles as the hover tooltip.
-                      title={collapsed ? item.label : undefined}
-                      className={cx(
-                        'group relative mb-0.5 flex items-center gap-3 rounded-lg text-sm transition-colors',
-                        collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
-                        active
-                          ? 'bg-sidebar-active font-medium text-white'
-                          : 'text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink',
-                      )}
-                    >
-                      <span className="shrink-0">{NAV_ICONS[item.href] ?? FALLBACK_ICON}</span>
-                      {collapsed ? (
-                        <span className="sr-only">{item.label}</span>
-                      ) : (
-                        <span className="truncate">{item.label}</span>
-                      )}
-                    </Link>
-                  );
-                })}
+              <div key={section.title} className="mb-3">
+                {/* A rule instead of a word on the rail: the grouping still
+                    reads, and a truncated label would read as a mistake. */}
+                <div
+                  className={cx('mx-3 mb-2 hidden border-t border-sidebar-border', rail && 'lg:block')}
+                />
+                <p
+                  className={cx(
+                    'px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-ink-muted',
+                    rail && 'lg:hidden',
+                  )}
+                >
+                  {section.title}
+                </p>
+                {items.map((item) => (
+                  <NavEntry
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    icon={NAV_ICONS[item.href] ?? FALLBACK_ICON}
+                    active={activeItem(pathname, items)?.href === item.href}
+                    rail={rail}
+                  />
+                ))}
               </div>
             );
           })}
@@ -213,79 +280,158 @@ export function AppShell({
           rather than a menu item among the pages, because it changes which
           data every other link shows.
         */}
-        <div className="mt-auto border-t border-sidebar-border p-2">
-          {collapsed ? (
+        <div className="mt-2 border-t border-sidebar-border pt-3">
+          <Link
+            href="/companies"
+            title="Switch company"
+            className={cx(
+              'hidden h-10 items-center justify-center rounded-xl text-sidebar-ink transition-colors hover:bg-sidebar-hover',
+              rail && 'lg:flex',
+            )}
+          >
+            <svg
+              width={18}
+              height={18}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.7}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M4 7h13" />
+              <path d="M14 4l3 3-3 3" />
+              <path d="M20 17H7" />
+              <path d="M10 14l-3 3 3 3" />
+            </svg>
+            <span className="sr-only">Switch company</span>
+          </Link>
+
+          <div className={cx('rounded-xl bg-surface-sunken p-3', rail && 'lg:hidden')}>
+            <p className="truncate text-xs font-semibold text-ink">{scope.name}</p>
+            <p className="mt-0.5 text-[11px] text-sidebar-ink-muted">{scope.detail}</p>
             <Link
               href="/companies"
-              title="Switch company"
-              className="flex justify-center rounded-lg py-2.5 text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+              className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
             >
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M4 7h13" />
-                <path d="M14 4l3 3-3 3" />
-                <path d="M20 17H7" />
-                <path d="M10 14l-3 3 3 3" />
-              </svg>
-              <span className="sr-only">Switch company</span>
+              Switch company
             </Link>
-          ) : (
-            <div className="rounded-xl bg-sidebar-hover p-3">
-              <p className="truncate text-xs font-medium text-sidebar-ink">
-                {scope.name}
-              </p>
-              <p className="mt-0.5 text-[11px] text-sidebar-ink-muted">
-                {scope.detail}
-              </p>
-              <Link
-                href="/companies"
-                className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-sidebar-active px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
-              >
-                Switch company
-              </Link>
-            </div>
-          )}
+          </div>
 
           <button
             type="button"
             onClick={toggleCollapsed}
             className={cx(
-              'mt-2 hidden w-full items-center gap-2 rounded-lg py-2 text-xs text-sidebar-ink-muted',
+              'mt-2 hidden h-9 w-full items-center gap-2 rounded-xl text-xs font-semibold text-sidebar-ink-muted',
               'transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink lg:flex',
-              collapsed ? 'justify-center' : 'px-3',
+              rail ? 'justify-center' : 'px-3',
             )}
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            aria-label={rail ? 'Expand navigation' : 'Collapse navigation'}
           >
             <span aria-hidden className="text-base leading-none">
-              {collapsed ? '»' : '«'}
+              {rail ? '»' : '«'}
             </span>
-            {collapsed ? null : <span>Collapse</span>}
+            {rail ? null : <span>Collapse</span>}
           </button>
         </div>
       </aside>
 
-      {mobileOpen ? (
-        <div
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden
-        />
-      ) : null}
-
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        className={cx(
+          'flex min-h-screen min-w-0 flex-col transition-[margin] duration-300 ease-[var(--ease-glass)] print:ml-0',
+          rail ? 'lg:ml-[7.25rem]' : 'lg:ml-[18rem]',
+        )}
+      >
         <TopBar user={user} company={company} group={group} onMenu={() => setMobileOpen(true)} />
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main id="main" className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+          {strip ? (
+            <SectionTabs
+              label={strip.section.title}
+              items={strip.items}
+              active={activeItem(pathname, strip.items)?.href}
+            />
+          ) : null}
+          {children}
+        </main>
       </div>
     </div>
+  );
+}
+
+/** One entry in the sidebar. */
+function NavEntry({
+  href,
+  label,
+  icon,
+  active,
+  rail,
+}: {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  rail: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      // The label is the accessible name whether or not it is drawn, so a
+      // collapsed rail is still navigable by screen reader, and it doubles as
+      // the hover tooltip.
+      title={rail ? label : undefined}
+      className={cx(
+        'group relative mb-0.5 flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-semibold',
+        'transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-glass)]',
+        rail && 'lg:justify-center lg:px-0',
+        active
+          ? 'bg-sidebar-active text-white shadow-[0_8px_20px_-8px_var(--accent-glow)]'
+          : 'text-sidebar-ink hover:bg-sidebar-hover',
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className={cx('truncate', rail && 'lg:sr-only')}>{label}</span>
+    </Link>
+  );
+}
+
+/**
+ * The pages of a sibling section, as pills above whichever of them is open.
+ * Swipes sideways on a phone rather than wrapping into a block.
+ */
+function SectionTabs({
+  label,
+  items,
+  active,
+}: {
+  label: string;
+  items: NavItem[];
+  active: string | undefined;
+}) {
+  return (
+    <nav aria-label={`${label} pages`} className="no-print mb-5">
+      <div className="glass-bar thin-scroll inline-flex max-w-full gap-1 overflow-x-auto rounded-full p-1">
+        {items.map((item) => {
+          const here = item.href === active;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={here ? 'page' : undefined}
+              className={cx(
+                'shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors',
+                here
+                  ? 'bg-accent-fill text-white shadow-[0_6px_16px_-8px_var(--accent-glow)]'
+                  : 'text-ink-secondary hover:bg-surface-hover hover:text-ink',
+              )}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 
@@ -301,31 +447,38 @@ function TopBar({
   onMenu: () => void;
 }) {
   return (
-    <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-surface/95 px-4 py-2.5 backdrop-blur sm:px-6 lg:px-8">
+    <header className="no-print glass-bar sticky top-4 z-20 mx-4 mt-4 flex items-center gap-3 rounded-[var(--radius-card)] px-3 py-2 sm:mx-6 lg:mx-8">
       <button
         type="button"
         onClick={onMenu}
-        className="rounded-md p-1.5 text-ink-secondary hover:bg-surface-hover lg:hidden"
+        className="grid h-9 w-9 place-items-center rounded-full text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
         aria-label="Open navigation"
       >
-        ☰
+        <svg
+          width={18}
+          height={18}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
       </button>
 
-      {/*
-        The company sits in the top bar on every page. Someone reading a figure
-        should never have to work out whose figure it is.
-      */}
       {/*
         The company is named on every page. Someone reading a figure should
         never have to work out whose figure it is.
       */}
       <Link
         href="/companies"
-        className="min-w-0 rounded-lg px-2 py-1 transition-colors hover:bg-surface-hover"
+        className="min-w-0 rounded-xl px-2.5 py-1 transition-colors hover:bg-surface-hover"
         title="Switch company"
       >
         <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-ink">
+          <span className="truncate text-sm font-bold text-ink">
             {company?.displayName ?? 'Group'}
           </span>
           <span aria-hidden className="text-[10px] text-ink-muted">
@@ -402,11 +555,11 @@ function UserMenu({ user }: { user: User }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-hover"
+        className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 transition-colors hover:bg-surface-hover"
       >
         <span
           aria-hidden
-          className="grid h-8 w-8 place-items-center rounded-full bg-accent text-xs font-semibold text-white"
+          className="grid h-8 w-8 place-items-center rounded-full bg-accent-fill text-xs font-bold text-white shadow-[0_6px_16px_-6px_var(--accent-glow)]"
         >
           {initials || '?'}
         </span>
@@ -424,7 +577,7 @@ function UserMenu({ user }: { user: User }) {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-30 mt-1.5 w-56 overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-lg"
+          className="glass-pop absolute right-0 z-30 mt-2 w-60 overflow-hidden rounded-[var(--radius-card)]"
         >
           <div className="border-b border-border px-3 py-2.5">
             <p className="truncate text-sm font-medium text-ink">{user.name}</p>
@@ -434,14 +587,14 @@ function UserMenu({ user }: { user: User }) {
           <Link
             href="/account"
             role="menuitem"
-            className="block px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+            className="mx-1.5 my-0.5 block rounded-lg px-3 py-2 text-sm font-semibold text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
             Profile settings
           </Link>
           <Link
             href="/companies"
             role="menuitem"
-            className="block px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+            className="mx-1.5 my-0.5 block rounded-lg px-3 py-2 text-sm font-semibold text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
             Switch company
           </Link>
@@ -450,7 +603,7 @@ function UserMenu({ user }: { user: User }) {
             <button
               type="submit"
               role="menuitem"
-              className="w-full px-3 py-2 text-left text-sm text-critical transition-colors hover:bg-critical/10"
+              className="mx-1.5 my-1 block w-[calc(100%-0.75rem)] rounded-lg px-3 py-2 text-left text-sm font-semibold text-critical-ink transition-colors hover:bg-critical/10"
             >
               Log out
             </button>
@@ -487,10 +640,29 @@ function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      className="rounded-md border border-border-strong px-2 py-1 text-xs text-ink-secondary hover:bg-surface-hover"
+      className="grid h-9 w-9 place-items-center rounded-full text-ink-secondary transition-colors hover:bg-surface-hover"
       aria-label="Toggle colour theme"
     >
-      {theme === 'dark' ? '☀' : '☾'}
+      <svg
+        width={17}
+        height={17}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        {theme === 'dark' ? (
+          <>
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />
+          </>
+        ) : (
+          <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" />
+        )}
+      </svg>
     </button>
   );
 }

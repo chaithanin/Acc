@@ -166,7 +166,7 @@ export function CustomerCardReport({
         </div>
 
         {error ? (
-          <p className="mt-4 rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">
+          <p className="mt-4 rounded-md border border-critical/30 tint bg-field [--tint:var(--status-critical)] px-3 py-2 text-sm text-critical-ink">
             {error}
           </p>
         ) : null}
@@ -253,7 +253,7 @@ function SummaryView({ summary }: { summary: Summary }) {
         <ul className="space-y-1.5 text-sm text-ink-secondary">
           {summary.needsConfirmation.map((note) => (
             <li key={note} className="flex gap-2">
-              <span aria-hidden className="text-warning">
+              <span aria-hidden className="text-warning-ink">
                 ●
               </span>
               <span>{note}</span>
@@ -278,9 +278,9 @@ function SummaryView({ summary }: { summary: Summary }) {
                   className={cx(
                     'mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase',
                     issue.severity === 'error'
-                      ? 'bg-critical/15 text-critical'
+                      ? 'bg-critical/15 text-critical-ink'
                       : issue.severity === 'warning'
-                        ? 'bg-warning/15 text-warning'
+                        ? 'bg-warning/15 text-warning-ink'
                         : 'bg-surface-sunken text-ink-muted',
                   )}
                 >

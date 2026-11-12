@@ -1,8 +1,87 @@
 # Design notes
 
-An executive financial dashboard: quiet chrome, generous spacing, and the
-numbers carrying the emphasis. Desktop-first, responsive, and deliberately
-light on animation.
+An executive financial dashboard: the numbers carry the emphasis, and the
+chrome recedes. Desktop-first, responsive, and deliberately light on animation.
+
+## Direction: frosted glass on an aurora
+
+The visual system follows the **Room Management** app's (`chaithanin/Room-management`,
+`DESIGN.md`), itself modelled on the Cirrel admin template: translucent sheets
+float over a soft field of colour instead of boxing the data in with borders.
+
+* **The aurora** — four blurred pools of colour (blue, cyan, teal, amber), fixed
+  behind the whole app (`.aurora` in `globals.css`, mounted once in the root
+  layout so the sign-in page has it too).
+* **Sheets** — a bright 1px top edge, a hairline rim and a soft drop shadow do
+  the separating a border used to. Corners are generous: cards 22px, controls
+  12px, pills full.
+* **Floating sidebar** — a glass sheet inset 16px from the edges (256px, or an
+  84px icon rail; the choice is remembered, desktop only), and a floating glass
+  top bar. Below 1024px the sidebar is a drawer.
+* **Sibling pages as pills** — Data and Settings are each ONE entry in the
+  sidebar, and their pages are a strip of pills above whichever is open.
+  Twenty sidebar entries do not fit in a laptop-height sheet; eleven do.
+  Dashboards stay individual entries: they are the destinations.
+* **One interactive colour**, blue. Teal means *income* and nothing else; it
+  used to double as the active-navigation colour, which broke its own rule.
+* Type: **Urbanist** for the UI, **Noto Sans Thai** behind it, **JetBrains Mono**
+  for formulas and codes, all self-hosted through npm (nothing is fetched from
+  Google at build time or by a visitor). Digits come from a different face, see
+  below.
+
+### Where this departs from the reference, and why
+
+**The sheets are far more opaque.** The reference's data cards are 62% white.
+Here they are 90% (light) and 86% (dark). The reference's own rule is that
+legibility beats effect; its cards hold room statuses, these hold chart marks
+whose contrast was validated against a plain surface, and the glass changes the
+surface behind them from place to place. Measured against the worst point of
+the aurora (both top pools overlapping), a 62% sheet takes five of the eight
+mark colours below 3:1 and the muted text to exactly 4.50. The tiers are:
+
+| Tier | Class | Light | Dark | Holds |
+|---|---|---|---|---|
+| Data | `.glass` | 90% white | 86% `26,29,36` | cards, tiles, tables |
+| Chrome | `.glass-bar` | 64% | 60% | sidebar, top bar, pill strip: navigation only |
+| Overlay | `.glass-pop` | 97% | 97% | menus, tooltips, dialogs, the open drawer |
+
+The aurora itself is 60% (light) and 40% (dark) of the reference's strength.
+
+**Digits are a different face.** Urbanist has no tabular figures. The file that
+ships carries no `tnum` feature (measured: `1111111111` is 90px wide and
+`0000000000` is 187px, with `font-variant-numeric: tabular-nums` on), so a
+column of amounts does not line up. The reference's DESIGN.md says "Urbanist
+with tabular numerals"; that does not hold for the shipped file. Digits and the
+separators `, . % + - −` come from a 3 kB subset of **Manrope** (SIL OFL,
+`src/app/fonts/OFL-Manrope.txt`) declared with a `unicode-range`, so it is first
+in the stack and everything else falls through to Urbanist. Every figure is
+tabular by default (`body`), and `.pnum` opts a hero figure out.
+
+Re-cut it with fontTools if the face ever changes:
+`pyftsubset manrope-latin-wght-normal.woff2 --unicodes='U+0030-0039,U+002C,U+002E,U+0025,U+002B,U+002D,U+2212' --layout-features='tnum,pnum,lnum' --flavor=woff2`
+
+### Contrast on glass
+
+Computed, not eyeballed: each foreground composited against the sheet over the
+worst point of the aurora (the two top pools overlapping), light and dark.
+
+```
+data tier   light  every text colour >= 4.5   worst: muted 5.82, accent 5.44
+                   marks >= 3, except series-3   2.66  (was 2.74 on plain; see below)
+            dark   every text colour >= 4.5   worst: delta-up 4.88
+                   every mark >= 3            worst: critical 3.41
+```
+
+The rule that follows: **text with no sheet behind it (the page heading and its
+description sit straight on the aurora) is ink or ink-secondary, never muted or
+accent.** On bare aurora, light mode, muted is 3.34 and accent 3.13. Anything
+tinted that can float on the page — badges, banners, selected states — is laid
+over a near-white base (`.tint` over `bg-field`) rather than being a see-through
+wash of its own colour.
+
+The status colours have **text-weight** twins, `--good-ink`, `--warning-ink`,
+`--critical-ink` (4.5:1 on the worst point). The mark-weight colours were being
+used for words, which gave pale amber on a pale amber tint.
 
 ## Tokens
 
@@ -17,8 +96,10 @@ the toggle wins in either direction.
 ## Financial dashboard accents
 
 The brief asks for teal on income, coral on expense and gold on the cash line.
-Those are roles, not slots, and they sit on white cards over a pale grey plane
-with a dark sidebar.
+Those are roles, not slots, and they sit on glass cards over the aurora. (The
+original brief also asked for a dark sidebar; the Room Management direction
+replaced it with a floating glass one, and with it the teal that used to mark
+the active navigation entry, so teal now means income and only income.)
 
 | Role | Light | Dark |
 |---|---|---|
@@ -26,7 +107,9 @@ with a dark sidebar.
 | Expense / negative | `#e5484d` | `#e5535a` |
 | Cash line | `#b07c0a` | `#bd8a18` |
 
-Validated against the surfaces actually used (`#ffffff` light, `#1e1e1d` dark)
+Validated against the plain surfaces these colours were chosen on (`#ffffff` light,
+`#1e1e1d` dark); the same pairs checked against the glass are in "Contrast on
+glass" above
 on the pairs that genuinely co-occur — teal and coral share the income/expense
 chart, while gold is the lone series on the cash chart:
 
@@ -63,7 +146,9 @@ good `#0ca30c`, warning `#fab219`, serious `#ec835a`, critical `#d03b3b`.
 ### Validation record
 
 Checked with the data-viz validator rather than by eye, all pairs, against the
-surfaces actually used (`#fcfcfb` light, `#1a1a19` dark):
+plain surfaces (`#fcfcfb` light, `#1a1a19` dark). The colours are unchanged by
+the glass redesign, so the pairwise results below stand; only the *contrast to
+the surface* moved, and that is re-measured above:
 
 ```
 light  lightness band PASS · chroma floor PASS

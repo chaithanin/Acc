@@ -119,7 +119,7 @@ export default async function BudgetSettingsPage({
                 type="month"
                 defaultValue={month}
                 required
-                className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </label>
 
@@ -130,7 +130,7 @@ export default async function BudgetSettingsPage({
               <select
                 name="projectId"
                 defaultValue={projectId ?? ''}
-                className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               >
                 <option value="">All projects</option>
                 {projects.map((p) => (
@@ -150,7 +150,7 @@ export default async function BudgetSettingsPage({
                 inputMode="decimal"
                 defaultValue={existing?.incomeBudget ?? ''}
                 placeholder="e.g. 5000000"
-                className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </label>
 
@@ -163,14 +163,14 @@ export default async function BudgetSettingsPage({
                 inputMode="decimal"
                 defaultValue={existing?.expenseBudget ?? ''}
                 placeholder="e.g. 3500000"
-                className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-ink"
+                className="rounded-md border border-border-strong bg-field px-2.5 py-1.5 text-sm text-ink"
               />
             </label>
           </div>
 
           <button
             type="submit"
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-accent-fill px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
             Save budget
           </button>
