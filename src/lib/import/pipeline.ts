@@ -578,7 +578,14 @@ export function detectReportDate(workbook: RawWorkbook, fileName: string): strin
   }
 
   // Fall back to a date in the file name: "Financial Report 2026-08-31.xlsx".
-  const fromName = /(\d{4}[-_.]\d{1,2}(?:[-_.]\d{1,2})?)/.exec(fileName);
+  //
+  // The digits must stand alone. Mango names its exports like
+  // "20260826105253_5d3c120433.xlsx" — a fourteen-digit timestamp and a hash —
+  // and the unanchored pattern read the last four digits of the timestamp and
+  // the first of the hash ("5253_5") as year 5253, month 5. Buddhist-era
+  // normalisation took that to 4710, and the report was filed as 4710-05-31,
+  // the newest date there will ever be. A second export became 3389-07-31.
+  const fromName = /(?<!\d)(\d{4}[-_.]\d{1,2}(?:[-_.]\d{1,2})?)(?!\d)/.exec(fileName);
   if (fromName) {
     const parsed = parseDateText(fromName[1].replace(/[_.]/g, '-'));
     if (parsed) return endOfMonthIfMonthOnly(parsed, fromName[1]);

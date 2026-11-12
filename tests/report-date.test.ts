@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { parseDateCell, parseDateText } from '@/lib/excel/cells';
+import { detectReportDate } from '@/lib/import/pipeline';
 import { reportDateProblem } from '@/lib/import/report-date';
 
 /**
@@ -100,5 +101,38 @@ describe('the writer, which every route in passes through', () => {
         `${reportDate} was filed`,
       );
     }
+  });
+});
+
+describe('a date in a file name', () => {
+  /**
+   * The cause of the two dates found in the live database, reproduced with the
+   * file names the audit printed. Mango names its exports with a fourteen-digit
+   * timestamp and a hash. The last four digits of the timestamp and the first
+   * of the hash looked like "year 5253, month 5"; Buddhist-era normalisation
+   * made that 4710, and the report was filed as 4710-05-31.
+   */
+  const noContent = { sheets: [] } as never;
+
+  it('does not read a year out of the middle of a longer run of digits', () => {
+    assert.equal(detectReportDate(noContent, '20260826105253_5d3c120433.xlsx'), null);
+    assert.equal(detectReportDate(noContent, '20260826113932_7f86357f7b.xlsx'), null);
+  });
+
+  /**
+   * The year ceiling alone would also turn the two real names into null, so
+   * they do not show that the pattern itself is fixed. This is one that would
+   * pass the ceiling: a reference number whose last four digits happen to be a
+   * plausible year, followed by what looks like a month.
+   */
+  it('does not take a plausible year off the end of a reference number either', () => {
+    assert.equal(detectReportDate(noContent, 'ref12026_8.xlsx'), null);
+    assert.equal(detectReportDate(noContent, 'INV9202608-14.xlsx'), null);
+  });
+
+  it('still reads a date that stands alone', () => {
+    assert.equal(detectReportDate(noContent, 'Financial Report 2026-08-31.xlsx'), '2026-08-31');
+    assert.equal(detectReportDate(noContent, 'Hamonia_Report_2026-08.xlsx'), '2026-08-31');
+    assert.equal(detectReportDate(noContent, 'GL.2026.08.31.xlsx'), '2026-08-31');
   });
 });
