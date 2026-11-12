@@ -25,6 +25,79 @@ export interface KpiCardProps {
   emphasis?: boolean;
 }
 
+/**
+ * Which way a figure moved, in one line.
+ *
+ * It used to be three rows — Previous, Difference, Change — each with its own
+ * label. On a first import, and on any metric without an earlier period, all
+ * three read "—", "—", "N/A": sixty pixels per card to say nothing, times
+ * seven cards on the receivable page. One line says the same and says it
+ * faster, and where there is nothing to compare it says that in words instead
+ * of making the reader decode three dashes.
+ */
+function Movement({
+  metric,
+  sentiment,
+  isCount,
+}: {
+  metric: MetricComparison;
+  sentiment: 'positive' | 'negative' | 'neutral';
+  isCount: boolean;
+}) {
+  // Nothing at all when there is nothing to compare. The filter bar above
+  // already says "no earlier period to compare" once for the whole page;
+  // seven tiles each repeating it is the same sentence read eight times.
+  if (metric.previous === null || metric.difference === null) return null;
+
+  const tone =
+    sentiment === 'positive'
+      ? 'text-delta-up'
+      : sentiment === 'negative'
+        ? 'text-delta-down'
+        : 'text-ink-secondary';
+
+  const amount = isCount
+    ? formatNumber(metric.difference)
+    : formatDelta(metric.difference, 'millions');
+
+  return (
+    <p className="mt-2 flex flex-wrap items-baseline gap-x-1.5 text-xs">
+      <span className={cx('tnum inline-flex items-baseline gap-1 font-medium', tone)}>
+        <Direction difference={metric.difference} />
+        {amount}
+      </span>
+      <span className={cx('tnum', tone)}>({formatPercent(metric.differencePct)})</span>
+      <span className="text-ink-muted">
+        vs{' '}
+        <span className="tnum">
+          {isCount ? formatNumber(metric.previous) : formatCompactTHB(metric.previous)}
+        </span>
+      </span>
+    </p>
+  );
+}
+
+/**
+ * The arrow. Direction must never rest on hue alone — a reader who cannot
+ * separate the green from the red still has to be able to tell a rise from a
+ * fall. The sign in front of the number says it too; this says it at a glance.
+ *
+ * Hidden from assistive technology because the signed number beside it already
+ * reads correctly, and an announced "up arrow" before "+1.2M" is noise.
+ */
+function Direction({ difference }: { difference: number }) {
+  if (difference === 0) return null;
+  return (
+    <svg
+      viewBox="0 0 8 8"
+      aria-hidden="true"
+      className="h-2 w-2 shrink-0 self-center fill-current"
+    >
+      {difference > 0 ? <path d="M4 0 8 7H0z" /> : <path d="M4 8 0 1h8z" />}
+    </svg>
+  );
+}
+
 export function KpiCard({ metric, snapshotId, projectId, emphasis }: KpiCardProps) {
   const [showCalculation, setShowCalculation] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownResponse | null>(null);
@@ -62,44 +135,7 @@ export function KpiCard({ metric, snapshotId, projectId, emphasis }: KpiCardProp
             {isCount ? formatNumber(metric.current) : formatCompactTHB(metric.current)}
           </p>
 
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border pt-3 text-xs">
-            <span className="text-ink-muted">Previous</span>
-            <span className="tnum text-right text-ink-secondary">
-              {metric.previous === null
-                ? '—'
-                : isCount
-                  ? formatNumber(metric.previous)
-                  : formatCompactTHB(metric.previous)}
-            </span>
-
-            <span className="text-ink-muted">Difference</span>
-            <span
-              className={cx(
-                'tnum text-right font-medium',
-                sentiment === 'positive' && 'text-delta-up',
-                sentiment === 'negative' && 'text-delta-down',
-                sentiment === 'neutral' && 'text-ink-secondary',
-              )}
-            >
-              {metric.difference === null
-                ? '—'
-                : isCount
-                  ? formatNumber(metric.difference)
-                  : formatDelta(metric.difference, 'millions')}
-            </span>
-
-            <span className="text-ink-muted">Change</span>
-            <span
-              className={cx(
-                'tnum text-right font-medium',
-                sentiment === 'positive' && 'text-delta-up',
-                sentiment === 'negative' && 'text-delta-down',
-                sentiment === 'neutral' && 'text-ink-secondary',
-              )}
-            >
-              {formatPercent(metric.differencePct)}
-            </span>
-          </div>
+          <Movement metric={metric} sentiment={sentiment} isCount={isCount} />
         </div>
 
         <div className="mt-3 flex gap-1.5">

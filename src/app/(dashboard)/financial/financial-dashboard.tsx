@@ -189,22 +189,32 @@ export function FinancialDashboard({
           )}
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-          <BudgetDial
-            title="Income budget for the month"
-            utilisation={incomeBudget}
-            tone="income"
-            month={month}
-            canEdit={canEditBudget}
-          />
-          <BudgetDial
-            title="Expense budget for the month"
-            utilisation={expenseBudget}
-            tone="expense"
-            month={month}
-            canEdit={canEditBudget}
-          />
-        </div>
+        {/*
+          With no budget entered — the usual state until someone sets one —
+          both dials used to draw a tall card explaining the same absence in
+          the same words, with the same button, one above the other. Two
+          hundred pixels each to say nothing twice. One line says it once.
+        */}
+        {incomeBudget.percent === null && expenseBudget.percent === null ? (
+          <NoBudgetYet month={month} canEdit={canEditBudget} />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+            <BudgetDial
+              title="Income budget for the month"
+              utilisation={incomeBudget}
+              tone="income"
+              month={month}
+              canEdit={canEditBudget}
+            />
+            <BudgetDial
+              title="Expense budget for the month"
+              utilisation={expenseBudget}
+              tone="expense"
+              month={month}
+              canEdit={canEditBudget}
+            />
+          </div>
+        )}
       </section>
 
       {/* Cash line and the statement. */}
@@ -368,6 +378,33 @@ function negate(value: number | null | undefined): number | null {
   return value === 0 ? 0 : -value;
 }
 
+/**
+ * Both budgets unset — the state every company starts in, since no source
+ * workbook carries a budget. Said once, in a line, with the way to fix it in
+ * the same sentence.
+ */
+function NoBudgetYet({ month, canEdit }: { month: string; canEdit: boolean }) {
+  return (
+    <Card>
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
+        Budget for the month
+      </p>
+      <p className="mt-2 text-sm text-ink-secondary">
+        No income or expense budget is set for {formatMonth(month)}, so neither dial can be drawn.
+        Source workbooks never carry one.
+      </p>
+      {canEdit ? (
+        <Link
+          href={`/settings/budget?month=${month}`}
+          className="mt-3 inline-flex rounded-md border border-border-strong px-3 py-1.5 text-xs text-ink hover:bg-surface-hover"
+        >
+          Set a budget
+        </Link>
+      ) : null}
+    </Card>
+  );
+}
+
 function BudgetDial({
   title,
   utilisation,
@@ -384,20 +421,22 @@ function BudgetDial({
   return (
     <Card className="flex flex-col items-center justify-center">
       {utilisation.percent === null ? (
-        <div className="py-4 text-center">
+        <div className="py-2 text-center">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</p>
-          <p className="mt-3 text-sm text-ink-secondary">No budget set for {formatMonth(month)}.</p>
-          <p className="mt-1 text-xs text-ink-muted">
-            Source workbooks carry no budget, so this dial stays empty until one is entered.
+          <p className="mt-2 text-sm text-ink-secondary">
+            No budget set for {formatMonth(month)}.
+            {canEdit ? (
+              <>
+                {' '}
+                <Link
+                  href={`/settings/budget?month=${month}`}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  Set one
+                </Link>
+              </>
+            ) : null}
           </p>
-          {canEdit ? (
-            <Link
-              href={`/settings/budget?month=${month}`}
-              className="mt-3 inline-flex rounded-md border border-border-strong px-3 py-1.5 text-xs text-ink hover:bg-surface-hover"
-            >
-              Set a budget
-            </Link>
-          ) : null}
         </div>
       ) : (
         <ProgressDial
