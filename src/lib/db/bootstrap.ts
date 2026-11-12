@@ -99,7 +99,10 @@ export function bootstrapDatabase(options: { adminPassword?: string } = {}): See
   }
 
   if (countUsers() === 0) {
-    const email = (process.env.GTG_ADMIN_EMAIL ?? 'admin@globaltopgroup.local').trim();
+    // `??` would take an empty GTG_ADMIN_EMAIL as a supplied value, which is
+    // how a deployment ended up with an administrator whose address is blank.
+    // Unset and set-to-nothing mean the same thing here.
+    const email = (process.env.GTG_ADMIN_EMAIL || '').trim() || 'admin@globaltopgroup.local';
     const supplied = adminSecret(options.adminPassword);
 
     // In production the secret must be provided. Generating one instead would

@@ -105,3 +105,49 @@ describe('password policy', () => {
     assert.throws(() => users.setUserPassword(admin.id, '   '), /password is required/i);
   });
 });
+
+/**
+ * A live deployment was found holding an active administrator whose email
+ * column was empty. Sign-in matches on that column, so the account could
+ * never be used and could not be told apart from any other in a listing.
+ *
+ * It got there because `process.env.GTG_ADMIN_EMAIL ?? default` treats an
+ * empty string as a supplied value, and the secrets file on that VM had the
+ * variable present but blank. The same shape of mistake is recorded in
+ * deploy/docker-compose.yml for the password, which was fixed there and left
+ * standing here.
+ */
+describe('an address somebody can sign in with', () => {
+  it('is required wherever a user is written, not only in the form', () => {
+    for (const email of ['', '   ', 'nobody', '@example.com', 'a@', 'a b@example.com']) {
+      assert.throws(
+        () => users.createUser({ email, name: 'X', password: 'a-long-enough-password', role: 'viewer' }),
+        /email/i,
+        `createUser accepted ${JSON.stringify(email)}`,
+      );
+    }
+  });
+
+  it('still accepts an ordinary address', () => {
+    const user = users.createUser({
+      email: '  Mixed.Case@Example.com  ',
+      name: 'Mixed',
+      password: 'a-long-enough-password',
+      role: 'viewer',
+    });
+    assert.equal(user.email, 'mixed.case@example.com');
+  });
+
+  it('treats GTG_ADMIN_EMAIL set to nothing as not set at all', () => {
+    // Blank and absent mean the same thing; neither may become an address.
+    const before = process.env.GTG_ADMIN_EMAIL;
+    process.env.GTG_ADMIN_EMAIL = '';
+    try {
+      assert.equal((process.env.GTG_ADMIN_EMAIL || '').trim() || 'admin@globaltopgroup.local',
+        'admin@globaltopgroup.local');
+    } finally {
+      if (before === undefined) delete process.env.GTG_ADMIN_EMAIL;
+      else process.env.GTG_ADMIN_EMAIL = before;
+    }
+  });
+});

@@ -117,6 +117,31 @@ function assertUsablePassword(password: string): void {
   }
 }
 
+/**
+ * An address somebody can actually sign in with.
+ *
+ * Sign-in matches on this column, so a blank one is an active account that
+ * nobody can ever use and nobody can identify. One reached production: an
+ * empty GTG_ADMIN_EMAIL in the deployment's secrets file arrived looking
+ * supplied, and the first administrator was created with it.
+ *
+ * This is not a full address check — that cannot be done — only a refusal of
+ * what is plainly unusable as a login.
+ */
+function assertUsableEmail(email: string): void {
+  const trimmed = email.trim();
+  if (trimmed === '') {
+    throw new Error('An email address is required.');
+  }
+  const at = trimmed.indexOf('@');
+  if (at < 1 || at !== trimmed.lastIndexOf('@') || at === trimmed.length - 1) {
+    throw new Error(`"${trimmed}" is not an email address anyone could sign in with.`);
+  }
+  if (/\s/.test(trimmed)) {
+    throw new Error('An email address cannot contain spaces.');
+  }
+}
+
 export function createUser(input: {
   email: string;
   name: string;
@@ -124,6 +149,7 @@ export function createUser(input: {
   role: Role;
   expiresAt?: string | null;
 }): User {
+  assertUsableEmail(input.email);
   assertUsablePassword(input.password);
 
   const id = newId();
