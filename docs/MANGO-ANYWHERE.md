@@ -299,11 +299,17 @@ npm run anywhere:pull -- --company HAMONIA             # writes
 ## All six companies in one run
 
 The group is six companies and the sign-in reaches all of them, so
-`--all-companies` asks Mango which ones the account can open and walks them.
-Between companies it calls `anywhere/center/Maincomp` to point the service
-session at the next one — without which the second company's figures are the
-first company's, under the second one's name, which is the worst available
-outcome: plausible, labelled, and wrong.
+`--all-companies` asks Mango which ones the account can open and pulls each.
+
+**Each company is its own sign-in.** The company is fixed when the account signs
+in, so `--all-companies` runs the ordinary single-company pull once per company,
+one after another, as separate processes (`MANGO_MAINCODE=<code>` for each).
+Calling `anywhere/center/Maincomp` to switch inside one session answers 200 and
+changes nothing (see below), so it is not used. Each run checks which company the
+application itself opened before it reads, and stops if that is not the company
+asked for. A run takes about as many sign-ins as there are companies, a minute or
+so each; one failing does not stop the others, and the summary at the end says
+which did what.
 
 Writing more than one needs the mapping given rather than guessed:
 
@@ -419,7 +425,7 @@ if nothing was written, starts the app and leaves the VM's database alone;
 otherwise uploads it, restarts the app, waits for `healthy`, and runs the audit.
 The last lines print the command that puts the earlier copy back.
 
-- **The app is down for the length of the pull**, usually a few minutes. That is
+- **The app is down for the length of the pull**: a sign-in per company, so with six companies expect several minutes (the first live runs took about half a minute each). That is
   deliberate: with the app running, anything it wrote meanwhile would be
   overwritten by the copy coming back.
 - Any failure before the replacement leaves the VM's database as it was, and the
@@ -452,10 +458,10 @@ the service appears to use the company the session signed in with.
 Nothing was written (it was a `--dry-run`). Had it been a real run, one
 company's figures would have been filed under six companies.
 
-So `--all-companies` now refuses, before anything is written, when two companies
-answer identically. It writes nothing for *any* company in that case, including
-the first, because the first answer is then unproven too. The stub can show it:
-`STUB_IGNORE_SWITCH=1 node scripts/anywhere-stub.mjs`.
+That is why the run now signs in once per company instead. (An earlier version
+refused when two companies answered identically; with one sign-in per company and
+the check below, that situation cannot arise, so the check was removed with the
+switching it guarded.)
 
 ### What `--trace` showed (13 Nov)
 
@@ -472,11 +478,13 @@ posted `maincode=MG1`. The list is not what it builds the request from.
 So the pull corrects the `maincode` in that request on its way out (matched by
 its shape, a POST carrying `userid`, `userpass` and `maincode`), and afterwards
 checks the company the application itself opened (`Maincomp`) against the one
-asked for, stopping if they differ. This has been tested against a stub that
-behaves this way; it has not yet been seen to return a second company's figures
-from the live service. Expect the line `the application opened company MG4`, and
-figures different from MG1's.
+asked for, stopping if they differ.
 
-`--all-companies` still signs in once and switches through the service, which
-does not work, and is refused when two answers match. It needs one sign-in per
-company, which is not built yet.
+Confirmed against the live service the same day: signed in as MG4, the run
+printed `the application opened company MG4` and read 129 customers and 47
+suppliers, where MG1 has 29 and 69, with every row naming MG4.
+
+`--trace` stays, for the next time Mango changes its sign-in. It prints shapes
+only: paths, query, header names, JSON body keys, cookie and storage names, and
+the `maincode` and `appcode` in the login body. Never a password, a token or a
+header or cookie value.

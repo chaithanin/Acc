@@ -38,8 +38,10 @@
  *                       sends, once that has been confirmed against one
  *                       account in Mango's own screen
  *   --date YYYY-MM-DD   the date to file it under (default: today)
- *   --all-companies     walk every company this account can open, asking Mango
- *                       which those are
+ *   --all-companies     every company this account can open, asking Mango which
+ *                       those are. One sign-in PER company: the company is fixed
+ *                       when the account signs in, so each is its own run of this
+ *                       script, one after another.
  *   --map MG2=HAMONIA,MG1=CHTN
  *                       which company here each Mango company is. Needed to
  *                       write more than one; the two systems spell the same
@@ -59,8 +61,10 @@
  *   npx playwright install --with-deps chromium
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
@@ -150,6 +154,94 @@ if (looksLikePlaceholder(pass)) {
 
 const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 const money = (n) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(n));
+
+/*
+ * --all-companies: one sign-in per company, one run of this script each.
+ *
+ * The company belongs to the session from the moment of sign-in (see the trace
+ * in docs/MANGO-ANYWHERE.md), so reading another company means signing in as it.
+ * Switching through the service answered 200 and changed nothing, which is how
+ * six companies came back with one company's figures. Each company therefore
+ * runs as the ordinary single-company pull in a process of its own, so a failure
+ * in one cannot take another's figures with it, and nothing here can read one
+ * company under another's name: each child checks which company the application
+ * opened before it reads.
+ */
+if (allCompanies && !(process.env.GTG_PULL_CHILD === '1')) {
+  const wanted = new Map();
+  for (const pair of companyMap) {
+    const [from, to] = pair.split('=').map((part) => part.trim());
+    if (from && to) wanted.set(from.toUpperCase(), to);
+  }
+  if (!dryRun && wanted.size === 0) {
+    console.error('--all-companies needs --map to write: say which company here each Mango company is.');
+    console.error('  --map MG1=CODE,MG2=CODE   (or --dry-run first, to see the companies)');
+    process.exit(2);
+  }
+
+  /** The arguments for a child: everything given, minus what the parent consumes. */
+  const without = (list, bare, valued) => {
+    const kept = [];
+    for (let i = 0; i < list.length; i += 1) {
+      if (bare.includes(list[i])) continue;
+      if (valued.includes(list[i])) { i += 1; continue; }
+      kept.push(list[i]);
+    }
+    return kept;
+  };
+  const child = (extraArgs, env) => spawnSync(
+    process.execPath,
+    [...process.execArgv, process.argv[1], ...extraArgs],
+    { stdio: 'inherit', env: { ...process.env, GTG_PULL_CHILD: '1', ...env } },
+  );
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gtg-companies-'));
+  const listFile = path.join(scratch, 'companies.json');
+  let rows = [];
+  try {
+    console.log(bold('\n══ Asking Mango which companies this account can open'));
+    const listed = child(['--list-companies', '--dry-run'], { GTG_PULL_COMPANIES_FILE: listFile });
+    if (listed.status !== 0 || !fs.existsSync(listFile)) {
+      console.error('\n   Could not find out which companies this account can open.');
+      process.exit(1);
+    }
+    rows = JSON.parse(fs.readFileSync(listFile, 'utf8'));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+
+  const known = new Set(rows.map((r) => r.code));
+  const unknown = [...wanted.keys()].filter((code) => !known.has(code));
+  if (unknown.length > 0) {
+    console.error(`\n   --map names ${unknown.join(', ')}, which this account cannot open. Nothing was read.`);
+    console.error(`   It can open: ${rows.map((r) => r.code).join(', ')}`);
+    process.exit(2);
+  }
+
+  const outcome = [];
+  for (const { code, name } of rows) {
+    const target = wanted.get(code);
+    if (!dryRun && !target) { outcome.push([code, name, 'skipped: not in --map']); continue; }
+
+    const childArgs = without(args, ['--all-companies'], ['--map', '--company', '--save']);
+    if (!dryRun) childArgs.push('--company', target);
+    if (savePath) childArgs.push('--save', savePath.replace(/(\.json)?$/, `.${code}$1`));
+
+    console.log(bold(`\n══ ${code}  ${name}${dryRun ? '' : `  →  ${target}`}`));
+    const ran = child(childArgs, { MANGO_MAINCODE: code });
+    outcome.push([code, name, ran.status === 0 ? 'ok' : `FAILED (exit ${ran.status ?? 'signal'})`]);
+  }
+
+  console.log(bold('\n══ Summary'));
+  for (const [code, name, status] of outcome) console.log(`   ${code.padEnd(5)} ${status.padEnd(26)} ${name}`);
+  const failed = outcome.filter(([, , status]) => status.startsWith('FAILED'));
+  const skipped = outcome.filter(([, , status]) => status.startsWith('skipped'));
+  if (skipped.length > 0) {
+    console.log(`\n   Not written, because --map does not name them: ${skipped.map(([c]) => c).join(', ')}`);
+  }
+  console.log('');
+  process.exit(failed.length > 0 || outcome.every(([, , status]) => status.startsWith('skipped')) ? 1 : 0);
+}
 
 let chromium;
 try {
@@ -565,8 +657,8 @@ const tokensSeen = [];
 /**
  * The company the APPLICATION says it opened: it calls
  * center/Maincomp?maincode=<company> as it starts, after signing in. Only
- * while `observing`, because this script's own switchCompany makes the same
- * call from inside the page and must not be mistaken for the application's.
+ * while `observing`, because this script's own reads are made from inside the
+ * page too and must not be mistaken for the application's.
  */
 let observing = true;
 const appCompanies = new Set();
@@ -832,23 +924,6 @@ try {
 
   // ------------------------------------------------------------------ read
 
-  /**
-   * Point the service session at a company.
-   *
-   * Signing in settles the company for the estate module; the service keeps its
-   * own, and this is what the front end calls to change it. Reading a second
-   * company without it returns the first one's figures under the second one's
-   * name, which is the worst available outcome — plausible, labelled, wrong.
-   */
-  const switchCompany = async (code) => {
-    const answer = await ask(`${service}/anywhere/center/Maincomp?maincode=${encodeURIComponent(code)}`);
-    if (answer.status !== 200) {
-      console.error(`   could not switch to ${code}: ${answer.status}`);
-      return false;
-    }
-    return true;
-  };
-
   /** One request, made from inside the page: its origin, its cookies, its token. */
   const ask = (url) => page.evaluate(async ([target, token]) => {
     try {
@@ -991,15 +1066,12 @@ try {
   };
 
   /**
-   * Which companies to read.
-   *
-   * `--all-companies` asks Mango which ones the account can open rather than
-   * being told, because the answer is the authority on it — and an account that
-   * has lost a company should shrink the run rather than fail one of them.
+   * `--list-companies`: say which companies the account can open, and stop. The
+   * orchestrating run (`--all-companies`) uses it, since the answer is the
+   * authority on which there are and an account that has lost a company should
+   * shrink the run rather than fail one of them.
    */
-  let targets = [maincode];
-
-  if (allCompanies) {
+  if (has('list-companies')) {
     const payload = unwrap(
       await ask(`${service}/api/public/LoginCompaniesByUserID?userid=${encodeURIComponent(user)}`),
       'companies',
@@ -1011,66 +1083,37 @@ try {
       process.exit(1);
     }
 
-    targets = rows
-      .map((row) => String(row.maincode ?? '').trim().toUpperCase())
-      .filter(Boolean);
+    const list = rows
+      .map((row) => ({ code: String(row.maincode ?? '').trim().toUpperCase(), name: String(row.mainname ?? row.compname ?? '').trim() }))
+      .filter((row) => row.code);
 
-    console.log(bold(`\n── ${targets.length} companies this account can open`));
-    for (const row of rows) {
-      console.log(`   ${String(row.maincode ?? '').padEnd(6)} ${row.mainname ?? row.compname ?? ''}`);
+    console.log(bold(`\n── ${list.length} companies this account can open`));
+    for (const row of list) console.log(`   ${row.code.padEnd(6)} ${row.name}`);
+
+    if (process.env.GTG_PULL_COMPANIES_FILE) {
+      fs.writeFileSync(process.env.GTG_PULL_COMPANIES_FILE, JSON.stringify(list), 'utf8');
     }
+    process.exit(0);
   }
 
+  // One company per run: the one signed in as.
+  const targets = [maincode];
+
   const results = [];
-  /**
-   * What each company answered, to notice when two answered the same thing.
-   *
-   * switchCompany getting a 200 does not mean the session changed company; on
-   * the live service it did not. Six companies came back with identical figures
-   * to the unit, every one labelled with its own name — exactly the "plausible,
-   * labelled, wrong" outcome switchCompany exists to prevent. Two real
-   * companies do not agree on every balance, so identical answers mean the read
-   * was of one company, whatever it was asked for.
-   */
-  const seen = new Map();
-  const twins = [];
   for (const code of targets) {
     console.log(bold(`\n── Reading ${code}`));
-    if (targets.length > 1 && !(await switchCompany(code))) continue;
 
     const { bundle, read, mapped, withheld } = await readCompany(code);
     if (read === 0) {
       console.error(`   nothing answered for ${code}; skipping it rather than writing an empty position`);
       continue;
     }
-
-    const same = seen.get(JSON.stringify(bundle));
-    if (same) {
-      console.error(`   ${code} answered exactly what ${same} answered, to the last figure.`);
-      console.error(`   That is one company read twice, not two companies. Not reported, not written.`);
-      twins.push(code);
-      continue;
-    }
-    seen.set(JSON.stringify(bundle), code);
-
     report(code, mapped, withheld);
     results.push({ code, bundle, mapped, withheld });
   }
 
-  if (twins.length > 0) {
-    const first = [...seen.values()][0];
-    console.error(bold(`\n   ${twins.length} of ${targets.length} companies answered with another company's figures: ${twins.join(', ')}.`));
-    console.error('   Switching company through the service did not change what it reads, so even');
-    console.error(`   the first answer (${first}) is unproven. NOTHING is written, for any company.`);
-    console.error('');
-    console.error('   Sign in as the company instead, one at a time, and compare:');
-    console.error(`     MANGO_MAINCODE=${twins[0]} npm run anywhere:pull -- --dry-run`);
-    console.error('   If that shows different figures, the company is fixed at sign-in.');
-    process.exit(1);
-  }
-
   if (results.length === 0) {
-    console.error('\n   Nothing answered for any company. The token went past, so the session is');
+    console.error('\n   Nothing answered. The token went past, so the session is');
     console.error('   signed in and not pointed at a company.');
     process.exit(1);
   }
@@ -1137,6 +1180,7 @@ try {
     const OWNED = ['receivable', 'payable', 'bank'];
 
     let written = 0;
+    let failedWrites = 0;
     for (const { code, bundle, mapped, withheld } of results) {
       const target = mapping.get(code);
       if (!target) continue;
@@ -1144,6 +1188,7 @@ try {
       const company = known.find((c) => c.companyCode === target);
       if (!company) {
         console.error(`\n   ${code} → ${target}, and there is no company here with that code.`);
+        failedWrites += 1;
         continue;
       }
 
@@ -1233,6 +1278,7 @@ try {
     }
 
     console.log(bold(`\n   ${written} of ${results.length} companies written.\n`));
+    if (failedWrites > 0) process.exitCode = 1;
   }
 } finally {
   await context.close();

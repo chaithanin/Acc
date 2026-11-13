@@ -15,8 +15,8 @@
 #
 #   ./deploy/pull-via-cloudshell.sh --all-companies --map MG1=CHTN,MG2=HAMONIA
 #       Stops the app, takes a copy of the database, pulls, puts it back, starts
-#       the app and runs the audit. The app is down for the length of the pull,
-#       usually a few minutes.
+#       the app and runs the audit. The app is down for the length of the pull:
+#       a sign-in per company, so several minutes for all six.
 #
 # Everything after the script name goes to `npm run anywhere:pull`.
 #
@@ -80,7 +80,7 @@ gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | 
 cat <<PLAN
 
 This will:
-  1. stop the app on $VM  (it is down until the end, usually a few minutes)
+  1. stop the app on $VM  (it is down until the end: a sign-in per company, so several minutes for six)
   2. copy $VM_DATA/$DB on the VM to $DB.before-pull-$STAMP beside it
   3. take a copy of the database here, and pull from Mango into THAT copy
   4. put it back on the VM, and start the app
