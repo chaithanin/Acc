@@ -126,8 +126,22 @@ if (!user || !pass) {
   console.error('MANGO_USER and MANGO_PASS are not set. Use a service account, not a person’s login.');
   process.exit(2);
 }
-if (/^<.*>$|^(your|xxx+|changeme|placeholder)/i.test(user) || /^[…．.\-_*·•]+$/.test(user)) {
+/*
+ * A value copied out of instructions rather than filled in: <angle brackets>,
+ * "your…", "changeme", dots, or an instruction sentence in Thai. A wrong
+ * password is not free: it is a failed sign-in against the real account, and
+ * Mango may lock an account after a few.
+ */
+const looksLikePlaceholder = (v) =>
+  /^<.*>$|^(your|xxx+|changeme|placeholder)/i.test(v)
+  || /^[…．.\-_*·•]+$/.test(v)
+  || /รหัสผ่าน|ชื่อผู้ใช้|ตรงนี้|ใส่/.test(v);
+if (looksLikePlaceholder(user)) {
   console.error('MANGO_USER still holds the placeholder from the instructions.');
+  process.exit(2);
+}
+if (looksLikePlaceholder(pass)) {
+  console.error('MANGO_PASS still holds the placeholder from the instructions. Nothing was sent to Mango.');
   process.exit(2);
 }
 
