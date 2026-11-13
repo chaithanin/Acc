@@ -586,6 +586,18 @@ try {
      * what the page does offer. MG1 as an unstated default is the one case
      * allowed to carry on, because it is what the page defaults to anyway.
      */
+    /*
+     * The page fills this list after it loads. Reading it the moment the
+     * password box appears found it empty on one run and full on the next, with
+     * the same account — so wait for it to hold more than one company, and
+     * carry on regardless if it never does (an account with a single company
+     * has nothing to choose between).
+     */
+    await page.waitForFunction(() => {
+      const el = document.querySelector('select');
+      return Boolean(el) && el.options.length > 1;
+    }, null, { timeout: 15_000 }).catch(() => undefined);
+
     const picker = page.locator('select').first();
     const wanted = maincode.toLowerCase();
     const offered = await picker.count() > 0
@@ -606,7 +618,10 @@ try {
     } else if (maincodeGiven || maincode !== 'MG1') {
       console.error(`\n   Cannot choose company ${maincode} on the sign-in page, so not signing in:`);
       console.error('   signed in as the page\'s default, it would read another company and label it ' + maincode + '.');
-      if (offered.length === 0) {
+      if (offered.length === 0 && await picker.count() > 0) {
+        console.error('   There is a <select> on the page, but it has no options in it — the list of companies did not load.');
+        console.error('   Run it again; if it keeps happening the sign-in page is not giving this account a list.');
+      } else if (offered.length === 0) {
         const controls = await page.evaluate(() => [...document.querySelectorAll('input,select,button,[role=combobox],[role=listbox],[role=radio],[class*=company i],[class*=select i]')]
           .slice(0, 25)
           .map((el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${el.getAttribute('name') ? '[name=' + el.getAttribute('name') + ']' : ''}${el.getAttribute('role') ? '[role=' + el.getAttribute('role') + ']' : ''}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`));
