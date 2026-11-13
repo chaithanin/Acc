@@ -110,7 +110,8 @@ http.createServer((req, res) => {
     if (p === 'anywhere/center/Maincomp') {
       const asked = u.searchParams.get('maincode');
       if (!['MG1', 'MG2'].includes(asked)) return json(res, { success: false, error: 'no' }, 403);
-      current = asked;
+      // STUB_IGNORE_SWITCH=1 answers 200 and changes nothing, as the live service did.
+      if (!process.env.STUB_IGNORE_SWITCH) current = asked;
       return json(res, { success: true, data: { maincode: asked } });
     }
     if (p === 'anywhereAPI/Dashboard/balanceArReadList')

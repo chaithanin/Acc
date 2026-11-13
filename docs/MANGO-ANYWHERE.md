@@ -435,3 +435,36 @@ The last lines print the command that puts the earlier copy back.
 It has been run against a stand-in for the VM and the Mango stub, covering the
 success, a failed sign-in, a repeat of the same pull, an unclean shutdown and an
 answered "no". It has not been run against the real VM or the real Mango.
+
+## Six companies, one set of figures
+
+The first `--all-companies --dry-run` against the live service (13 Nov) read all
+six companies and got **identical figures for every one**: 30 customers, 69
+suppliers, 11 bank accounts, 20,151,345 owed by customers, -153,501,268 in the
+bank, the same to the unit. Each was printed under its own company name.
+
+`switchCompany` (`anywhere/center/Maincomp?maincode=`) answers 200 for every
+code, so the run saw no failure. It does not change what the service reads.
+Only the bank endpoint is given a company (`company_code`), the other eight are
+given none and read the session's, and the bank figures were identical too, so
+the service appears to use the company the session signed in with.
+
+Nothing was written (it was a `--dry-run`). Had it been a real run, one
+company's figures would have been filed under six companies.
+
+So `--all-companies` now refuses, before anything is written, when two companies
+answer identically. It writes nothing for *any* company in that case, including
+the first, because the first answer is then unproven too. The stub can show it:
+`STUB_IGNORE_SWITCH=1 node scripts/anywhere-stub.mjs`.
+
+What is **not** known is how to read a second company. The sign-in form takes a
+company (the front end posts `userid`, `userpass`, `maincode`), so the likely
+answer is one sign-in per company. That has not been tried against the live
+service, and Mango allows one session per account, so the sign-ins would have
+to follow one another. To test it, one company at a time:
+
+```bash
+MANGO_MAINCODE=MG4 npm run anywhere:pull -- --dry-run
+```
+
+If that shows figures different from MG1's, the company is fixed at sign-in.

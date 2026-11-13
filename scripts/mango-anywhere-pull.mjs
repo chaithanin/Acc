@@ -792,6 +792,18 @@ try {
   }
 
   const results = [];
+  /**
+   * What each company answered, to notice when two answered the same thing.
+   *
+   * switchCompany getting a 200 does not mean the session changed company; on
+   * the live service it did not. Six companies came back with identical figures
+   * to the unit, every one labelled with its own name — exactly the "plausible,
+   * labelled, wrong" outcome switchCompany exists to prevent. Two real
+   * companies do not agree on every balance, so identical answers mean the read
+   * was of one company, whatever it was asked for.
+   */
+  const seen = new Map();
+  const twins = [];
   for (const code of targets) {
     console.log(bold(`\n── Reading ${code}`));
     if (targets.length > 1 && !(await switchCompany(code))) continue;
@@ -801,8 +813,30 @@ try {
       console.error(`   nothing answered for ${code}; skipping it rather than writing an empty position`);
       continue;
     }
+
+    const same = seen.get(JSON.stringify(bundle));
+    if (same) {
+      console.error(`   ${code} answered exactly what ${same} answered, to the last figure.`);
+      console.error(`   That is one company read twice, not two companies. Not reported, not written.`);
+      twins.push(code);
+      continue;
+    }
+    seen.set(JSON.stringify(bundle), code);
+
     report(code, mapped, withheld);
     results.push({ code, bundle, mapped, withheld });
+  }
+
+  if (twins.length > 0) {
+    const first = [...seen.values()][0];
+    console.error(bold(`\n   ${twins.length} of ${targets.length} companies answered with another company's figures: ${twins.join(', ')}.`));
+    console.error('   Switching company through the service did not change what it reads, so even');
+    console.error(`   the first answer (${first}) is unproven. NOTHING is written, for any company.`);
+    console.error('');
+    console.error('   Sign in as the company instead, one at a time, and compare:');
+    console.error(`     MANGO_MAINCODE=${twins[0]} npm run anywhere:pull -- --dry-run`);
+    console.error('   If that shows different figures, the company is fixed at sign-in.');
+    process.exit(1);
   }
 
   if (results.length === 0) {
