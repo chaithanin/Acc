@@ -388,3 +388,50 @@ read it before pasting it anywhere.
 To undo a wrong import: Import History → Roll back, then upload or pull again.
 Rolling back DELETES that snapshot and every row in it; only the record that an
 import happened is kept. Have the original file, or be able to export it again.
+
+## Getting a pull into the VM's database
+
+The pull needs Chromium and about 600 MB. The VM is an e2-micro running the
+app, and the repository is private, so the VM cannot clone it and could not run
+the pull if it did. Cloud Shell can run it, but `npm run anywhere:pull` writes
+to the `./data` of whatever machine it runs on. Run on Cloud Shell on its own,
+it fills a database the dashboard never reads. (This is why the audit found no
+Mango pull on the VM: a pull on Cloud Shell leaves nothing there.)
+
+`deploy/pull-via-cloudshell.sh` carries the VM's database to Cloud Shell, runs
+the pull against that copy, and puts it back:
+
+```bash
+cd ~/Acc && git pull
+./deploy/pull-via-cloudshell.sh --all-companies --dry-run          # reads Mango; writes nothing anywhere
+./deploy/pull-via-cloudshell.sh --all-companies --map MG1=CHTN,MG2=HAMONIA
+```
+
+Everything after the script name goes to `anywhere:pull`, so the flags in this
+document apply unchanged. It asks for the Mango user and password (not echoed),
+shows a plan, and wants `yes` typed.
+
+What it does, in order: stops the app; refuses if the database was not closed
+cleanly (a non-empty `-wal`); keeps `gtg-financial.db.before-pull-<time>` beside
+the database on the VM; copies the database to a private folder outside the
+repository; pulls into that copy; compares what the copy holds before and after;
+if nothing was written, starts the app and leaves the VM's database alone;
+otherwise uploads it, restarts the app, waits for `healthy`, and runs the audit.
+The last lines print the command that puts the earlier copy back.
+
+- **The app is down for the length of the pull**, usually a few minutes. That is
+  deliberate: with the app running, anything it wrote meanwhile would be
+  overwritten by the copy coming back.
+- Any failure before the replacement leaves the VM's database as it was, and the
+  app is started again on the way out.
+- Run it right after deploying the same commit, so the schema the pull writes is
+  the one the app expects. The plan prints the commit.
+- A pull identical to an earlier one is skipped by the pull itself (`--force`
+  imports it again).
+- `GTG_VM`, `GTG_ZONE`, `GTG_APP_CONTAINER`, `GTG_VM_DATA` and `GTG_PULL_WORK`
+  override the VM name, zone, container, data directory and scratch folder.
+- The `-before-pull-` copies are never removed. Delete old ones by hand.
+
+It has been run against a stand-in for the VM and the Mango stub, covering the
+success, a failed sign-in, a repeat of the same pull, an unclean shutdown and an
+answered "no". It has not been run against the real VM or the real Mango.
