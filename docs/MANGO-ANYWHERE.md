@@ -311,6 +311,12 @@ asked for. A run takes about as many sign-ins as there are companies, a minute o
 so each; one failing does not stop the others, and the summary at the end says
 which did what.
 
+A company that fails after another has signed in is tried once more after 30
+seconds (the live run's sixth sign-in in a row was refused with no reason given).
+A failure before any company has worked is not retried, and two in a row stop the
+run, since that looks like the password and every further attempt is a failed
+sign-in against a real account.
+
 Writing more than one needs the mapping given rather than guessed:
 
 ```bash

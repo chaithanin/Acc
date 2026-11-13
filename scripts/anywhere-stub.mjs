@@ -32,6 +32,8 @@ const grid = (rows) => ({ total: rows.length, data: rows });
 /** Which company the service session is pointed at. */
 let current = 'MG1';
 let signedCompany = 'MG1';
+let loginCount = 0;
+const rejectedOnce = new Set();
 
 /** MG2's balances are scaled, so a run that forgets to switch is obvious. */
 const scaled = (rows) => (current === 'MG2'
@@ -52,6 +54,14 @@ http.createServer((req, res) => {
     req.on('end', () => {
       const sent = JSON.parse(raw);
       if (sent.userid !== USER || sent.userpass !== PASS) return json(res, { success: false, error: 'bad' });
+      // STUB_REJECT_LOGIN_ONCE=MG2: the first sign-in for that company is refused with no reason.
+      // STUB_REJECT_AFTER_FIRST=1: every sign-in after the first one is.
+      loginCount += 1;
+      if (process.env.STUB_REJECT_LOGIN_ONCE === sent.maincode && !rejectedOnce.has(sent.maincode)) {
+        rejectedOnce.add(sent.maincode);
+        return json(res, { success: false, error: 'bad' });
+      }
+      if (process.env.STUB_REJECT_AFTER_FIRST && loginCount > 1) return json(res, { success: false, error: 'bad' });
       // The company belongs to the session from here on, as on the live service.
       // STUB_LOGIN_FORCES_MG1: the server ignores the one posted.
       signedCompany = process.env.STUB_LOGIN_FORCES_MG1 ? 'MG1' : String(sent.maincode ?? 'MG1');

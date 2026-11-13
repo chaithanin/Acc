@@ -219,23 +219,49 @@ if (allCompanies && !(process.env.GTG_PULL_CHILD === '1')) {
   }
 
   const outcome = [];
+  /*
+   * A company that fails AFTER another has signed in is tried once more, after
+   * a wait: the password is proven by then, so the likelier cause is something
+   * passing (the live run's sixth sign-in in a row was refused with no reason
+   * given). A failure BEFORE any company has worked is not retried and, after
+   * two in a row, stops the run — that looks like the password, and every
+   * further attempt is a failed sign-in against a real account.
+   */
+  let anyOk = false;
+  let failuresInARow = 0;
+  const wait = Number(process.env.GTG_PULL_RETRY_WAIT ?? 30);
+
   for (const { code, name } of rows) {
     const target = wanted.get(code);
     if (!dryRun && !target) { outcome.push([code, name, 'skipped: not in --map']); continue; }
+
+    if (!anyOk && failuresInARow >= 2) { outcome.push([code, name, 'not tried']); continue; }
 
     const childArgs = without(args, ['--all-companies'], ['--map', '--company', '--save']);
     if (!dryRun) childArgs.push('--company', target);
     if (savePath) childArgs.push('--save', savePath.replace(/(\.json)?$/, `.${code}$1`));
 
     console.log(bold(`\n══ ${code}  ${name}${dryRun ? '' : `  →  ${target}`}`));
-    const ran = child(childArgs, { MANGO_MAINCODE: code });
+    let ran = child(childArgs, { MANGO_MAINCODE: code });
+
+    if (ran.status !== 0 && anyOk) {
+      console.log(bold(`\n   ${code} failed. Other companies signed in, so it is not the password; trying once more in ${wait}s.`));
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+      ran = child(childArgs, { MANGO_MAINCODE: code });
+    }
+
+    if (ran.status === 0) { anyOk = true; failuresInARow = 0; } else { failuresInARow += 1; }
     outcome.push([code, name, ran.status === 0 ? 'ok' : `FAILED (exit ${ran.status ?? 'signal'})`]);
   }
 
   console.log(bold('\n══ Summary'));
   for (const [code, name, status] of outcome) console.log(`   ${code.padEnd(5)} ${status.padEnd(26)} ${name}`);
-  const failed = outcome.filter(([, , status]) => status.startsWith('FAILED'));
+  const failed = outcome.filter(([, , status]) => status.startsWith('FAILED') || status === 'not tried');
   const skipped = outcome.filter(([, , status]) => status.startsWith('skipped'));
+  if (outcome.some(([, , status]) => status === 'not tried')) {
+    console.log('\n   Stopped after two failed sign-ins in a row with none having worked. Check the password,');
+    console.log('   then run one company on its own:  MANGO_MAINCODE=MG1 npm run anywhere:pull -- --dry-run');
+  }
   if (skipped.length > 0) {
     console.log(`\n   Not written, because --map does not name them: ${skipped.map(([c]) => c).join(', ')}`);
   }
