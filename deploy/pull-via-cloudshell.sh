@@ -23,6 +23,8 @@
 # What keeps this from losing anything:
 #   * the app is stopped first, so nothing can write to the database while it
 #     is away and come back to find its work overwritten;
+#   * its write-ahead log is folded into the database file before anything is
+#     copied, since the app leaves writes there when it is stopped;
 #   * a copy of the database is kept ON THE VM before anything is replaced, and
 #     the command that puts it back is printed;
 #   * if anything fails before the replacement, the VM's database is never
@@ -107,6 +109,20 @@ rm -rf "$WORK"; mkdir -p "$WORK"
 say "Stopping the app, so the database is quiet"
 vm "sudo docker stop $APP" >/dev/null
 APP_STOPPED=true
+
+# The app does not close its database when it is stopped, so what it last wrote
+# can still be in the write-ahead log (the -wal file) and not in the database
+# file proper. Copying only the .db file would then drop those writes, and the
+# upload would put the loss on the VM. So fold the log into the file first, with
+# the app stopped (nothing else has it open), from a throwaway container of the
+# same image, which is where better-sqlite3 is.
+CHECKPOINT_JS="const D=require(\"better-sqlite3\");const db=new D(\"/data/$DB\");const r=db.pragma(\"wal_checkpoint(TRUNCATE)\");db.close();console.log(\"checkpoint: \"+JSON.stringify(r));process.exit(r[0].busy?3:0)"
+
+say "Folding the write-ahead log into the database"
+vm "set -e
+  IMAGE=\$(sudo docker inspect -f '{{.Config.Image}}' $APP)
+  sudo docker run --rm --entrypoint node -v $VM_DATA:/data \$IMAGE -e '$CHECKPOINT_JS'" \
+  || die "Could not fold the log into the database. The VM's database was not touched; the app is being started again."
 
 say "Checking it shut down cleanly, and keeping a copy on the VM"
 vm "set -e

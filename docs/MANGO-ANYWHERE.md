@@ -423,8 +423,10 @@ Everything after the script name goes to `anywhere:pull`, so the flags in this
 document apply unchanged. It asks for the Mango user and password (not echoed),
 shows a plan, and wants `yes` typed.
 
-What it does, in order: stops the app; refuses if the database was not closed
-cleanly (a non-empty `-wal`); keeps `gtg-financial.db.before-pull-<time>` beside
+What it does, in order: stops the app; folds the write-ahead log into the database
+file (the app does not close its database when stopped, so its last writes can be
+only in the `-wal` file, and copying the `.db` alone would lose them), and refuses
+if the `-wal` is still not empty afterwards; keeps `gtg-financial.db.before-pull-<time>` beside
 the database on the VM; copies the database to a private folder outside the
 repository; pulls into that copy; compares what the copy holds before and after;
 if nothing was written, starts the app and leaves the VM's database alone;
