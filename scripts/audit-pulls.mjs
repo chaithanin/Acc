@@ -25,6 +25,13 @@
  *
  * Exits 1 when it found something that should be fixed before the figures are
  * relied on, so it can sit in a pipeline.
+ *
+ *   node scripts/audit-pulls.mjs --peek 20260826105253
+ *
+ * prints the top of every sheet of an uploaded file whose name starts that way,
+ * and what each sheet was taken to be: to see which period a file covers, and why
+ * a date was or was not read from it. The rows are what a reviewer would see on
+ * screen, so they are the file's titles and headings, not its ledger.
  */
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -39,6 +46,44 @@ if (!fs.existsSync(file)) {
   process.exit(2);
 }
 const db = new Database(file, { readonly: true, fileMustExist: true });
+
+
+// ------------------------------------------------------------------------- peek
+const peekAt = process.argv.indexOf('--peek');
+if (peekAt >= 0) {
+  const prefix = process.argv[peekAt + 1];
+  if (!prefix) {
+    console.error('--peek needs the start of a file name, e.g. --peek 20260826105253');
+    process.exit(2);
+  }
+  const found = db.prepare(
+    `SELECT f.id, f.original_name, f.report_date, f.report_type, i.status, c.company_code
+       FROM import_files f JOIN imports i ON i.id = f.import_id LEFT JOIN companies c ON c.id = i.company_id
+      WHERE f.original_name LIKE ? ESCAPE '\\' ORDER BY f.created_at`,
+  ).all(`${prefix.replace(/[%_\\]/g, '\\$&')}%`);
+  if (found.length === 0) {
+    console.log(`No uploaded file here has a name starting "${prefix}".`);
+    process.exit(0);
+  }
+  const text = (cells) => JSON.parse(cells)
+    .map((c) => String(c).replace(/\s+/g, ' ').trim()).filter(Boolean)
+    .slice(0, 10).map((c) => (c.length > 44 ? `${c.slice(0, 43)}…` : c)).join(' | ');
+  for (const f of found) {
+    console.log(`\n${f.original_name}   company ${f.company_code ?? '?'}   import ${f.status}   report date filed: ${f.report_date}`);
+    const sheets = db.prepare(
+      'SELECT sheet_name, report_type, confidence, row_count FROM sheet_detections WHERE import_file_id = ? ORDER BY sheet_index',
+    ).all(f.id);
+    for (const sh of sheets) {
+      console.log(`  sheet "${sh.sheet_name}"  taken to be: ${sh.report_type} (${Math.round(sh.confidence * 100)}%)  ${sh.row_count} rows`);
+      const top = db.prepare(
+        'SELECT row_number, cells_json FROM raw_rows WHERE import_file_id = ? AND sheet_name = ? ORDER BY row_number LIMIT 8',
+      ).all(f.id, sh.sheet_name);
+      for (const r of top) console.log(`    ${String(r.row_number).padStart(3)}  ${text(r.cells_json)}`);
+    }
+  }
+  console.log('');
+  process.exit(0);
+}
 
 const MANGO = 'Mango Anywhere — ';
 const baht = (n) => Math.round(n ?? 0).toLocaleString('en-US');

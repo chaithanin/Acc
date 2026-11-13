@@ -374,4 +374,17 @@ the server. For that, put the "owed by customers" and "owed to suppliers" lines
 of a `--dry-run` for a Mango company beside the same company's row in the audit.
 They are computed the same way and must match to the baht.
 
-To undo a wrong import: Import History → Roll back, then pull again.
+To see which period an uploaded file covers, and why a date was or was not read
+from it, `--peek` prints the top of every sheet and what each was taken to be:
+
+```bash
+gcloud compute ssh gtg-financial --zone=asia-southeast1-a \
+  --command 'sudo docker exec gtg-app-1 node scripts/audit-pulls.mjs --peek 20260826105253'
+```
+
+The rows are the file's titles and headings plus its first few lines of data, so
+read it before pasting it anywhere.
+
+To undo a wrong import: Import History → Roll back, then upload or pull again.
+Rolling back DELETES that snapshot and every row in it; only the record that an
+import happened is kept. Have the original file, or be able to export it again.
