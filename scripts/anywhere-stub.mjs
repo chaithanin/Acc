@@ -63,7 +63,9 @@ http.createServer((req, res) => {
       res.writeHead(200, {'content-type':'text/html; charset=utf-8'});
       return res.end(`<!doctype html><html><body><h3>Sign in</h3>
         <form id=f onsubmit="return go(event)">
-          <select id=comp><option value="MG1">MG1</option><option value="MG2">MG2</option></select>
+          ${process.env.STUB_PICKER_NUMERIC
+            ? '<select id=comp><option value="1">บริษัท ไชยธนินทร์ จำกัด</option><option value="2">บริษัท เดอะ ซัน ไลท์ จำกัด</option></select>'
+            : '<select id=comp><option value="MG1">MG1</option><option value="MG2">MG2</option></select>'}
           <input type="text" id=u placeholder="user">
           <input type="password" id=p placeholder="pass">
           <button type=submit>Sign in</button>

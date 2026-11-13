@@ -536,10 +536,54 @@ try {
     if (await userField.count() > 0) await userField.fill(user);
     await page.locator('input[type=password]').first().fill(pass);
 
-    // The company picker, where the page offers one.
+    /*
+     * The company picker.
+     *
+     * This used to be `selectOption({ value: maincode }).catch(() => undefined)`,
+     * which cannot tell "chose it" from "there was no such option": the sign-in
+     * went ahead as whichever company the page defaults to, and the run printed
+     * "company MG4" over MG1's figures. The option values on the live page were
+     * never seen, only assumed to be the codes.
+     *
+     * So: find the option by value, then by its label, say which one was taken,
+     * read it back, and when nothing matches stop BEFORE signing in and show
+     * what the page does offer. MG1 as an unstated default is the one case
+     * allowed to carry on, because it is what the page defaults to anyway.
+     */
     const picker = page.locator('select').first();
-    if (await picker.count() > 0) {
-      await picker.selectOption({ value: maincode }).catch(() => undefined);
+    const wanted = maincode.toLowerCase();
+    const offered = await picker.count() > 0
+      ? await picker.evaluate((el) => [...el.options].map((o) => ({ value: o.value, text: (o.text || '').trim() })))
+      : [];
+    const hit = offered.find((o) => o.value.trim().toLowerCase() === wanted)
+      ?? offered.find((o) => o.text.toLowerCase() === wanted)
+      ?? offered.find((o) => new RegExp(`(^|[^a-z0-9])${wanted}([^a-z0-9]|$)`, 'i').test(o.text));
+
+    if (hit) {
+      await picker.selectOption({ value: hit.value });
+      const now = await picker.evaluate((el) => ({ value: el.value, text: el.selectedOptions[0]?.text.trim() ?? '' }));
+      if (now.value !== hit.value) {
+        console.error(`   the company picker would not stay on ${maincode} (it reads back "${now.value}"). Not signing in.`);
+        process.exit(2);
+      }
+      console.log(`   company picker: ${maincode} -> value "${hit.value}" (${hit.text})`);
+    } else if (maincodeGiven || maincode !== 'MG1') {
+      console.error(`\n   Cannot choose company ${maincode} on the sign-in page, so not signing in:`);
+      console.error('   signed in as the page\'s default, it would read another company and label it ' + maincode + '.');
+      if (offered.length === 0) {
+        const controls = await page.evaluate(() => [...document.querySelectorAll('input,select,button,[role=combobox],[role=listbox],[role=radio],[class*=company i],[class*=select i]')]
+          .slice(0, 25)
+          .map((el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${el.getAttribute('name') ? '[name=' + el.getAttribute('name') + ']' : ''}${el.getAttribute('role') ? '[role=' + el.getAttribute('role') + ']' : ''}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`));
+        console.error('   There is no <select> on the page. What it does have:');
+        for (const c of controls) console.error(`     ${c}`);
+      } else {
+        console.error(`   The <select> offers ${offered.length} options:`);
+        for (const o of offered.slice(0, 12)) console.error(`     value="${o.value}"   text="${o.text}"`);
+      }
+      console.error('\n   Send this list; the match is made from it.');
+      process.exit(2);
+    } else if (offered.length > 0) {
+      console.log(`   company picker: left on the page's default (no option is named ${maincode}).`);
     }
 
     const submit = page.locator('button[type=submit], input[type=submit], button:has-text("Login"), button:has-text("Sign in"), button:has-text("เข้าสู่ระบบ")').first();
