@@ -751,6 +751,36 @@ try {
     const read = Object.keys(bundle).length;
     console.log(`   ${String(read).padStart(2)} of ${READS.length} answered`);
 
+    /*
+     * Which company each ROW says it belongs to. Most of these answers carry a
+     * maincode or mainname column, and the receivables one is asked with
+     * field=mainname — the shape of a search over several companies. If the
+     * rows name more than one, the answer spans companies and the run has been
+     * reading all of them each time, whichever one it was pointed at. Printing
+     * the split (with the balance in each) shows that, rather than guessing.
+     */
+    const num = (v) => Number(String(v ?? 0).replace(/,/g, '')) || 0;
+    const split = (rows, key, amount) => {
+      const by = new Map();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const who = String(row?.[key] ?? '').trim() || '(blank)';
+        const cell = by.get(who) ?? { n: 0, sum: 0 };
+        cell.n += 1;
+        cell.sum += amount ? num(row?.[amount]) : 0;
+        by.set(who, cell);
+      }
+      return by;
+    };
+    const show = (label, by, withSum) => {
+      if (by.size === 0) return;
+      const parts = [...by.entries()].map(([who, c]) => `${who} ×${c.n}${withSum ? ` (${money(c.sum)})` : ''}`);
+      console.log(`   rows by company · ${label.padEnd(22)} ${parts.join(' · ')}`);
+    };
+    show('receivable balances', split(bundle.arBalances, 'maincode', 'balance_amt'), true);
+    show('payable balances', split(bundle.apBalances, 'mainname', 'balance_amt'), true);
+    show('receivables by month', split(bundle.arByMonth, 'maincode', 'receipt_net_amount'), true);
+    show('payables by month', split(bundle.apByMonth, 'maincode', 'pay_amount'), true);
+
     const { mapAnywhereBundle, withheldKinds } = await import('../src/lib/sources/anywhere/map.ts');
     const mapped = mapAnywhereBundle(bundle, { reportDate, maincode: code, flipBankSign });
     return { bundle, read, mapped, withheld: withheldKinds(mapped.issues) };
