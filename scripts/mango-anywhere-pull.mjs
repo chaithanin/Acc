@@ -527,9 +527,19 @@ const COMMON_HEADERS = new Set(['accept', 'accept-encoding', 'accept-language', 
   'upgrade-insecure-requests', 'dnt', 'priority']);
 const STATIC = /\.(js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map|webp)(\?|$)/i;
 
+/**
+ * Every distinct token seen, in order. The live front end sends x-mango-auth
+ * BEFORE anyone has signed in (the company list, the system codes), so "a token
+ * has been seen" does not mean "the signed-in session's token has". Only their
+ * order is ever shown, never a value.
+ */
+const tokensSeen = [];
+
 page.on('request', (request) => {
   const header = request.headers()['x-mango-auth'];
   if (header && header !== authToken) authToken = header;
+  if (header && !tokensSeen.includes(header)) tokensSeen.push(header);
+  const tokenNo = header ? tokensSeen.indexOf(header) + 1 : 0;
 
   const url = request.url();
   if (url.startsWith(service)) seenEndpoints.add(url.slice(service.length + 1).split('?')[0]);
@@ -542,11 +552,18 @@ page.on('request', (request) => {
     const names = Object.keys(request.headers())
       .filter((h) => !COMMON_HEADERS.has(h) && !h.startsWith('sec-'));
     let bodyKeys = '';
-    try { bodyKeys = Object.keys(JSON.parse(request.postData() ?? '')).join(','); } catch { /* not JSON */ }
+    try {
+      const body = JSON.parse(request.postData() ?? '');
+      // Values only for the two that name an application and a company; every
+      // other key (userpass, tokens, e-mail) is shown by name alone.
+      bodyKeys = Object.keys(body)
+        .map((k) => (/^(maincode|appcode)$/i.test(k) ? `${k}=${String(body[k]).slice(0, 20)}` : k))
+        .join(',');
+    } catch { /* not JSON */ }
     const key = `${request.method()} ${parsed.pathname} ${[...parsed.searchParams.keys()].sort().join('&')}`;
-    if (!traced.has(key)) {
-      traced.set(key, { method: request.method(), path: parsed.pathname, query, names, bodyKeys });
-    }
+    const entry = traced.get(key) ?? { method: request.method(), path: parsed.pathname, query, names, bodyKeys, tokens: new Set() };
+    if (tokenNo) entry.tokens.add(tokenNo);
+    traced.set(key, entry);
   }
 });
 
@@ -681,6 +698,14 @@ try {
    * token went past" was reporting its own impatience: six endpoints had been
    * called where a complete start-up calls eighteen.
    */
+  /*
+   * Let the application settle after the sign-in. A token had already been seen
+   * by the time the password box went (see tokensSeen), so without this the run
+   * went on to read with whichever token it had, while the application was still
+   * starting the signed-in session.
+   */
+  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+
   const waitForToken = async (seconds) => {
     for (let waited = 0; waited < seconds * 4; waited += 1) {
       if (authToken) return true;
@@ -712,10 +737,12 @@ try {
 
   if (trace) {
     console.log(bold('\n── What the application sent (shapes only; no secret values)'));
+    console.log(`   ${tokensSeen.length} distinct token(s) seen; the reads below use #${tokensSeen.indexOf(authToken) + 1}`);
     for (const t of traced.values()) {
       console.log(`   ${t.method} ${t.path}`);
       if (t.query.length) console.log(`       query    ${t.query.join('&')}`);
       if (t.names.length) console.log(`       headers  ${t.names.join(', ')}`);
+      if (t.tokens.size) console.log(`       token    #${[...t.tokens].join(', #')}`);
       if (t.bodyKeys) console.log(`       body     ${t.bodyKeys}`);
     }
     const cookies = await context.cookies();
