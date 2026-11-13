@@ -31,6 +31,7 @@ const grid = (rows) => ({ total: rows.length, data: rows });
 
 /** Which company the service session is pointed at. */
 let current = 'MG1';
+let signedCompany = 'MG1';
 
 /** MG2's balances are scaled, so a run that forgets to switch is obvious. */
 const scaled = (rows) => (current === 'MG2'
@@ -51,6 +52,10 @@ http.createServer((req, res) => {
     req.on('end', () => {
       const sent = JSON.parse(raw);
       if (sent.userid !== USER || sent.userpass !== PASS) return json(res, { success: false, error: 'bad' });
+      // The company belongs to the session from here on, as on the live service.
+      // STUB_LOGIN_FORCES_MG1: the server ignores the one posted.
+      signedCompany = process.env.STUB_LOGIN_FORCES_MG1 ? 'MG1' : String(sent.maincode ?? 'MG1');
+      current = signedCompany;
       res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': `sid=${SESSION}; Path=/` });
       res.end(JSON.stringify({ success: true }));
     });
@@ -76,7 +81,7 @@ http.createServer((req, res) => {
         async function go(e){ e.preventDefault();
           const r = await fetch('/production.anywhere/login_do', {method:'POST',
             headers:{'content-type':'application/json'},
-            body: JSON.stringify({userid:u.value,userpass:p.value,maincode:comp.value})});
+            body: JSON.stringify({userid:u.value,userpass:p.value,maincode:${process.env.STUB_PAGE_POSTS_MG1 ? "'MG1'" : 'comp.value'}})});
           if ((await r.json()).success) location.reload();
           return false; }
         </script></body></html>`);
@@ -87,7 +92,7 @@ http.createServer((req, res) => {
       const T = ${JSON.stringify(TOKEN)};
       (async () => {
         // the start-up the application performs, carrying its token
-        for (const path of ['anywhere/api/LayoutModuleConfig','anywhere/center/Maincomp?maincode=MG1','API/UserOnline/UserAuthentication']) {
+        for (const path of ['anywhere/api/LayoutModuleConfig','anywhere/center/Maincomp?maincode=' + ${JSON.stringify(signedCompany)},'API/UserOnline/UserAuthentication']) {
           await fetch('/production.service/' + path, { headers: { 'x-mango-auth': T } });
         }
         await fetch('/production.service/anywhereAPI/Dashboard/viewArRead?type=MONTH', { headers: { 'x-mango-auth': T } });

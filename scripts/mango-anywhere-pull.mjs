@@ -491,7 +491,34 @@ await context.route('**/*', async (route) => {
     return route.continue();
   }
 
-  if (host === allowedHost) return route.continue();
+  if (host === allowedHost) {
+    /*
+     * The company the page signs in as.
+     *
+     * The live sign-in posts { appcode, maincode, userid, userpass, … } and the
+     * session belongs to that maincode for good — the figures, the menus and the
+     * application's own start-up all follow it. Choosing MG4 in the page's
+     * company list did not change what it posted: the trace showed
+     * maincode=MG1 after the picker read back MG4, so the list is not what the
+     * page builds its request from.
+     *
+     * So the request is corrected where it leaves, matched by its shape (a POST
+     * carrying userid, userpass and maincode), not by a path that may change.
+     * It is the page's own request with the company it was asked to use; the
+     * server still decides whether the account may open that company.
+     */
+    const request = route.request();
+    if (request.method() === 'POST') {
+      let body = null;
+      try { body = JSON.parse(request.postData() ?? ''); } catch { /* not JSON */ }
+      if (body && typeof body === 'object' && 'userid' in body && 'userpass' in body && 'maincode' in body
+        && String(body.maincode).toUpperCase() !== maincode) {
+        console.log(`   the page was about to sign in as ${body.maincode}; signing in as ${maincode} instead`);
+        return route.continue({ postData: JSON.stringify({ ...body, maincode }) });
+      }
+    }
+    return route.continue();
+  }
 
   blocked.set(host, (blocked.get(host) ?? 0) + 1);
   return route.abort();
@@ -535,11 +562,25 @@ const STATIC = /\.(js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map|webp)(\?|$)/i;
  */
 const tokensSeen = [];
 
+/**
+ * The company the APPLICATION says it opened: it calls
+ * center/Maincomp?maincode=<company> as it starts, after signing in. Only
+ * while `observing`, because this script's own switchCompany makes the same
+ * call from inside the page and must not be mistaken for the application's.
+ */
+let observing = true;
+const appCompanies = new Set();
+
 page.on('request', (request) => {
   const header = request.headers()['x-mango-auth'];
   if (header && header !== authToken) authToken = header;
   if (header && !tokensSeen.includes(header)) tokensSeen.push(header);
   const tokenNo = header ? tokensSeen.indexOf(header) + 1 : 0;
+
+  if (observing && /\/anywhere\/center\/Maincomp$/i.test(request.url().split('?')[0])) {
+    const asked = new URL(request.url()).searchParams.get('maincode');
+    if (asked) appCompanies.add(asked.toUpperCase());
+  }
 
   const url = request.url();
   if (url.startsWith(service)) seenEndpoints.add(url.slice(service.length + 1).split('?')[0]);
@@ -726,6 +767,18 @@ try {
     await page.goto(`${anywhere}/page/transaction/fin/v_fn_cash_on_hand`,
       { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
     await waitForToken(30);
+  }
+
+  observing = false;
+  const opened = [...appCompanies];
+  if (opened.length === 0) {
+    console.log(`   the application did not say which company it opened; ${maincode} is unconfirmed`);
+  } else if (opened.every((c) => c === maincode)) {
+    console.log(`   the application opened company ${maincode}`);
+  } else {
+    console.error(`\n   Asked for company ${maincode}, but the application opened ${opened.join(', ')}.`);
+    console.error('   Reading now would label that company\'s figures as ' + maincode + '. Stopping.');
+    process.exit(1);
   }
 
   if (blocked.size > 0) {

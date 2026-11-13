@@ -457,14 +457,26 @@ answer identically. It writes nothing for *any* company in that case, including
 the first, because the first answer is then unproven too. The stub can show it:
 `STUB_IGNORE_SWITCH=1 node scripts/anywhere-stub.mjs`.
 
-What is **not** known is how to read a second company. The sign-in form takes a
-company (the front end posts `userid`, `userpass`, `maincode`), so the likely
-answer is one sign-in per company. That has not been tried against the live
-service, and Mango allows one session per account, so the sign-ins would have
-to follow one another. To test it, one company at a time:
+### What `--trace` showed (13 Nov)
 
-```bash
-MANGO_MAINCODE=MG4 npm run anywhere:pull -- --dry-run
-```
+The company is fixed when the account signs in, and the page's own login
+request carries it: `POST /api/public/Login` with a body of `appcode, maincode,
+extension, userid, userpass, …`. After it the application calls
+`center/Maincomp?maincode=<company>`, posts the same `maincode` in
+`UserAuthentication`, and keeps `mango_home_module_order_<company>_<user>` in
+localStorage. There is one token throughout, so it is not a pre-login token.
 
-If that shows figures different from MG1's, the company is fixed at sign-in.
+Choosing MG4 in the page's company list was read back as MG4, and the page still
+posted `maincode=MG1`. The list is not what it builds the request from.
+
+So the pull corrects the `maincode` in that request on its way out (matched by
+its shape, a POST carrying `userid`, `userpass` and `maincode`), and afterwards
+checks the company the application itself opened (`Maincomp`) against the one
+asked for, stopping if they differ. This has been tested against a stub that
+behaves this way; it has not yet been seen to return a second company's figures
+from the live service. Expect the line `the application opened company MG4`, and
+figures different from MG1's.
+
+`--all-companies` still signs in once and switches through the service, which
+does not work, and is refused when two answers match. It needs one sign-in per
+company, which is not built yet.
