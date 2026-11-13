@@ -31,6 +31,9 @@
  * Flags:
  *   --company <code>    which company in the dashboard the data belongs to
  *   --force             import even when this pull is identical to a previous one
+ *   --trace             after signing in, list the shape of what the application sent
+ *                       (paths, query, header names, body keys, cookie names; no
+ *                       secret values) to find where it names the company
  *   --flip-bank-sign    take the bank balances as the negative of what Mango
  *                       sends, once that has been confirmed against one
  *                       account in Mango's own screen
@@ -506,12 +509,45 @@ const page = await context.newPage();
 let authToken = null;
 const seenEndpoints = new Set();
 
+/**
+ * --trace: what the application itself sends, shape only.
+ *
+ * The question it answers is "where does the application tell the server which
+ * company it means?" — which is not in the endpoints this script calls, since
+ * signing in as MG4 and calling them returns MG1. So it records, per distinct
+ * request: the method and path, the query (values hidden for anything that
+ * looks like a secret), the NAMES of the unusual headers, and the KEYS of a JSON
+ * body. No header value, body value, password or token is ever printed.
+ */
+const trace = has('trace');
+const traced = new Map();
+const SECRET = /pass|pwd|token|auth|secret|session|key|cookie/i;
+const COMMON_HEADERS = new Set(['accept', 'accept-encoding', 'accept-language', 'cache-control', 'connection',
+  'content-length', 'content-type', 'host', 'origin', 'pragma', 'referer', 'user-agent', 'cookie',
+  'upgrade-insecure-requests', 'dnt', 'priority']);
+const STATIC = /\.(js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map|webp)(\?|$)/i;
+
 page.on('request', (request) => {
   const header = request.headers()['x-mango-auth'];
   if (header && header !== authToken) authToken = header;
 
   const url = request.url();
   if (url.startsWith(service)) seenEndpoints.add(url.slice(service.length + 1).split('?')[0]);
+
+  if (trace && (url.startsWith(service) || url.startsWith(anywhere)) && !STATIC.test(url)) {
+    let parsed;
+    try { parsed = new URL(url); } catch { return; }
+    const query = [...parsed.searchParams.entries()]
+      .map(([k, v]) => `${k}=${SECRET.test(k) ? '‹hidden›' : v.slice(0, 40)}`);
+    const names = Object.keys(request.headers())
+      .filter((h) => !COMMON_HEADERS.has(h) && !h.startsWith('sec-'));
+    let bodyKeys = '';
+    try { bodyKeys = Object.keys(JSON.parse(request.postData() ?? '')).join(','); } catch { /* not JSON */ }
+    const key = `${request.method()} ${parsed.pathname} ${[...parsed.searchParams.keys()].sort().join('&')}`;
+    if (!traced.has(key)) {
+      traced.set(key, { method: request.method(), path: parsed.pathname, query, names, bodyKeys });
+    }
+  }
 });
 
 try {
@@ -658,6 +694,31 @@ try {
   }
   console.log(`   the application called ${seenEndpoints.size} endpoints on the service`);
   console.log(`   token: ${authToken ? 'taken off its own traffic' : 'not seen — the reads below will fail'}`);
+
+  if (trace) {
+    console.log(bold('\n── What the application sent (shapes only; no secret values)'));
+    for (const t of traced.values()) {
+      console.log(`   ${t.method} ${t.path}`);
+      if (t.query.length) console.log(`       query    ${t.query.join('&')}`);
+      if (t.names.length) console.log(`       headers  ${t.names.join(', ')}`);
+      if (t.bodyKeys) console.log(`       body     ${t.bodyKeys}`);
+    }
+    const cookies = await context.cookies();
+    console.log('   cookies:');
+    for (const c of cookies) {
+      const show = /comp|main|code|branch|org/i.test(c.name) && !SECRET.test(c.name);
+      console.log(`       ${c.name}${show ? `=${String(c.value).slice(0, 40)}` : ''}  (${c.domain})`);
+    }
+    const stores = await page.evaluate(() => {
+      const names = (s) => { try { return Object.keys(s); } catch { return []; } };
+      const show = (s, k) => (/comp|main|code|branch|org/i.test(k) && !/pass|token|auth|secret|session|key/i.test(k)
+        ? `${k}=${String(s.getItem(k)).slice(0, 40)}` : k);
+      return { local: names(localStorage).map((k) => show(localStorage, k)), session: names(sessionStorage).map((k) => show(sessionStorage, k)) };
+    }).catch(() => ({ local: [], session: [] }));
+    console.log(`   localStorage:   ${stores.local.join(', ') || '(none)'}`);
+    console.log(`   sessionStorage: ${stores.session.join(', ') || '(none)'}`);
+    console.log('');
+  }
 
   if (!authToken) {
     console.error('\n   No x-mango-auth header went past in a minute of waiting.');
